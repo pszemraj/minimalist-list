@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Minimalist List
+Comment=Native minimalist task lists
+Exec=minimalist-list
+Icon=checkbox-checked-symbolic
+Terminal=false
+Categories=Utility;Office;
+StartupNotify=true
