@@ -16,12 +16,10 @@ pub struct Settings {
     pub workspace_path: String,
     pub always_on_top: bool,
     pub window_decorations: bool,
-    pub focus_fullscreen: bool,
     pub font: FontChoice,
     pub font_size: f32,
     pub bold_text: bool,
     pub row_padding: f32,
-    pub focus_minutes: u32,
     pub last_list_id: Option<Uuid>,
 }
 
@@ -31,12 +29,10 @@ impl Default for Settings {
             workspace_path: default_workspace_dir().to_string_lossy().into_owned(),
             always_on_top: false,
             window_decorations: true,
-            focus_fullscreen: true,
             font: FontChoice::Sans,
             font_size: 19.0,
             bold_text: false,
             row_padding: 12.0,
-            focus_minutes: 25,
             last_list_id: None,
         }
     }

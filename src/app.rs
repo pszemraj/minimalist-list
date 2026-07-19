@@ -9,10 +9,7 @@ use crate::model::Accent;
 use crate::storage::{self, Settings, StoredList, WorkspaceFingerprint};
 use eframe::egui;
 use egui::viewport::WindowLevel;
-use egui::{
-    Align, Align2, Button, Color32, CornerRadius, CursorIcon, Frame, Label, Layout, Margin, Sense,
-    Stroke, Vec2,
-};
+use egui::{Align, Button, Color32, CornerRadius, CursorIcon, Frame, Layout, Margin, Stroke, Vec2};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use uuid::Uuid;
@@ -24,24 +21,12 @@ const ROW_HEIGHT: f32 = 58.0;
 const CLEAR_ANIMATION_SECONDS: f32 = 0.24;
 const DELETE_ANIMATION_SECONDS: f32 = 0.20;
 const INSERT_ANIMATION_SECONDS: f32 = 0.28;
-const TASK_CLICK_DELAY: Duration = Duration::from_millis(310);
 
 #[derive(Clone)]
 enum Screen {
     Overview,
     List(Uuid),
-    Focus,
     Settings,
-}
-
-#[derive(Clone)]
-struct FocusState {
-    list_id: Uuid,
-    task_id: Uuid,
-    remaining: f32,
-    running: bool,
-    finished: bool,
-    last_tick: Instant,
 }
 
 #[derive(Clone)]
@@ -84,18 +69,15 @@ pub struct MinimalistApp {
     workspace_input: String,
     rename_input: String,
     delete_armed: bool,
-    focus: Option<FocusState>,
     next_scan: Instant,
     last_pin_state: Option<bool>,
     last_decorations_state: Option<bool>,
-    last_fullscreen_state: Option<bool>,
     view_zoom: f32,
     transition_direction: f32,
     displayed_palette: Palette,
     newest_task: Option<(Uuid, Instant)>,
     clear_animation: Option<(Uuid, Instant)>,
     delete_animation: Option<(Uuid, Uuid, Instant)>,
-    pending_task_click: Option<(Uuid, Uuid, Instant)>,
     last_motion_tick: Instant,
 }
 
@@ -184,18 +166,15 @@ impl MinimalistApp {
             workspace_input,
             rename_input: String::new(),
             delete_armed: false,
-            focus: None,
             next_scan: Instant::now() + SCAN_INTERVAL,
             last_pin_state: None,
             last_decorations_state: None,
-            last_fullscreen_state: None,
             view_zoom,
             transition_direction: 1.0,
             displayed_palette,
             newest_task: None,
             clear_animation: None,
             delete_animation: None,
-            pending_task_click: None,
             last_motion_tick: Instant::now(),
         }
     }
@@ -207,10 +186,6 @@ impl MinimalistApp {
     fn target_palette(&self) -> Palette {
         let accent = match self.screen {
             Screen::List(id) => self.list_index(id).map(|i| self.lists[i].data.accent),
-            Screen::Focus => self.focus.as_ref().and_then(|f| {
-                self.list_index(f.list_id)
-                    .map(|i| self.lists[i].data.accent)
-            }),
             Screen::Settings => self
                 .settings_list_id
                 .and_then(|id| self.list_index(id).map(|i| self.lists[i].data.accent)),
@@ -264,12 +239,6 @@ impl MinimalistApp {
             ));
             self.last_decorations_state = Some(self.settings.window_decorations);
         }
-
-        let fullscreen = self.settings.focus_fullscreen && matches!(self.screen, Screen::Focus);
-        if self.last_fullscreen_state != Some(fullscreen) {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(fullscreen));
-            self.last_fullscreen_state = Some(fullscreen);
-        }
     }
 
     fn update_motion(&mut self, ctx: &egui::Context) {
@@ -322,27 +291,6 @@ impl MinimalistApp {
                 ctx.request_repaint_after(Duration::from_millis(16));
             }
         }
-
-        if let Some((list_id, task_id, started)) = self.pending_task_click {
-            let still_on_list = matches!(self.screen, Screen::List(id) if id == list_id);
-            if !still_on_list {
-                self.pending_task_click = None;
-            } else if started.elapsed() >= TASK_CLICK_DELAY {
-                self.pending_task_click = None;
-                let task_is_active = self.list_index(list_id).is_some_and(|index| {
-                    self.lists[index]
-                        .data
-                        .tasks
-                        .iter()
-                        .any(|task| task.id == task_id && !task.completed)
-                });
-                if task_is_active {
-                    self.start_focus(list_id, task_id);
-                }
-            } else {
-                ctx.request_repaint_after(Duration::from_millis(16));
-            }
-        }
     }
 
     fn view_presentation(&self) -> f32 {
@@ -350,7 +298,6 @@ impl MinimalistApp {
     }
 
     fn begin_transition(&mut self, direction: f32) {
-        self.pending_task_click = None;
         self.view_zoom = 0.0;
         self.transition_direction = direction.signum();
         self.last_motion_tick = Instant::now();
@@ -449,21 +396,6 @@ impl MinimalistApp {
 
                 match self.screen.clone() {
                     Screen::List(id) if self.list_index(id).is_none() => self.go_to_overview(),
-                    Screen::Focus => {
-                        let focus_missing = self.focus.as_ref().is_none_or(|focus| {
-                            self.list_index(focus.list_id).is_none_or(|index| {
-                                !self.lists[index]
-                                    .data
-                                    .tasks
-                                    .iter()
-                                    .any(|task| task.id == focus.task_id)
-                            })
-                        });
-                        if focus_missing {
-                            self.focus = None;
-                            self.go_to_overview();
-                        }
-                    }
                     Screen::Settings => {
                         if self
                             .settings_list_id
@@ -511,188 +443,6 @@ impl MinimalistApp {
             }
             Err(error) => self.status = Some(error),
         }
-    }
-
-    fn start_focus(&mut self, list_id: Uuid, task_id: Uuid) {
-        self.focus = Some(FocusState {
-            list_id,
-            task_id,
-            remaining: self.settings.focus_minutes.max(1) as f32 * 60.0,
-            running: false,
-            finished: false,
-            last_tick: Instant::now(),
-        });
-        self.begin_transition(1.0);
-        self.screen = Screen::Focus;
-    }
-
-    fn focus_ui(&mut self, ui: &mut egui::Ui, palette: Palette) {
-        let Some(mut focus) = self.focus.clone() else {
-            self.go_to_overview();
-            return;
-        };
-        let elapsed = focus.last_tick.elapsed().as_secs_f32();
-        focus.last_tick = Instant::now();
-        if focus.running && !focus.finished {
-            focus.remaining = (focus.remaining - elapsed).max(0.0);
-            if focus.remaining <= 0.0 {
-                focus.running = false;
-                focus.finished = true;
-            }
-        }
-        let task_text = self
-            .list_index(focus.list_id)
-            .and_then(|index| {
-                self.lists[index]
-                    .data
-                    .tasks
-                    .iter()
-                    .find(|task| task.id == focus.task_id)
-            })
-            .map(|task| task.text.clone())
-            .unwrap_or_else(|| "Task".to_owned());
-        self.focus = Some(focus.clone());
-
-        let mut go_back = false;
-        ui.horizontal(|ui| {
-            if ui
-                .add(Button::new(self.rich("< Back", 17.0, palette.muted)).frame(false))
-                .clicked()
-            {
-                go_back = true;
-            }
-            let title_response = ui
-                .add(Label::new(self.rich("Focus", 18.0, palette.text)).sense(Sense::drag()))
-                .on_hover_cursor(CursorIcon::Grab);
-            if title_response.drag_started() {
-                ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
-            }
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if !self.settings.window_decorations
-                    && ui
-                        .add(Button::new(self.rich("x", 18.0, palette.muted)).frame(false))
-                        .on_hover_text("Close")
-                        .clicked()
-                {
-                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
-                }
-            });
-        });
-        if go_back {
-            self.open_list(focus.list_id);
-            self.transition_direction = -1.0;
-            self.focus = None;
-            return;
-        }
-
-        ui.vertical_centered(|ui| {
-            ui.add_space(42.0);
-            ui.add(Label::new(self.rich(task_text, 26.0, palette.text)).wrap());
-            ui.add_space(22.0);
-
-            let total_seconds = self.settings.focus_minutes.max(1) as f32 * 60.0;
-            let elapsed_progress = (1.0 - focus.remaining / total_seconds).clamp(0.0, 1.0);
-            let (timer_rect, _) = ui.allocate_exact_size(Vec2::splat(252.0), Sense::hover());
-            let center = timer_rect.center();
-            let radius = 104.0;
-            let pulse = if focus.running {
-                let time = ui.input(|input| input.time) as f32;
-                (time * 2.2).sin() * 0.5 + 0.5
-            } else {
-                0.0
-            };
-            ui.painter().circle_stroke(
-                center,
-                radius,
-                Stroke::new(4.0, palette.surface.lerp_to_gamma(palette.raised, 0.5)),
-            );
-            if pulse > 0.0 {
-                ui.painter().circle_stroke(
-                    center,
-                    radius + 7.0 + pulse * 2.0,
-                    Stroke::new(2.0, palette.accent.linear_multiply(0.10 + pulse * 0.08)),
-                );
-            }
-            if elapsed_progress > 0.0 {
-                let start = -std::f32::consts::FRAC_PI_2;
-                let sweep = std::f32::consts::TAU * elapsed_progress;
-                let points = (0..=96)
-                    .map(|step| {
-                        let angle = start + sweep * step as f32 / 96.0;
-                        center + Vec2::angled(angle) * radius
-                    })
-                    .collect::<Vec<_>>();
-                ui.painter()
-                    .add(egui::Shape::line(points, Stroke::new(4.0, palette.accent)));
-            }
-
-            let remaining = focus.remaining.ceil() as u32;
-            let minutes = remaining / 60;
-            let seconds = remaining % 60;
-            ui.painter().text(
-                center,
-                Align2::CENTER_CENTER,
-                format!("{minutes:02}:{seconds:02}"),
-                self.font_id(62.0),
-                palette.accent,
-            );
-            ui.painter().text(
-                center + Vec2::new(0.0, 46.0),
-                Align2::CENTER_CENTER,
-                if focus.finished {
-                    "session complete"
-                } else if focus.running {
-                    "stay with it"
-                } else {
-                    "ready"
-                },
-                self.font_id(13.0),
-                palette.muted,
-            );
-            ui.add_space(18.0);
-            let label = if focus.finished {
-                "Done"
-            } else if focus.running {
-                "Pause"
-            } else {
-                "Start"
-            };
-            if ui
-                .add(
-                    Button::new(self.rich(label, 20.0, palette.text))
-                        .fill(palette.surface)
-                        .corner_radius(18.0)
-                        .min_size(Vec2::new(150.0, 52.0)),
-                )
-                .clicked()
-                && let Some(state) = &mut self.focus
-            {
-                if state.finished {
-                    state.remaining = self.settings.focus_minutes.max(1) as f32 * 60.0;
-                    state.finished = false;
-                } else {
-                    state.running = !state.running;
-                }
-                state.last_tick = Instant::now();
-            }
-            if focus.finished {
-                ui.add_space(12.0);
-                if ui
-                    .add(Button::new(self.rich("Complete task", 17.0, palette.accent)).frame(false))
-                    .clicked()
-                {
-                    self.complete_task(focus.list_id, focus.task_id);
-                    self.open_list(focus.list_id);
-                    self.transition_direction = -1.0;
-                    self.focus = None;
-                }
-            }
-        });
-        ui.ctx().request_repaint_after(if focus.running {
-            Duration::from_millis(16)
-        } else {
-            Duration::from_millis(100)
-        });
     }
 
     fn status_ui(&mut self, ui: &mut egui::Ui, palette: Palette) {
@@ -810,7 +560,6 @@ impl eframe::App for MinimalistApp {
         match screen {
             Screen::Overview => self.overview_ui(&mut content_ui, palette),
             Screen::List(id) => self.list_ui(&mut content_ui, id, palette),
-            Screen::Focus => self.focus_ui(&mut content_ui, palette),
             Screen::Settings => self.settings_ui(&mut content_ui, palette),
         }
         self.status_ui(&mut content_ui, palette);

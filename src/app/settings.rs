@@ -98,14 +98,6 @@ impl MinimalistApp {
                 Id::new("settings-window-decorations"),
                 "Native window decorations",
                 &mut self.settings.window_decorations,
-                toggle_font.clone(),
-                palette,
-            );
-            window_changed |= Self::toggle_row(
-                ui,
-                Id::new("settings-focus-fullscreen"),
-                "Fullscreen focus timer",
-                &mut self.settings.focus_fullscreen,
                 toggle_font,
                 palette,
             );
@@ -119,14 +111,13 @@ impl MinimalistApp {
         if window_changed {
             self.last_pin_state = None;
             self.last_decorations_state = None;
-            self.last_fullscreen_state = None;
             self.save_settings();
         }
 
         ui.add_space(12.0);
         let mut appearance_changed = false;
         Self::surface_card(ui, palette, |ui| {
-            ui.label(self.rich("Typography and focus", 18.0, palette.text));
+            ui.label(self.rich("Appearance", 18.0, palette.text));
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 for (choice, label) in [(FontChoice::Sans, "Sans"), (FontChoice::Mono, "Mono")] {
@@ -206,26 +197,6 @@ impl MinimalistApp {
                 .add_sized(
                     [ui.available_width(), 18.0],
                     egui::Slider::new(&mut self.settings.row_padding, 4.0..=24.0)
-                        .show_value(false)
-                        .trailing_fill(true),
-                )
-                .changed();
-
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                ui.label(self.rich("Focus minutes", 14.0, palette.text));
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.label(self.rich(
-                        self.settings.focus_minutes.to_string(),
-                        13.0,
-                        palette.accent,
-                    ));
-                });
-            });
-            appearance_changed |= ui
-                .add_sized(
-                    [ui.available_width(), 18.0],
-                    egui::Slider::new(&mut self.settings.focus_minutes, 1..=90)
                         .show_value(false)
                         .trailing_fill(true),
                 )

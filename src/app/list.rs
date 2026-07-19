@@ -409,14 +409,9 @@ impl MinimalistApp {
         let text_color = paint_palette
             .text
             .lerp_to_gamma(paint_palette.muted, completion_progress);
-        let progress_width = if task.progress().is_some() {
-            58.0
-        } else {
-            18.0
-        };
         let text_clip = Rect::from_min_max(
             Pos2::new(row_rect.left() + 44.0, row_rect.top()),
-            Pos2::new(row_rect.right() - progress_width, row_rect.bottom()),
+            Pos2::new(row_rect.right() - 82.0, row_rect.bottom()),
         )
         .intersect(ui.clip_rect());
         let text_pos = Pos2::new(row_rect.left() + 46.0, row_rect.center().y);
@@ -448,14 +443,65 @@ impl MinimalistApp {
                 Stroke::new(2.0, paint_palette.accent),
             );
         }
-        if let Some((done, total)) = task.progress() {
-            ui.painter().text(
-                Pos2::new(row_rect.right() - 16.0, row_rect.center().y),
-                Align2::RIGHT_CENTER,
-                format!("{done}/{total}"),
-                self.font_id(13.0),
-                paint_palette.accent,
+        let text_response = (!is_editing).then(|| {
+            ui.interact(
+                text_rect.expand2(Vec2::new(4.0, 10.0)).intersect(text_clip),
+                Id::new(("task-text", list_id, task.id)),
+                Sense::click(),
+            )
+            .on_hover_cursor(CursorIcon::Text)
+        });
+
+        if !is_editing {
+            let checklist_rect = Rect::from_center_size(
+                Pos2::new(row_rect.right() - 52.0, row_rect.center().y),
+                Vec2::new(42.0, 30.0),
             );
+            let checklist_label = task
+                .progress()
+                .map_or_else(|| "+".to_owned(), |(done, total)| format!("{done}/{total}"));
+            let checklist_opacity = if task.progress().is_some() {
+                0.72 + hover_progress * 0.28
+            } else {
+                0.24 + hover_progress * 0.76
+            };
+            let checklist = ui
+                .put(
+                    checklist_rect,
+                    Button::new(self.rich(
+                        checklist_label,
+                        13.0,
+                        paint_palette.accent.linear_multiply(checklist_opacity),
+                    ))
+                    .frame(false),
+                )
+                .on_hover_text("Subtasks");
+            if checklist.clicked() {
+                return Some(RowAction::Subtasks(list_id, task.id));
+            }
+
+            let delete_rect = Rect::from_center_size(
+                Pos2::new(row_rect.right() - 17.0, row_rect.center().y),
+                Vec2::splat(30.0),
+            );
+            let delete = ui
+                .put(
+                    delete_rect,
+                    Button::new(
+                        self.rich(
+                            "x",
+                            14.0,
+                            paint_palette
+                                .danger
+                                .linear_multiply(0.16 + hover_progress * 0.84),
+                        ),
+                    )
+                    .frame(false),
+                )
+                .on_hover_text("Delete task");
+            if delete.clicked() {
+                return Some(RowAction::Delete(list_id, task.id));
+            }
         }
 
         if is_editing {
@@ -549,11 +595,12 @@ impl MinimalistApp {
                 }
             }
 
-            if response.double_clicked() {
-                return Some(RowAction::Subtasks(list_id, task.id));
-            }
-            if response.clicked() && !revealed && !task.completed {
-                return Some(RowAction::Focus(list_id, task.id));
+            if text_response
+                .as_ref()
+                .is_some_and(|response| response.clicked())
+                && !revealed
+            {
+                return Some(RowAction::BeginEdit(list_id, task.id, task.text.clone()));
             }
         }
 
@@ -572,7 +619,6 @@ impl MinimalistApp {
     }
 
     fn apply_row_action(&mut self, action: RowAction) {
-        self.pending_task_click = None;
         match action {
             RowAction::Toggle(list_id, task_id) => {
                 if let Some(index) = self.list_index(list_id)
@@ -628,23 +674,6 @@ impl MinimalistApp {
                 };
                 self.new_subtask.clear();
             }
-            RowAction::Focus(list_id, task_id) => {
-                self.pending_task_click = Some((list_id, task_id, Instant::now()));
-            }
-        }
-    }
-
-    pub(super) fn complete_task(&mut self, list_id: Uuid, task_id: Uuid) {
-        if let Some(index) = self.list_index(list_id)
-            && let Some(task) = self.lists[index]
-                .data
-                .tasks
-                .iter_mut()
-                .find(|task| task.id == task_id)
-            && !task.completed
-        {
-            task.toggle();
-            self.save_list_index(index);
         }
     }
 }
@@ -657,5 +686,4 @@ enum RowAction {
     CommitEdit(Uuid, Uuid, String),
     Reorder(Uuid, Uuid, usize),
     Subtasks(Uuid, Uuid),
-    Focus(Uuid, Uuid),
 }
