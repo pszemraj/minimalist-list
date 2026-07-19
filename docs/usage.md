@@ -22,7 +22,8 @@ Drag a task vertically to reorder it. Drag right past the threshold to complete 
 
 Use the back control or double-click a list title to return to the overview. `Ctrl+Tab` and `Ctrl+Shift+Tab` move between lists. Each overview card has a settings action for renaming, recoloring, or deleting that list.
 
-All shortcuts require the Minimalist List window to have keyboard focus.
+> [!NOTE]
+> Shortcuts work only while the Minimalist List window has keyboard focus.
 
 ## Window and appearance settings
 

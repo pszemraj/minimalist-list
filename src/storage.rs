@@ -190,7 +190,7 @@ pub fn load_workspace(root: &Path) -> Result<WorkspaceSnapshot, String> {
             lists.push(stored);
         } else {
             warnings.push(format!(
-                "ignored duplicate list identity in {}; Dropbox conflict copies remain untouched on disk",
+                "ignored duplicate list identity in {}; the file remains untouched on disk",
                 stored.path.display()
             ));
         }
@@ -507,7 +507,7 @@ mod tests {
     }
 
     #[test]
-    fn canonical_file_wins_over_dropbox_conflict_copy() {
+    fn canonical_file_wins_over_sync_conflict_copy() {
         let root = test_root();
         let root =
             normalize_workspace_path(&root.to_string_lossy()).expect("create test workspace");
