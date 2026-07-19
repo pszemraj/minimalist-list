@@ -1,3 +1,5 @@
+//! Settings and folder-backed list persistence.
+
 use crate::model::{Accent, FontChoice, TodoList};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
@@ -12,6 +14,7 @@ const APP_DIR: &str = "minimalist-list";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
+/// User preferences persisted outside the task workspace.
 pub struct Settings {
     pub workspace_path: String,
     pub always_on_top: bool,
@@ -41,6 +44,7 @@ impl Default for Settings {
 }
 
 #[derive(Clone, Debug)]
+/// A list paired with the file that stores it.
 pub struct StoredList {
     pub key: Uuid,
     pub path: PathBuf,
@@ -48,14 +52,17 @@ pub struct StoredList {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// File metadata used to detect workspace changes between scans.
 pub struct FileStamp {
     pub modified_ns: u128,
     pub len: u64,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+/// Metadata snapshot keyed by each list file name.
 pub struct WorkspaceFingerprint(pub BTreeMap<String, FileStamp>);
 
+/// Lists, change metadata, and non-fatal issues found while loading a workspace.
 pub struct WorkspaceSnapshot {
     pub lists: Vec<StoredList>,
     pub fingerprint: WorkspaceFingerprint,
@@ -63,6 +70,15 @@ pub struct WorkspaceSnapshot {
     pub failed_paths: Vec<PathBuf>,
 }
 
+/// Loads persisted settings, or defaults when no settings file exists.
+///
+/// # Returns
+///
+/// Persisted settings, or defaults when the settings file is absent.
+///
+/// # Errors
+///
+/// Returns an error when the settings file cannot be read or parsed.
 pub fn load_settings() -> Result<Settings, String> {
     let path = settings_path();
     if !path.exists() {
@@ -74,10 +90,28 @@ pub fn load_settings() -> Result<Settings, String> {
         .map_err(|error| format!("could not parse {}: {error}", path.display()))
 }
 
+/// Persists application settings atomically.
+///
+/// # Returns
+///
+/// `Ok(())` after the settings file is replaced.
+///
+/// # Errors
+///
+/// Returns an error when settings cannot be serialized, written, or replaced.
 pub fn save_settings(settings: &Settings) -> Result<(), String> {
     write_json_atomic(&settings_path(), settings)
 }
 
+/// Expands, creates, and canonicalizes a workspace directory.
+///
+/// # Returns
+///
+/// The canonical absolute workspace path.
+///
+/// # Errors
+///
+/// Returns an error when the path cannot be resolved or its list directory cannot be created.
 pub fn normalize_workspace_path(raw: &str) -> Result<PathBuf, String> {
     let path = expand_tilde(raw.trim());
     let absolute = if path.is_absolute() {
@@ -94,6 +128,15 @@ pub fn normalize_workspace_path(raw: &str) -> Result<PathBuf, String> {
         .map_err(|error| format!("could not resolve {}: {error}", absolute.display()))
 }
 
+/// Loads all readable list files and a fingerprint from a workspace.
+///
+/// # Returns
+///
+/// A snapshot containing readable lists, file metadata, and non-fatal warnings.
+///
+/// # Errors
+///
+/// Returns an error when the workspace list directory cannot be created or read.
 pub fn load_workspace(root: &Path) -> Result<WorkspaceSnapshot, String> {
     let lists_dir = root.join("lists");
     fs::create_dir_all(&lists_dir)
@@ -186,10 +229,26 @@ fn read_list(path: &Path) -> Result<(StoredList, bool), String> {
     ))
 }
 
+/// Orders lists by creation time and then identity.
 pub fn sort_lists(lists: &mut [StoredList]) {
     lists.sort_by_key(|entry| (entry.data.created_at_unix, entry.key));
 }
 
+/// Creates and persists a new empty list in a workspace.
+///
+/// # Arguments
+///
+/// - `root` - Workspace root containing the `lists` directory.
+/// - `title` - User-facing title for the new list.
+/// - `accent` - Initial list accent.
+///
+/// # Returns
+///
+/// The new list paired with its storage path.
+///
+/// # Errors
+///
+/// Returns an error when the new list cannot be serialized, written, or installed.
 pub fn create_list(root: &Path, title: &str, accent: Accent) -> Result<StoredList, String> {
     let data = TodoList::new(title, accent);
     let path = root.join("lists").join(format!("{}.json", data.id));
@@ -202,15 +261,42 @@ pub fn create_list(root: &Path, title: &str, accent: Accent) -> Result<StoredLis
     Ok(stored)
 }
 
+/// Persists a list atomically to its associated path.
+///
+/// # Returns
+///
+/// `Ok(())` after the list file is replaced.
+///
+/// # Errors
+///
+/// Returns an error when the list cannot be serialized, written, or replaced.
 pub fn save_list(list: &StoredList) -> Result<(), String> {
     write_json_atomic(&list.path, &list.data)
 }
 
+/// Deletes a list's associated file.
+///
+/// # Returns
+///
+/// `Ok(())` after the file is removed.
+///
+/// # Errors
+///
+/// Returns an error when the list file cannot be removed.
 pub fn delete_list(list: &StoredList) -> Result<(), String> {
     fs::remove_file(&list.path)
         .map_err(|error| format!("could not delete {}: {error}", list.path.display()))
 }
 
+/// Collects change-detection metadata for every list file in a workspace.
+///
+/// # Returns
+///
+/// A fingerprint keyed by list file name.
+///
+/// # Errors
+///
+/// Returns an error when the list directory cannot be created or read.
 pub fn workspace_fingerprint(root: &Path) -> Result<WorkspaceFingerprint, String> {
     let mut map = BTreeMap::new();
     let lists_dir = root.join("lists");
@@ -237,6 +323,20 @@ pub fn workspace_fingerprint(root: &Path) -> Result<WorkspaceFingerprint, String
     Ok(WorkspaceFingerprint(map))
 }
 
+/// Refreshes one list file's entry in an existing fingerprint.
+///
+/// # Arguments
+///
+/// - `fingerprint` - Snapshot to update in place.
+/// - `path` - List file whose metadata should be recorded.
+///
+/// # Returns
+///
+/// `Ok(())` after the entry is refreshed.
+///
+/// # Errors
+///
+/// Returns an error when the file name or metadata cannot be read.
 pub fn update_fingerprint_for_file(
     fingerprint: &mut WorkspaceFingerprint,
     path: &Path,
@@ -253,6 +353,12 @@ pub fn update_fingerprint_for_file(
     Ok(())
 }
 
+/// Removes one list file's entry from an existing fingerprint.
+///
+/// # Arguments
+///
+/// - `fingerprint` - Snapshot to update in place.
+/// - `path` - List file whose entry should be removed.
 pub fn remove_file_from_fingerprint(fingerprint: &mut WorkspaceFingerprint, path: &Path) {
     if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
         fingerprint.0.remove(name);
@@ -271,6 +377,11 @@ fn stamp_from_metadata(metadata: &fs::Metadata) -> FileStamp {
     }
 }
 
+/// Returns the platform-appropriate default task workspace directory.
+///
+/// # Returns
+///
+/// The application's directory beneath the platform data root.
 pub fn default_workspace_dir() -> PathBuf {
     xdg_dir("XDG_DATA_HOME", ".local/share").join(APP_DIR)
 }

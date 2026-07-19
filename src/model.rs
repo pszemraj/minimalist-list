@@ -1,10 +1,14 @@
+//! Serializable list, task, subtask, and archive data models.
+
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
+/// Current on-disk list format written by the application.
 pub const FORMAT_VERSION: u32 = 1;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// Color accent assigned to a list.
 pub enum Accent {
     #[default]
     Mint,
@@ -25,6 +29,11 @@ impl Accent {
         Self::Lavender,
     ];
 
+    /// Returns the user-facing name of the accent.
+    ///
+    /// # Returns
+    ///
+    /// A static display label for this accent.
     pub const fn label(self) -> &'static str {
         match self {
             Self::Mint => "Mint",
@@ -38,6 +47,7 @@ impl Accent {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// Font family available for application text.
 pub enum FontChoice {
     #[default]
     Sans,
@@ -45,6 +55,7 @@ pub enum FontChoice {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+/// A persisted task list with its live tasks and archive.
 pub struct TodoList {
     pub format_version: u32,
     pub id: Uuid,
@@ -58,6 +69,16 @@ pub struct TodoList {
 }
 
 impl TodoList {
+    /// Creates an empty list with a new stable identity.
+    ///
+    /// # Arguments
+    ///
+    /// - `title` - User-facing list title.
+    /// - `accent` - Initial list accent.
+    ///
+    /// # Returns
+    ///
+    /// A versioned list with no tasks or archived entries.
     pub fn new(title: impl Into<String>, accent: Accent) -> Self {
         Self {
             format_version: FORMAT_VERSION,
@@ -70,16 +91,27 @@ impl TodoList {
         }
     }
 
+    /// Counts tasks that have not been completed.
+    ///
+    /// # Returns
+    ///
+    /// The number of active tasks in the live task collection.
     pub fn active_count(&self) -> usize {
         self.tasks.iter().filter(|task| !task.completed).count()
     }
 
+    /// Counts completed tasks that have not yet been archived.
+    ///
+    /// # Returns
+    ///
+    /// The number of completed tasks in the live task collection.
     pub fn completed_count(&self) -> usize {
         self.tasks.iter().filter(|task| task.completed).count()
     }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+/// A top-level task and its optional checklist.
 pub struct Task {
     pub id: Uuid,
     pub text: String,
@@ -91,6 +123,11 @@ pub struct Task {
 }
 
 impl Task {
+    /// Creates an active task with a new identity and creation timestamp.
+    ///
+    /// # Returns
+    ///
+    /// A task with no completion timestamp or subtasks.
     pub fn new(text: impl Into<String>) -> Self {
         Self {
             id: Uuid::new_v4(),
@@ -102,11 +139,17 @@ impl Task {
         }
     }
 
+    /// Flips completion state and updates the completion timestamp.
     pub fn toggle(&mut self) {
         self.completed = !self.completed;
         self.completed_at_unix = self.completed.then(now_unix_seconds);
     }
 
+    /// Returns completed and total subtask counts when a checklist exists.
+    ///
+    /// # Returns
+    ///
+    /// `Some((completed, total))` for a checklist, otherwise `None`.
     pub fn progress(&self) -> Option<(usize, usize)> {
         if self.subtasks.is_empty() {
             return None;
@@ -119,6 +162,7 @@ impl Task {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+/// One checklist item attached to a task.
 pub struct Subtask {
     pub id: Uuid,
     pub text: String,
@@ -126,6 +170,11 @@ pub struct Subtask {
 }
 
 impl Subtask {
+    /// Creates an incomplete subtask with a new identity.
+    ///
+    /// # Returns
+    ///
+    /// A new incomplete subtask containing the supplied text.
     pub fn new(text: impl Into<String>) -> Self {
         Self {
             id: Uuid::new_v4(),
@@ -136,12 +185,18 @@ impl Subtask {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+/// A completed task retained with the time it entered history.
 pub struct ArchivedTask {
     pub task: Task,
     pub archived_at_unix: u64,
 }
 
 impl ArchivedTask {
+    /// Wraps a task for archival and records the current time.
+    ///
+    /// # Returns
+    ///
+    /// An archive entry containing the task and current timestamp.
     pub fn new(task: Task) -> Self {
         Self {
             task,
@@ -150,6 +205,11 @@ impl ArchivedTask {
     }
 }
 
+/// Returns the current Unix timestamp in whole seconds.
+///
+/// # Returns
+///
+/// Seconds since the Unix epoch, or zero when the system clock predates it.
 pub fn now_unix_seconds() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)

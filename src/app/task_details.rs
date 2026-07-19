@@ -1,3 +1,5 @@
+//! Subtask, deletion, completion-clearing, and history views.
+
 use super::{CLEAR_ANIMATION_SECONDS, DELETE_ANIMATION_SECONDS, MinimalistApp, theme::Palette};
 use crate::model::{ArchivedTask, Subtask, Task};
 use eframe::egui;
@@ -9,6 +11,19 @@ use std::time::Instant;
 use uuid::Uuid;
 
 impl MinimalistApp {
+    /// Renders the animated subtask editor for a task.
+    ///
+    /// # Arguments
+    ///
+    /// - `ui` - Destination UI for the panel.
+    /// - `list_id` - Parent list identity.
+    /// - `task` - Task whose checklist is displayed.
+    /// - `palette` - Colors used to render the panel.
+    /// - `progress` - Panel reveal progress from zero to one.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an internally resolved list index becomes invalid during an interaction.
     pub(super) fn subtasks_panel(
         &mut self,
         ui: &mut egui::Ui,
@@ -161,6 +176,7 @@ impl MinimalistApp {
         }
     }
 
+    /// Starts the animation that moves completed tasks into history.
     pub(super) fn begin_clear_completed(&mut self, list_id: Uuid) {
         if self.clear_animation.is_none() {
             self.revealed = None;
@@ -168,6 +184,12 @@ impl MinimalistApp {
         }
     }
 
+    /// Starts the removal animation for a task.
+    ///
+    /// # Arguments
+    ///
+    /// - `list_id` - Parent list identity.
+    /// - `task_id` - Identity of the task to remove.
     pub(super) fn begin_delete_task(&mut self, list_id: Uuid, task_id: Uuid) {
         if self.delete_animation.is_none() {
             self.revealed = None;
@@ -176,6 +198,20 @@ impl MinimalistApp {
         }
     }
 
+    /// Returns the current removal animation progress for a task.
+    ///
+    /// # Arguments
+    ///
+    /// - `list_id` - Parent list identity.
+    /// - `task_id` - Task whose animation is queried.
+    ///
+    /// # Returns
+    ///
+    /// Eased progress from zero to one, or zero when the task is not being removed.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the configured deletion duration is zero.
     pub(super) fn delete_progress(&self, list_id: Uuid, task_id: Uuid) -> f32 {
         self.delete_animation
             .map_or(0.0, |(active_list, active_task, started)| {
@@ -190,6 +226,16 @@ impl MinimalistApp {
             })
     }
 
+    /// Removes a task from its list and persists the change.
+    ///
+    /// # Arguments
+    ///
+    /// - `list_id` - Parent list identity.
+    /// - `task_id` - Identity of the task to remove.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an internally resolved list index is invalid.
     pub(super) fn remove_task(&mut self, list_id: Uuid, task_id: Uuid) {
         if let Some(index) = self.list_index(list_id) {
             self.lists[index]
@@ -200,6 +246,20 @@ impl MinimalistApp {
         }
     }
 
+    /// Returns the current clear animation progress for a completed task.
+    ///
+    /// # Arguments
+    ///
+    /// - `list_id` - Parent list identity.
+    /// - `completed` - Whether the task participates in the clear animation.
+    ///
+    /// # Returns
+    ///
+    /// Eased progress from zero to one, or zero for an active task or list.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the configured clear duration is zero.
     pub(super) fn clear_progress(&self, list_id: Uuid, completed: bool) -> f32 {
         if !completed {
             return 0.0;
@@ -215,6 +275,11 @@ impl MinimalistApp {
         })
     }
 
+    /// Moves every completed task in a list into its archive.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an internally resolved list index is invalid.
     pub(super) fn archive_completed(&mut self, list_id: Uuid) {
         if let Some(index) = self.list_index(list_id) {
             let mut active = Vec::new();
@@ -232,6 +297,18 @@ impl MinimalistApp {
         }
     }
 
+    /// Renders the animated archive panel and its restore actions.
+    ///
+    /// # Arguments
+    ///
+    /// - `ui` - Destination UI for the archive panel.
+    /// - `list_id` - List whose archive is displayed.
+    /// - `palette` - Colors used to render the panel.
+    /// - `progress` - Panel reveal progress from zero to one.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an internally resolved list index becomes invalid during an interaction.
     pub(super) fn history_ui(
         &mut self,
         ui: &mut egui::Ui,

@@ -1,3 +1,5 @@
+//! Quick-capture and cross-list search overlays.
+
 use super::{MinimalistApp, Screen, theme::Palette};
 use crate::model::{Subtask, Task};
 use crate::storage::StoredList;
@@ -6,12 +8,14 @@ use egui::{Align, Button, ComboBox, CornerRadius, Id, Key, Layout, Modal, Scroll
 use std::time::Instant;
 use uuid::Uuid;
 
+/// Holds the draft and destination selected in the quick-capture overlay.
 pub(super) struct QuickCaptureState {
     text: String,
     selected_list_id: Option<Uuid>,
     request_focus: bool,
 }
 
+/// Holds the current global-search query and keyboard selection.
 pub(super) struct FindState {
     query: String,
     selected: usize,
@@ -19,6 +23,7 @@ pub(super) struct FindState {
 }
 
 #[derive(Clone)]
+/// Identifies a search result that should be revealed and briefly highlighted.
 pub(super) struct Spotlight {
     pub(super) list_id: Uuid,
     pub(super) task_id: Uuid,
@@ -57,6 +62,7 @@ struct SearchHit {
 }
 
 impl MinimalistApp {
+    /// Opens quick capture or global search when their app-scoped shortcuts fire.
     pub(super) fn handle_app_shortcuts(&mut self, ctx: &egui::Context) {
         let (quick_capture, find) = ctx.input(|input| {
             (
@@ -75,6 +81,7 @@ impl MinimalistApp {
         }
     }
 
+    /// Opens quick capture, preferring the hinted list when no saved destination applies.
     pub(super) fn open_quick_capture(&mut self, hinted_list_id: Option<Uuid>) {
         self.find = None;
         if let Some(state) = &mut self.quick_capture {
@@ -93,6 +100,7 @@ impl MinimalistApp {
         });
     }
 
+    /// Opens global search and requests focus for its query field.
     pub(super) fn open_find(&mut self) {
         self.quick_capture = None;
         if let Some(state) = &mut self.find {
@@ -106,6 +114,12 @@ impl MinimalistApp {
         });
     }
 
+    /// Renders whichever modal capture or search overlay is active.
+    ///
+    /// # Arguments
+    ///
+    /// - `ctx` - Egui context used to display the modal.
+    /// - `palette` - Colors used to render the active overlay.
     pub(super) fn overlay_ui(&mut self, ctx: &egui::Context, palette: Palette) {
         if self.quick_capture.is_some() {
             self.quick_capture_ui(ctx, palette);

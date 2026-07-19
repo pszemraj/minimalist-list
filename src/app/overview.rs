@@ -1,3 +1,5 @@
+//! Workspace overview and list-card interactions.
+
 use super::{MinimalistApp, theme::Palette};
 use crate::model::Accent;
 use crate::storage;
@@ -9,6 +11,16 @@ use egui::{
 use uuid::Uuid;
 
 impl MinimalistApp {
+    /// Renders the responsive list overview and list-creation controls.
+    ///
+    /// # Arguments
+    ///
+    /// - `ui` - Destination UI for the overview.
+    /// - `palette` - Colors used to render list cards.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the fixed card-column count is zero.
     pub(super) fn overview_ui(&mut self, ui: &mut egui::Ui, palette: Palette) {
         self.header(ui, palette, "Lists", None);
         ui.add_space(12.0);

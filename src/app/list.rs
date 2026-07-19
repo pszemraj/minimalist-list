@@ -1,3 +1,5 @@
+//! Task-list screen and direct task interactions.
+
 use super::{
     DragState, INSERT_ANIMATION_SECONDS, MinimalistApp, ROW_HEIGHT, SWIPE_ACTIONS, SWIPE_COMPLETE,
     theme::Palette,
@@ -12,6 +14,17 @@ use std::time::Instant;
 use uuid::Uuid;
 
 impl MinimalistApp {
+    /// Renders one list and handles task creation, editing, completion, and ordering.
+    ///
+    /// # Arguments
+    ///
+    /// - `ui` - Destination UI for the list screen.
+    /// - `list_id` - Identity of the list to display.
+    /// - `palette` - Colors used to render the screen.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an internally resolved list index becomes invalid while the screen is rendered.
     pub(super) fn list_ui(&mut self, ui: &mut egui::Ui, list_id: Uuid, palette: Palette) {
         let Some(index) = self.list_index(list_id) else {
             self.go_to_overview();

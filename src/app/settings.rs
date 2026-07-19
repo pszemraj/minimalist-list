@@ -1,3 +1,5 @@
+//! In-app workspace, appearance, and list settings.
+
 use super::{MinimalistApp, theme::Palette};
 use crate::model::{Accent, FontChoice};
 use crate::storage;
@@ -7,6 +9,12 @@ use rfd::FileDialog;
 use uuid::Uuid;
 
 impl MinimalistApp {
+    /// Renders global settings and, when selected, controls for a specific list.
+    ///
+    /// # Arguments
+    ///
+    /// - `ui` - Destination UI for the settings screen.
+    /// - `palette` - Colors used to render the settings controls.
     pub(super) fn settings_ui(&mut self, ui: &mut egui::Ui, palette: Palette) {
         ui.horizontal(|ui| {
             if ui

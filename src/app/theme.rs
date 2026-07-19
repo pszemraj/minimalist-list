@@ -1,3 +1,5 @@
+//! Accent-derived colors and shared rendering helpers.
+
 use super::MinimalistApp;
 use crate::model::{Accent, FontChoice};
 use eframe::egui;
@@ -8,6 +10,7 @@ use egui::{
 use uuid::Uuid;
 
 #[derive(Clone, Copy, PartialEq)]
+/// Complete set of colors used to render one accent theme.
 pub(super) struct Palette {
     pub(super) background: Color32,
     pub(super) surface: Color32,
@@ -19,6 +22,11 @@ pub(super) struct Palette {
 }
 
 impl Palette {
+    /// Builds the dark palette associated with an accent choice.
+    ///
+    /// # Returns
+    ///
+    /// The complete palette associated with `accent`.
     pub(super) fn from_accent(accent: Accent) -> Self {
         match accent {
             Accent::Mint => Self::new((22, 38, 35), (31, 53, 48), (41, 67, 60), (137, 220, 187)),
@@ -51,6 +59,16 @@ impl Palette {
         }
     }
 
+    /// Interpolates every palette color toward another palette.
+    ///
+    /// # Arguments
+    ///
+    /// - `other` - Target palette.
+    /// - `amount` - Blend amount, clamped from zero to one.
+    ///
+    /// # Returns
+    ///
+    /// A palette containing the interpolated colors.
     pub(super) fn mix(self, other: Self, amount: f32) -> Self {
         let amount = amount.clamp(0.0, 1.0);
         Self {
@@ -64,6 +82,11 @@ impl Palette {
         }
     }
 
+    /// Applies a shared opacity multiplier to every palette color.
+    ///
+    /// # Returns
+    ///
+    /// A palette whose colors use the clamped opacity.
     pub(super) fn fade(self, opacity: f32) -> Self {
         let opacity = opacity.clamp(0.0, 1.0);
         Self {
@@ -79,6 +102,11 @@ impl Palette {
 }
 
 impl MinimalistApp {
+    /// Creates a font identifier using the configured font family.
+    ///
+    /// # Returns
+    ///
+    /// A font identifier with the requested size and configured family.
     pub(super) fn font_id(&self, size: f32) -> FontId {
         let family = match self.settings.font {
             FontChoice::Sans => FontFamily::Proportional,
@@ -87,6 +115,17 @@ impl MinimalistApp {
         FontId::new(size, family)
     }
 
+    /// Styles text with the configured family, weight, size, and supplied color.
+    ///
+    /// # Arguments
+    ///
+    /// - `text` - Content to display.
+    /// - `size` - Font size in points.
+    /// - `color` - Text color.
+    ///
+    /// # Returns
+    ///
+    /// Rich text ready to pass to an egui widget.
     pub(super) fn rich(&self, text: impl Into<String>, size: f32, color: Color32) -> RichText {
         let mut rich = RichText::new(text).font(self.font_id(size)).color(color);
         if self.settings.bold_text {
@@ -95,6 +134,20 @@ impl MinimalistApp {
         rich
     }
 
+    /// Renders a single-line input with the shared flat frame and focus treatment.
+    ///
+    /// # Arguments
+    ///
+    /// - `ui` - Destination UI for the input.
+    /// - `id` - Stable widget identity.
+    /// - `text` - Editable input buffer.
+    /// - `hint` - Placeholder shown when the buffer is empty.
+    /// - `font` - Font used for input text.
+    /// - `palette` - Colors used for the frame and focus treatment.
+    ///
+    /// # Returns
+    ///
+    /// The text widget's response.
     pub(super) fn flat_text_input(
         ui: &mut egui::Ui,
         id: Id,
@@ -139,6 +192,20 @@ impl MinimalistApp {
         response
     }
 
+    /// Renders a full-width animated boolean setting and reports whether it changed.
+    ///
+    /// # Arguments
+    ///
+    /// - `ui` - Destination UI for the control.
+    /// - `id` - Stable animation identity.
+    /// - `label` - User-facing setting name.
+    /// - `value` - Boolean preference edited by the control.
+    /// - `font` - Font used for the label.
+    /// - `palette` - Colors used to render the control.
+    ///
+    /// # Returns
+    ///
+    /// `true` when the value changed during this frame.
     pub(super) fn toggle_row(
         ui: &mut egui::Ui,
         id: Id,
@@ -222,6 +289,17 @@ impl MinimalistApp {
         response.changed()
     }
 
+    /// Renders content inside the shared rounded surface-card frame.
+    ///
+    /// # Arguments
+    ///
+    /// - `ui` - Destination UI for the card.
+    /// - `palette` - Colors used for the card surface.
+    /// - `add_contents` - Closure that renders the card body.
+    ///
+    /// # Returns
+    ///
+    /// The card response and the closure's return value.
     pub(super) fn surface_card<R>(
         ui: &mut egui::Ui,
         palette: Palette,
@@ -238,6 +316,19 @@ impl MinimalistApp {
             })
     }
 
+    /// Paints the animated task-completion control over an allocated response.
+    ///
+    /// # Arguments
+    ///
+    /// - `ui` - UI whose painter draws the control.
+    /// - `response` - Interaction region allocated for the control.
+    /// - `completed` - Current task completion state.
+    /// - `progress` - Completion animation progress from zero to one.
+    /// - `palette` - Colors used to paint the control.
+    ///
+    /// # Returns
+    ///
+    /// The original response with accessibility metadata and hover text attached.
     pub(super) fn completion_control(
         &self,
         ui: &mut egui::Ui,
@@ -303,6 +394,14 @@ impl MinimalistApp {
         response.on_hover_text(label)
     }
 
+    /// Renders the draggable screen header and its navigation actions.
+    ///
+    /// # Arguments
+    ///
+    /// - `ui` - Destination UI for the header.
+    /// - `palette` - Colors used to render header controls.
+    /// - `title` - Screen title.
+    /// - `list_id` - Current list identity, or `None` on the overview.
     pub(super) fn header(
         &mut self,
         ui: &mut egui::Ui,

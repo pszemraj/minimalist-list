@@ -1,3 +1,5 @@
+//! Application state, navigation, persistence coordination, and root rendering.
+
 mod list;
 mod overlays;
 mod overview;
@@ -40,6 +42,7 @@ struct DragState {
     delta: Vec2,
 }
 
+/// Owns the loaded workspace and all transient state for the native UI.
 pub struct MinimalistApp {
     settings: Settings,
     persisted_workspace_path: String,
@@ -87,6 +90,18 @@ pub struct MinimalistApp {
 }
 
 impl MinimalistApp {
+    /// Initializes the UI, resolves the workspace, and loads its lists.
+    ///
+    /// # Arguments
+    ///
+    /// - `cc` - Native application creation context.
+    /// - `settings` - Persisted preferences to apply.
+    /// - `workspace_override` - Optional workspace path supplied for this launch.
+    /// - `startup_warning` - Optional warning to show after startup.
+    ///
+    /// # Returns
+    ///
+    /// A fully initialized application state.
     pub fn new(
         cc: &eframe::CreationContext<'_>,
         mut settings: Settings,

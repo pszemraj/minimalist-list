@@ -1,3 +1,5 @@
+//! Native application entry point and window configuration.
+
 mod app;
 mod model;
 mod storage;
