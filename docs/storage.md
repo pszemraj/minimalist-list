@@ -13,13 +13,27 @@ Change it through **Settings -> Workspace** with the native folder chooser or ty
 > [!TIP]
 > Point the workspace at any folder already managed by your preferred sync service. Minimalist List uses ordinary files and does not require a provider-specific integration.
 
-Set `MINIMALIST_LIST_WORKSPACE` for a launch-only override:
+Use `--data-dir` to select a workspace for one launch:
+
+```bash
+minimalist-list --data-dir "$HOME/Sync/minimalist-list"
+cargo run -- --data-dir "$HOME/Sync/minimalist-list"
+```
+
+`MINIMALIST_LIST_WORKSPACE` provides the same launch-only behavior through the environment:
 
 ```bash
 MINIMALIST_LIST_WORKSPACE="$HOME/Sync/minimalist-list" cargo run
 ```
 
-The environment variable does not replace the workspace saved in settings. Choosing a folder in the application does.
+Workspace selection follows this order:
+
+1. `--data-dir`
+2. `MINIMALIST_LIST_WORKSPACE`
+3. The path saved through Settings
+4. The XDG default shown above
+
+The flag and environment variable do not replace the saved setting. Choosing a folder in the application does. Run `minimalist-list --help` for the command summary or `minimalist-list --version` for the installed version.
 
 ## File layout
 
