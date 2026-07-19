@@ -346,6 +346,20 @@ impl MinimalistApp {
                 {
                     self.open_settings(list_id);
                 }
+                if ui
+                    .add(Button::new(self.rich("find", 14.0, palette.muted)).frame(false))
+                    .on_hover_text("Find anything (Ctrl+F)")
+                    .clicked()
+                {
+                    self.open_find();
+                }
+                if ui
+                    .add(Button::new(self.rich("add", 14.0, palette.accent)).frame(false))
+                    .on_hover_text("Quick add (Ctrl+N)")
+                    .clicked()
+                {
+                    self.open_quick_capture(list_id);
+                }
                 let pin = if self.settings.always_on_top {
                     "pinned"
                 } else {

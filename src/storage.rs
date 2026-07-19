@@ -21,6 +21,7 @@ pub struct Settings {
     pub bold_text: bool,
     pub row_padding: f32,
     pub last_list_id: Option<Uuid>,
+    pub last_capture_list_id: Option<Uuid>,
 }
 
 impl Default for Settings {
@@ -34,6 +35,7 @@ impl Default for Settings {
             bold_text: false,
             row_padding: 12.0,
             last_list_id: None,
+            last_capture_list_id: None,
         }
     }
 }
@@ -433,5 +435,18 @@ mod tests {
         assert_eq!(entries[0].path(), list.path);
 
         fs::remove_dir_all(root).expect("remove test workspace");
+    }
+
+    #[test]
+    fn legacy_focus_settings_are_ignored() {
+        let settings = serde_json::from_str::<Settings>(
+            r#"{
+                "focus_fullscreen": true,
+                "focus_minutes": 25
+            }"#,
+        )
+        .expect("parse legacy settings");
+
+        assert!(settings.last_capture_list_id.is_none());
     }
 }

@@ -2,7 +2,8 @@ use super::{CLEAR_ANIMATION_SECONDS, DELETE_ANIMATION_SECONDS, MinimalistApp, th
 use crate::model::{ArchivedTask, Subtask, Task};
 use eframe::egui;
 use egui::{
-    Align, Button, CornerRadius, Frame, Id, Key, Layout, Margin, Rect, Sense, TextEdit, Vec2,
+    Align, Button, CornerRadius, Frame, Id, Key, Layout, Margin, Rect, Sense, Stroke, TextEdit,
+    Vec2,
 };
 use std::time::Instant;
 use uuid::Uuid;
@@ -41,7 +42,7 @@ impl MinimalistApp {
             .inner_margin(Margin::same(12))
             .show(&mut panel_ui, |ui| {
                 for subtask in &task.subtasks {
-                    ui.horizontal(|ui| {
+                    let row = ui.horizontal(|ui| {
                         let completion_progress = ui.ctx().animate_bool_with_time_and_easing(
                             Id::new(("subtask-complete", list_id, task.id, subtask.id)),
                             subtask.completed,
@@ -77,6 +78,25 @@ impl MinimalistApp {
                             }
                         });
                     });
+                    if let Some(spotlight) = self.spotlight.as_mut().filter(|spotlight| {
+                        !spotlight.archived
+                            && spotlight.list_id == list_id
+                            && spotlight.task_id == task.id
+                            && spotlight.subtask_id == Some(subtask.id)
+                    }) {
+                        if spotlight.scroll_pending {
+                            ui.scroll_to_rect(row.response.rect, Some(Align::Center));
+                            spotlight.scroll_pending = false;
+                        }
+                        let opacity =
+                            (1.0 - spotlight.started.elapsed().as_secs_f32() / 1.4).clamp(0.0, 1.0);
+                        ui.painter().rect_stroke(
+                            row.response.rect.shrink(1.0),
+                            8.0,
+                            Stroke::new(1.5, palette.accent.linear_multiply(opacity)),
+                            egui::StrokeKind::Inside,
+                        );
+                    }
                 }
                 let subtask_response = ui.add(
                     TextEdit::singleline(&mut self.new_subtask)
@@ -249,7 +269,7 @@ impl MinimalistApp {
             .show(&mut history_ui, |ui| {
                 ui.label(self.rich("History", 18.0, palette.text));
                 for item in archived {
-                    ui.horizontal(|ui| {
+                    let row = ui.horizontal(|ui| {
                         ui.label(
                             self.rich(item.task.text.clone(), 15.0, palette.muted)
                                 .strikethrough(),
@@ -266,6 +286,24 @@ impl MinimalistApp {
                             }
                         });
                     });
+                    if let Some(spotlight) = self.spotlight.as_mut().filter(|spotlight| {
+                        spotlight.archived
+                            && spotlight.list_id == list_id
+                            && spotlight.task_id == item.task.id
+                    }) {
+                        if spotlight.scroll_pending {
+                            ui.scroll_to_rect(row.response.rect, Some(Align::Center));
+                            spotlight.scroll_pending = false;
+                        }
+                        let opacity =
+                            (1.0 - spotlight.started.elapsed().as_secs_f32() / 1.4).clamp(0.0, 1.0);
+                        ui.painter().rect_stroke(
+                            row.response.rect.shrink(1.0),
+                            8.0,
+                            Stroke::new(1.5, palette.accent.linear_multiply(opacity)),
+                            egui::StrokeKind::Inside,
+                        );
+                    }
                 }
             });
     }

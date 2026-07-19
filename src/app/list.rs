@@ -5,7 +5,7 @@ use super::{
 use crate::model::Task;
 use eframe::egui;
 use egui::{
-    Align2, Button, Color32, CornerRadius, CursorIcon, Frame, Id, Key, Margin, Pos2, Rect,
+    Align, Align2, Button, Color32, CornerRadius, CursorIcon, Frame, Id, Key, Margin, Pos2, Rect,
     ScrollArea, Sense, Stroke, TextEdit, Vec2,
 };
 use std::time::Instant;
@@ -150,9 +150,8 @@ impl MinimalistApp {
             self.apply_row_action(action);
         }
 
-        let (focus_new, cycle, clear_completed) = ui.input(|input| {
+        let (cycle, clear_completed) = ui.input(|input| {
             (
-                input.modifiers.command && input.key_pressed(Key::N),
                 (input.modifiers.command && input.key_pressed(Key::Tab))
                     .then_some(input.modifiers.shift),
                 input.modifiers.command
@@ -160,9 +159,6 @@ impl MinimalistApp {
                     && input.key_pressed(Key::Backspace),
             )
         });
-        if focus_new {
-            self.request_task_focus = true;
-        }
         if let Some(backwards) = cycle {
             self.cycle_list(list_id, backwards);
         }
@@ -384,6 +380,21 @@ impl MinimalistApp {
                         .raised
                         .lerp_to_gamma(paint_palette.accent, hover_progress * 0.18),
                 ),
+                egui::StrokeKind::Inside,
+            );
+        }
+        if let Some(spotlight) = self.spotlight.as_mut().filter(|spotlight| {
+            !spotlight.archived && spotlight.list_id == list_id && spotlight.task_id == task.id
+        }) {
+            if spotlight.scroll_pending && spotlight.subtask_id.is_none() {
+                ui.scroll_to_rect(row_rect, Some(Align::Center));
+                spotlight.scroll_pending = false;
+            }
+            let opacity = (1.0 - spotlight.started.elapsed().as_secs_f32() / 1.4).clamp(0.0, 1.0);
+            ui.painter().rect_stroke(
+                row_rect.shrink(1.0),
+                13.0,
+                Stroke::new(2.0, paint_palette.accent.linear_multiply(opacity)),
                 egui::StrokeKind::Inside,
             );
         }

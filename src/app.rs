@@ -1,9 +1,11 @@
 mod list;
+mod overlays;
 mod overview;
 mod settings;
 mod task_details;
 mod theme;
 
+use self::overlays::{FindState, QuickCaptureState, Spotlight};
 use self::theme::Palette;
 use crate::model::Accent;
 use crate::storage::{self, Settings, StoredList, WorkspaceFingerprint};
@@ -78,6 +80,9 @@ pub struct MinimalistApp {
     newest_task: Option<(Uuid, Instant)>,
     clear_animation: Option<(Uuid, Instant)>,
     delete_animation: Option<(Uuid, Uuid, Instant)>,
+    quick_capture: Option<QuickCaptureState>,
+    find: Option<FindState>,
+    spotlight: Option<Spotlight>,
     last_motion_tick: Instant,
 }
 
@@ -175,6 +180,9 @@ impl MinimalistApp {
             newest_task: None,
             clear_animation: None,
             delete_animation: None,
+            quick_capture: None,
+            find: None,
+            spotlight: None,
             last_motion_tick: Instant::now(),
         }
     }
@@ -290,6 +298,16 @@ impl MinimalistApp {
             } else {
                 ctx.request_repaint_after(Duration::from_millis(16));
             }
+        }
+
+        if self
+            .spotlight
+            .as_ref()
+            .is_some_and(|spotlight| spotlight.started.elapsed().as_secs_f32() >= 1.4)
+        {
+            self.spotlight = None;
+        } else if self.spotlight.is_some() {
+            ctx.request_repaint_after(Duration::from_millis(16));
         }
     }
 
@@ -479,6 +497,7 @@ impl eframe::App for MinimalistApp {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.handle_app_shortcuts(ui.ctx());
         let palette = self.palette();
         {
             let style = ui.style_mut();
@@ -563,5 +582,6 @@ impl eframe::App for MinimalistApp {
             Screen::Settings => self.settings_ui(&mut content_ui, palette),
         }
         self.status_ui(&mut content_ui, palette);
+        self.overlay_ui(ui.ctx(), palette);
     }
 }
