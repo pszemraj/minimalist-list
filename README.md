@@ -2,7 +2,7 @@
 
 Minimalist List is a native desktop to-do application written in Rust with `egui` and `eframe`. It is a compiled binary: there is no JavaScript, Electron, webview, embedded browser, account system, database, daemon, or cloud service.
 
-The interface borrows the useful parts of MinimaList's interaction style-low chrome, typography-led controls, horizontal task gestures, a card overview, and interpolated movement-while behaving like a desktop application rather than pretending to be a phone UI.
+The interface borrows the useful parts of MinimaList's interaction style—low chrome, typography-led controls, horizontal task gestures, a card overview, and interpolated movement—while behaving like a desktop application rather than pretending to be a phone UI.
 
 ## Build and run
 
@@ -45,13 +45,17 @@ The supplied desktop entry expects `minimalist-list` to be available on the desk
 
 ## Interaction
 
-The top field owns keyboard-first task creation. It receives focus when a list opens, Enter adds the task at the top, and focus returns to the field immediately. `Ctrl+N` returns focus there at any time.
+The top field owns keyboard-first task creation within a list. It receives focus when a list opens, Enter adds the task at the top, and focus returns to the field immediately.
 
-Use the small circle at the left of a task to complete or reactivate it; it is a real keyboard-focusable control, so Tab followed by Space or Enter works as well. Drag a task vertically to reorder it. Drag right past the threshold for the same complete/reactivate action, with the strike-through following the drag. Drag left to reveal flat Edit and Delete actions, then drag right to close them. A single click on the task text opens its focus timer, while a double-click opens its nested subtasks.
+`Ctrl+N` opens Quick add from any screen while the application is focused. Its list selector defaults to the last successful capture destination, Enter adds one task and closes the overlay, and Escape cancels. The header's `add` action opens the same overlay.
 
-Double-click a list title or use the back chevron to return to the card overview. `Ctrl+Tab` and `Ctrl+Shift+Tab` move directly between lists. The `pin`/`pinned` label in the header toggles always-on-top mode. Settings can also remove native window decorations; in that mode, drag the title to move the window and use the visible `x` control to close it.
+`Ctrl+F` or the header's `find` action searches task and subtask text across every list, including completed tasks and History. Use Up and Down to select a result and Enter to open it; the owning task is scrolled into view and briefly highlighted.
 
-Motion is interpolated rather than switched abruptly: screens slide, fade, and settle into place; list palettes cross-fade; overview cards lift under the pointer; newly added tasks expand into the list; deleted and cleared tasks fade and collapse; neighboring rows move out of the way during reordering; and the history and subtask sections open as clipped accordions. The focus timer's progress ring and breathing state update smoothly while it is running.
+Use the small circle at the left of a task to complete or reactivate it; it is a real keyboard-focusable control, so Tab followed by Space or Enter works as well. Click task text to edit it inline. The checklist and delete controls at the right become prominent on hover and remain keyboard-focusable. Drag a task vertically to reorder it. Drag right past the threshold for the same complete/reactivate action, with the strike-through following the drag. Drag left to reveal the original flat Edit and Delete actions, then drag right to close them.
+
+Double-click a list title or use the back chevron to return to the card overview. `Ctrl+Tab` and `Ctrl+Shift+Tab` move directly between lists. Each overview card has its own settings action for renaming, recoloring, or deleting that list. The `pin`/`pinned` label in the header toggles always-on-top mode. Settings can also remove native window decorations; in that mode, drag the title to move the window and use the visible `x` control to close it.
+
+Motion is interpolated rather than switched abruptly: screens slide, fade, and settle into place; list palettes cross-fade; overview cards lift under the pointer; newly added tasks expand into the list; deleted and cleared tasks fade and collapse; neighboring rows move out of the way during reordering; and the history and subtask sections open as clipped accordions.
 
 Completed tasks can be moved into the restorable History section with "Clear completed" or `Ctrl+Shift+Backspace`. Each list has its own flat color theme. Typography settings control proportional versus monospace text, weight, size, and row spacing.
 
@@ -65,20 +69,19 @@ ${XDG_CONFIG_HOME:-$HOME/.config}/minimalist-list/settings.json
 
 All user-facing options save immediately.
 
-| Setting              |                            Default | Purpose                                                   |
-| -------------------- | ---------------------------------: | --------------------------------------------------------- |
-| `workspace_path`     | XDG data directory described below | Root directory containing the `lists/` folder             |
-| `always_on_top`      |                            `false` | Keeps the native window above ordinary windows            |
-| `window_decorations` |                             `true` | Enables the window manager's title bar and borders        |
-| `focus_fullscreen`   |                             `true` | Makes the task focus timer fullscreen                     |
-| `font`               |                           `"Sans"` | Uses proportional (`"Sans"`) or monospace (`"Mono"`) text |
-| `font_size`          |                             `19.0` | Main task text size in egui points                        |
-| `bold_text`          |                            `false` | Uses heavier interface text                               |
-| `row_padding`        |                             `12.0` | Extra vertical space in each task row                     |
-| `focus_minutes`      |                               `25` | Initial duration of a focus session                       |
-| `last_list_id`       |             `null` on first launch | Internal UUID used to reopen the last active list         |
+| Setting                  |                            Default | Purpose                                                   |
+| ------------------------ | ---------------------------------: | --------------------------------------------------------- |
+| `workspace_path`         | XDG data directory described below | Root directory containing the `lists/` folder             |
+| `always_on_top`          |                            `false` | Keeps the native window above ordinary windows            |
+| `window_decorations`     |                             `true` | Enables the window manager's title bar and borders        |
+| `font`                   |                           `"Sans"` | Uses proportional (`"Sans"`) or monospace (`"Mono"`) text |
+| `font_size`              |                             `19.0` | Main task text size in egui points                        |
+| `bold_text`              |                            `false` | Uses heavier interface text                               |
+| `row_padding`            |                             `12.0` | Extra vertical space in each task row                     |
+| `last_list_id`           |             `null` on first launch | Internal UUID used to reopen the last active list         |
+| `last_capture_list_id`   |             `null` on first launch | Internal UUID used for the Quick add destination          |
 
-Change the data location through Settings -> Workspace. Paths beginning with `~/` are expanded, and relative paths are resolved from the process's working directory before being stored as an absolute runtime location.
+Change the data location through Settings -> Workspace with the native folder chooser or the typed path field. Paths beginning with `~/` are expanded, and relative paths are resolved from the process's working directory before being stored as an absolute runtime location.
 
 For a launch-only or launcher-level override, set `MINIMALIST_LIST_WORKSPACE`:
 
@@ -150,11 +153,13 @@ The files are pretty-printed and intended to remain understandable and hand-edit
 ```text
 Cargo.toml                 Package and crates.io dependencies
 Cargo.lock                 Locked application dependency graph
+docs/dev.md                Development boundaries and verification commands
 minimalist-list.desktop    Optional Linux desktop entry
 src/main.rs                Native eframe window setup
-src/app.rs                 UI, interactions, timer, and app state
+src/app.rs                 Core app state, navigation, syncing, and eframe wiring
+src/app/                   Overview, lists, settings, overlays, and shared UI modules
 src/model.rs               Serializable task/list data model
 src/storage.rs             XDG paths, per-list loading, polling, and atomic writes
 ```
 
-The application intentionally does not implement accounts, priorities, projects, due-date systems, a tray icon, a server, GTK/libadwaita theming, or compositor-specific GNOME Shell widget behavior.
+The application intentionally does not implement accounts, priorities, projects, due dates, reminders, a tray icon, a server, system-wide hotkeys, GTK/libadwaita theming, or compositor-specific GNOME Shell widget behavior.

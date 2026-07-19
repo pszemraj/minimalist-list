@@ -3,7 +3,7 @@ use crate::model::Accent;
 use crate::storage;
 use eframe::egui;
 use egui::{
-    Align, Button, Color32, CornerRadius, CursorIcon, Frame, Id, Key, Label, Layout, Margin,
+    Align, Button, Color32, CornerRadius, CursorIcon, Frame, Id, Key, Label, Layout, Margin, Rect,
     ScrollArea, Sense, Stroke, Vec2,
 };
 use uuid::Uuid;
@@ -49,10 +49,12 @@ impl MinimalistApp {
                 for row in cards.chunks(columns) {
                     ui.horizontal(|ui| {
                         for (id, title, accent, active, completed, preview) in row {
-                            let response = self.list_card(
+                            let (response, settings_clicked) = self.list_card(
                                 ui, *id, title, *accent, *active, *completed, preview, card_width,
                             );
-                            if response.clicked() {
+                            if settings_clicked {
+                                self.open_settings(Some(*id));
+                            } else if response.clicked() {
                                 self.open_list(*id);
                             }
                         }
@@ -147,7 +149,7 @@ impl MinimalistApp {
         completed: usize,
         preview: &[String],
         width: f32,
-    ) -> egui::Response {
+    ) -> (egui::Response, bool) {
         let card_palette = Palette::from_accent(accent);
         let (slot_rect, response) = ui.allocate_exact_size(Vec2::new(width, 166.0), Sense::click());
         let response = response.on_hover_cursor(CursorIcon::PointingHand);
@@ -215,7 +217,23 @@ impl MinimalistApp {
             ));
         });
 
-        response
+        let settings_rect = Rect::from_center_size(
+            card_rect.right_top() + Vec2::new(-18.0, 18.0),
+            Vec2::splat(30.0),
+        );
+        let settings = ui
+            .put(
+                settings_rect,
+                Button::new(self.rich(
+                    "...",
+                    14.0,
+                    card_palette.muted.linear_multiply(0.24 + hover * 0.76),
+                ))
+                .frame(false),
+            )
+            .on_hover_text("List settings");
+
+        (response, settings.clicked())
     }
 
     fn create_list(&mut self) {

@@ -3,6 +3,7 @@ use crate::model::{Accent, FontChoice};
 use crate::storage;
 use eframe::egui;
 use egui::{Align, Button, CursorIcon, Id, Key, Label, Layout, ScrollArea, Sense, Stroke};
+use rfd::FileDialog;
 use uuid::Uuid;
 
 impl MinimalistApp {
@@ -46,7 +47,7 @@ impl MinimalistApp {
         Self::surface_card(ui, palette, |ui| {
             ui.label(self.rich("Workspace", 18.0, palette.text));
             ui.label(self.rich(
-                "One readable JSON file per list. Point this at Dropbox when wanted.",
+                "One readable JSON file per list. Any shared folder can sync it.",
                 13.0,
                 palette.muted,
             ));
@@ -60,17 +61,26 @@ impl MinimalistApp {
                 palette,
             );
             ui.horizontal(|ui| {
+                let choose_folder = ui
+                    .add(Button::new(self.rich("Choose folder", 15.0, palette.accent)).frame(false))
+                    .clicked();
                 let use_folder = ui
-                    .add(
-                        Button::new(self.rich("Use this folder", 15.0, palette.accent))
-                            .frame(false),
-                    )
+                    .add(Button::new(self.rich("Use typed path", 15.0, palette.muted)).frame(false))
                     .clicked();
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.label(self.rich("Enter applies", 12.0, palette.muted));
                 });
                 let enter = ui.input(|input| input.key_pressed(Key::Enter));
-                if use_folder
+                if choose_folder {
+                    if let Some(path) = FileDialog::new()
+                        .set_title("Choose Minimalist List workspace")
+                        .set_directory(&self.workspace)
+                        .pick_folder()
+                    {
+                        self.workspace_input = path.to_string_lossy().into_owned();
+                        self.switch_workspace();
+                    }
+                } else if use_folder
                     || (enter
                         && (workspace_response.has_focus() || workspace_response.lost_focus()))
                 {
