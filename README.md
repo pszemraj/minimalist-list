@@ -6,6 +6,10 @@ It runs without an account or hosted service. Folder-backed storage keeps the da
 
 The interface takes its low-chrome, typography-led interaction style from MinimaList while adapting it to a native desktop window.
 
+<br>
+<img src="assets/ui.png" alt="UI screenshot" width="260">
+<br>
+
 ## Features
 
 - Fast task entry within a list or through Quick add
