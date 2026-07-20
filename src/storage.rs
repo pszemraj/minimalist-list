@@ -229,7 +229,7 @@ fn read_list(path: &Path) -> Result<(StoredList, bool), String> {
     ))
 }
 
-/// Orders lists by creation time and then identity.
+/// Orders lists by creation time, using identity to stabilize same-second ties.
 pub fn sort_lists(lists: &mut [StoredList]) {
     lists.sort_by_key(|entry| (entry.data.created_at_unix, entry.key));
 }
@@ -462,6 +462,33 @@ mod tests {
 
     fn test_root() -> PathBuf {
         env::temp_dir().join(format!("minimalist-list-test-{}", Uuid::new_v4()))
+    }
+
+    #[test]
+    fn sort_lists_orders_by_creation_then_identity() {
+        let stored = |title, created_at_unix, key| {
+            let mut data = TodoList::new(title, Accent::Mint);
+            data.id = key;
+            data.created_at_unix = created_at_unix;
+            StoredList {
+                key,
+                path: PathBuf::new(),
+                data,
+            }
+        };
+        let first_id = Uuid::from_u128(1);
+        let second_id = Uuid::from_u128(2);
+        let later_id = Uuid::from_u128(3);
+        let mut lists = vec![
+            stored("Later", 20, later_id),
+            stored("Second", 10, second_id),
+            stored("First", 10, first_id),
+        ];
+
+        sort_lists(&mut lists);
+
+        let actual = lists.iter().map(|list| list.key).collect::<Vec<_>>();
+        assert_eq!(actual, vec![first_id, second_id, later_id]);
     }
 
     #[test]

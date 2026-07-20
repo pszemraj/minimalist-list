@@ -2,7 +2,7 @@
 
 use super::{
     DragState, INSERT_ANIMATION_SECONDS, MinimalistApp, ROW_HEIGHT, SWIPE_ACTIONS, SWIPE_COMPLETE,
-    theme::Palette,
+    text_input_shortcuts, theme::Palette,
 };
 use crate::model::Task;
 use eframe::egui;
@@ -71,8 +71,7 @@ impl MinimalistApp {
             ),
             egui::StrokeKind::Inside,
         );
-        let submit = ui.input(|input| input.key_pressed(Key::Enter))
-            && (create_response.has_focus() || create_response.lost_focus());
+        let (submit, _) = text_input_shortcuts(ui, &create_response);
         if submit {
             self.add_task(list_id);
         }
@@ -547,13 +546,10 @@ impl MinimalistApp {
                 edit_response.request_focus();
                 self.request_edit_focus = false;
             }
-            let escape = editor_ui.input(|input| input.key_pressed(Key::Escape));
-            let enter = editor_ui.input(|input| input.key_pressed(Key::Enter));
-            if escape {
+            let (submit, cancel) = text_input_shortcuts(&editor_ui, &edit_response);
+            if cancel {
                 self.editing = None;
-            } else if (enter && (edit_response.has_focus() || edit_response.lost_focus()))
-                || edit_response.lost_focus()
-            {
+            } else if submit || edit_response.lost_focus() {
                 return Some(RowAction::CommitEdit(
                     list_id,
                     task.id,

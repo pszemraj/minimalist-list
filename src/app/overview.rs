@@ -1,27 +1,14 @@
 //! Workspace overview and list-card interactions.
 
-use super::{MinimalistApp, theme::Palette};
+use super::{MinimalistApp, text_input_shortcuts, theme::Palette};
 use crate::model::Accent;
 use crate::storage;
 use eframe::egui;
 use egui::{
-    Align, Button, Color32, CornerRadius, CursorIcon, Frame, Id, Key, Label, Layout, Margin, Rect,
+    Align, Button, Color32, CornerRadius, CursorIcon, Frame, Id, Label, Layout, Margin, Rect,
     ScrollArea, Sense, Stroke, Vec2,
 };
 use uuid::Uuid;
-
-fn new_list_shortcuts(ui: &egui::Ui, response: &egui::Response) -> (bool, bool) {
-    let (enter, cancel) = ui.input(|input| {
-        (
-            input.key_pressed(Key::Enter),
-            input.key_pressed(Key::Escape),
-        )
-    });
-    (
-        enter && (response.has_focus() || response.lost_focus()),
-        cancel,
-    )
-}
 
 impl MinimalistApp {
     /// Renders the responsive list overview and list-creation controls.
@@ -139,7 +126,7 @@ impl MinimalistApp {
                                 }
                             });
                             ui.label(self.rich("Enter creates · Esc cancels", 12.0, palette.muted));
-                            let (submit, cancel) = new_list_shortcuts(ui, &response);
+                            let (submit, cancel) = text_input_shortcuts(ui, &response);
                             if submit {
                                 self.create_list();
                             } else if cancel {
@@ -277,42 +264,5 @@ impl MinimalistApp {
             }
             Err(error) => self.status = Some(error),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn enter_submission_does_not_reenter_the_context_lock() {
-        let ctx = egui::Context::default();
-        let field_id = Id::new("new-list-shortcut-test");
-        let mut title = "Second".to_owned();
-
-        let _ = ctx.run_ui(Default::default(), |ui| {
-            let response = ui.add(egui::TextEdit::singleline(&mut title).id(field_id));
-            response.request_focus();
-        });
-
-        let input = egui::RawInput {
-            events: vec![egui::Event::Key {
-                key: Key::Enter,
-                physical_key: None,
-                pressed: true,
-                repeat: false,
-                modifiers: egui::Modifiers::default(),
-            }],
-            ..Default::default()
-        };
-        let mut submitted = false;
-        let _ = ctx.run_ui(input, |ui| {
-            let response = ui.add(egui::TextEdit::singleline(&mut title).id(field_id));
-            let (submit, cancel) = new_list_shortcuts(ui, &response);
-            submitted = submit;
-            assert!(!cancel);
-        });
-
-        assert!(submitted);
     }
 }
