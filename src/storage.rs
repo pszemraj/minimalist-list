@@ -465,7 +465,7 @@ mod tests {
     }
 
     #[test]
-    fn stores_each_list_in_its_own_json_file() {
+    fn stores_and_reloads_multiple_lists() {
         let root = test_root();
         let root =
             normalize_workspace_path(&root.to_string_lossy()).expect("create test workspace");
@@ -476,6 +476,27 @@ mod tests {
         assert!(first.path.exists());
         assert!(second.path.exists());
         assert_eq!(first.path.parent(), second.path.parent());
+
+        let mut expected = vec![
+            (
+                first.data.created_at_unix,
+                first.key,
+                first.data.title.clone(),
+            ),
+            (
+                second.data.created_at_unix,
+                second.key,
+                second.data.title.clone(),
+            ),
+        ];
+        expected.sort_by_key(|(created_at, id, _)| (*created_at, *id));
+        let snapshot = load_workspace(&root).expect("reload workspace");
+        let actual = snapshot
+            .lists
+            .iter()
+            .map(|list| (list.data.created_at_unix, list.key, list.data.title.clone()))
+            .collect::<Vec<_>>();
+        assert_eq!(actual, expected);
 
         fs::remove_dir_all(root).expect("remove test workspace");
     }
