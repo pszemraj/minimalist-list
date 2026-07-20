@@ -1,10 +1,10 @@
 //! In-app workspace, appearance, and list settings.
 
-use super::{MinimalistApp, theme::Palette};
+use super::{MinimalistApp, text_input_shortcuts, theme::Palette};
 use crate::model::{Accent, FontChoice};
 use crate::storage;
 use eframe::egui;
-use egui::{Align, Button, CursorIcon, Id, Key, Label, Layout, ScrollArea, Sense, Stroke};
+use egui::{Align, Button, CursorIcon, Id, Label, Layout, ScrollArea, Sense, Stroke};
 use rfd::FileDialog;
 use uuid::Uuid;
 
@@ -78,7 +78,7 @@ impl MinimalistApp {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.label(self.rich("Enter applies", 12.0, palette.muted));
                 });
-                let enter = ui.input(|input| input.key_pressed(Key::Enter));
+                let (submit, _) = text_input_shortcuts(ui, &workspace_response);
                 if choose_folder {
                     if let Some(path) = FileDialog::new()
                         .set_title("Choose Minimalist List workspace")
@@ -88,10 +88,7 @@ impl MinimalistApp {
                         self.workspace_input = path.to_string_lossy().into_owned();
                         self.switch_workspace();
                     }
-                } else if use_folder
-                    || (enter
-                        && (workspace_response.has_focus() || workspace_response.lost_focus()))
-                {
+                } else if use_folder || submit {
                     self.switch_workspace();
                 }
             });
@@ -238,8 +235,8 @@ impl MinimalistApp {
                     rename_font,
                     palette,
                 );
-                let enter = ui.input(|input| input.key_pressed(Key::Enter));
-                if rename_response.lost_focus() || (enter && rename_response.has_focus()) {
+                let (submit, _) = text_input_shortcuts(ui, &rename_response);
+                if rename_response.lost_focus() || submit {
                     self.rename_list(list_id);
                 }
                 ui.add_space(5.0);

@@ -1,11 +1,13 @@
 //! Subtask, deletion, completion-clearing, and history views.
 
-use super::{CLEAR_ANIMATION_SECONDS, DELETE_ANIMATION_SECONDS, MinimalistApp, theme::Palette};
+use super::{
+    CLEAR_ANIMATION_SECONDS, DELETE_ANIMATION_SECONDS, MinimalistApp, text_input_shortcuts,
+    theme::Palette,
+};
 use crate::model::{ArchivedTask, Subtask, Task};
 use eframe::egui;
 use egui::{
-    Align, Button, CornerRadius, Frame, Id, Key, Layout, Margin, Rect, Sense, Stroke, TextEdit,
-    Vec2,
+    Align, Button, CornerRadius, Frame, Id, Layout, Margin, Rect, Sense, Stroke, TextEdit, Vec2,
 };
 use std::time::Instant;
 use uuid::Uuid;
@@ -118,8 +120,7 @@ impl MinimalistApp {
                         .hint_text("Add subtask")
                         .desired_width(f32::INFINITY),
                 );
-                let submit = ui.input(|input| input.key_pressed(Key::Enter))
-                    && (subtask_response.has_focus() || subtask_response.lost_focus());
+                let (submit, _) = text_input_shortcuts(ui, &subtask_response);
                 if submit {
                     self.add_subtask(list_id, task.id);
                     subtask_response.request_focus();

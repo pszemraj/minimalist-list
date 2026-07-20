@@ -26,6 +26,23 @@ const CLEAR_ANIMATION_SECONDS: f32 = 0.24;
 const DELETE_ANIMATION_SECONDS: f32 = 0.20;
 const INSERT_ANIMATION_SECONDS: f32 = 0.28;
 
+/// Reads submit/cancel shortcuts for a text field.
+///
+/// Keyboard state must be read before querying `Response` focus: `Ui::input` takes the
+/// context's exclusive lock, and focus queries re-enter that lock and self-deadlock.
+fn text_input_shortcuts(ui: &egui::Ui, response: &egui::Response) -> (bool, bool) {
+    let (enter, cancel) = ui.input(|input| {
+        (
+            input.key_pressed(egui::Key::Enter),
+            input.key_pressed(egui::Key::Escape),
+        )
+    });
+    (
+        enter && (response.has_focus() || response.lost_focus()),
+        cancel,
+    )
+}
+
 #[derive(Clone)]
 enum Screen {
     Overview,
@@ -598,5 +615,43 @@ impl eframe::App for MinimalistApp {
         }
         self.status_ui(&mut content_ui, palette);
         self.overlay_ui(ui.ctx(), palette);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn focused_enter_submits_without_nested_context_input() {
+        let ctx = egui::Context::default();
+        let field_id = egui::Id::new("text-input-shortcut-test");
+        let mut title = "Second".to_owned();
+
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            let response = ui.add(egui::TextEdit::singleline(&mut title).id(field_id));
+            response.request_focus();
+        });
+
+        let input = egui::RawInput {
+            events: vec![egui::Event::Key {
+                key: egui::Key::Enter,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::default(),
+            }],
+            ..Default::default()
+        };
+        let mut submitted = false;
+        let _ = ctx.run_ui(input, |ui| {
+            let response = ui.add(egui::TextEdit::singleline(&mut title).id(field_id));
+            let (submit, cancel) = text_input_shortcuts(ui, &response);
+            submitted = submit;
+            assert!(!cancel);
+        });
+
+        // Nesting the focus query inside `Ui::input` panics or hangs before this can become true.
+        assert!(submitted);
     }
 }

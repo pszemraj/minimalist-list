@@ -1,11 +1,11 @@
 //! Workspace overview and list-card interactions.
 
-use super::{MinimalistApp, theme::Palette};
+use super::{MinimalistApp, text_input_shortcuts, theme::Palette};
 use crate::model::Accent;
 use crate::storage;
 use eframe::egui;
 use egui::{
-    Align, Button, Color32, CornerRadius, CursorIcon, Frame, Id, Key, Label, Layout, Margin, Rect,
+    Align, Button, Color32, CornerRadius, CursorIcon, Frame, Id, Label, Layout, Margin, Rect,
     ScrollArea, Sense, Stroke, Vec2,
 };
 use uuid::Uuid;
@@ -126,13 +126,7 @@ impl MinimalistApp {
                                 }
                             });
                             ui.label(self.rich("Enter creates · Esc cancels", 12.0, palette.muted));
-                            let (submit, cancel) = ui.input(|input| {
-                                (
-                                    input.key_pressed(Key::Enter)
-                                        && (response.has_focus() || response.lost_focus()),
-                                    input.key_pressed(Key::Escape),
-                                )
-                            });
+                            let (submit, cancel) = text_input_shortcuts(ui, &response);
                             if submit {
                                 self.create_list();
                             } else if cancel {
@@ -258,6 +252,7 @@ impl MinimalistApp {
                 let id = list.key;
                 let path = list.path.clone();
                 self.lists.push(list);
+                storage::sort_lists(&mut self.lists);
                 self.new_list_title.clear();
                 self.creating_list = false;
                 if let Err(error) =
