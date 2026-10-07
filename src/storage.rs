@@ -385,7 +385,8 @@ fn stamp_from_metadata(metadata: &fs::Metadata) -> FileStamp {
 ///
 /// # Returns
 ///
-/// The application's directory beneath the platform data root.
+/// The application's directory beneath the platform data root, or an existing
+/// legacy workspace when the native directory does not exist.
 pub fn default_workspace_dir() -> PathBuf {
     #[cfg(target_os = "windows")]
     let root = env::var_os("LOCALAPPDATA")
@@ -395,7 +396,13 @@ pub fn default_workspace_dir() -> PathBuf {
     let root = home_dir().join("Library/Application Support");
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     let root = xdg_dir("XDG_DATA_HOME", ".local/share");
-    root.join(APP_DIR)
+    let preferred = root.join(APP_DIR);
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    let preferred = prefer_existing_path(
+        preferred,
+        xdg_dir("XDG_DATA_HOME", ".local/share").join(APP_DIR),
+    );
+    preferred
 }
 
 fn settings_path() -> PathBuf {
@@ -407,7 +414,24 @@ fn settings_path() -> PathBuf {
     let root = home_dir().join("Library/Application Support");
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     let root = xdg_dir("XDG_CONFIG_HOME", ".config");
-    root.join(APP_DIR).join("settings.json")
+    let preferred = root.join(APP_DIR).join("settings.json");
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    let preferred = prefer_existing_path(
+        preferred,
+        xdg_dir("XDG_CONFIG_HOME", ".config")
+            .join(APP_DIR)
+            .join("settings.json"),
+    );
+    preferred
+}
+
+#[cfg(any(target_os = "windows", target_os = "macos", test))]
+fn prefer_existing_path(preferred: PathBuf, legacy: PathBuf) -> PathBuf {
+    if !preferred.exists() && legacy.exists() {
+        legacy
+    } else {
+        preferred
+    }
 }
 
 fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
@@ -451,12 +475,18 @@ fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> Result<(), String>
     write_result
 }
 
-#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 fn xdg_dir(variable: &str, fallback: &str) -> PathBuf {
-    env::var_os(variable)
-        .filter(|value| !value.is_empty())
+    // Earlier versions used HOME on every platform, including Windows.
+    let home = env::var_os("HOME")
         .map(PathBuf::from)
-        .unwrap_or_else(|| home_dir().join(fallback))
+        .unwrap_or_else(|| PathBuf::from("."));
+    xdg_dir_from(home, env::var_os(variable).map(PathBuf::from), fallback)
+}
+
+fn xdg_dir_from(home: PathBuf, override_dir: Option<PathBuf>, fallback: &str) -> PathBuf {
+    override_dir
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| home.join(fallback))
 }
 
 fn home_dir() -> PathBuf {
@@ -501,6 +531,103 @@ mod tests {
 
     fn test_root() -> PathBuf {
         env::temp_dir().join(format!("minimalist-list-test-{}", Uuid::new_v4()))
+    }
+
+    #[test]
+    fn native_paths_reuse_legacy_locations_independently() {
+        let root = test_root();
+        for (native_root, settings_root) in [
+            ("Library/Application Support", "Library/Application Support"),
+            ("AppData/Local", "AppData/Roaming"),
+        ] {
+            let home = root.join(native_root.replace('/', "-"));
+            let preferred_workspace = home.join(native_root).join(APP_DIR);
+            let preferred_settings = home.join(settings_root).join(APP_DIR).join("settings.json");
+            let legacy_workspace = xdg_dir_from(home.clone(), None, ".local/share").join(APP_DIR);
+            let legacy_settings = xdg_dir_from(home.clone(), None, ".config")
+                .join(APP_DIR)
+                .join("settings.json");
+
+            assert_eq!(
+                prefer_existing_path(preferred_workspace.clone(), legacy_workspace.clone()),
+                preferred_workspace
+            );
+            assert_eq!(
+                prefer_existing_path(preferred_settings.clone(), legacy_settings.clone()),
+                preferred_settings
+            );
+            assert!(!preferred_workspace.exists());
+
+            let legacy_list =
+                create_list(&legacy_workspace, "Existing tasks", Accent::Mint).unwrap();
+            let settings = Settings {
+                workspace_path: home.join("chosen-workspace").to_string_lossy().into_owned(),
+                font_size: 24.0,
+                ..Settings::default()
+            };
+            write_json_atomic(&legacy_settings, &settings).unwrap();
+            let selected_workspace =
+                prefer_existing_path(preferred_workspace.clone(), legacy_workspace.clone());
+            assert_eq!(selected_workspace, legacy_workspace);
+            assert_eq!(
+                load_workspace(&selected_workspace).unwrap().lists[0]
+                    .data
+                    .title,
+                "Existing tasks"
+            );
+            let selected_settings =
+                prefer_existing_path(preferred_settings.clone(), legacy_settings.clone());
+            let reloaded: Settings =
+                serde_json::from_slice(&fs::read(&selected_settings).unwrap()).unwrap();
+            assert_eq!(selected_settings, legacy_settings);
+            assert_eq!(reloaded.workspace_path, settings.workspace_path);
+            assert_eq!(reloaded.font_size, 24.0);
+            assert!(legacy_list.path.exists());
+            assert!(!preferred_workspace.exists());
+
+            fs::create_dir_all(&preferred_workspace).unwrap();
+            assert_eq!(
+                prefer_existing_path(preferred_workspace.clone(), legacy_workspace),
+                preferred_workspace
+            );
+            // Creating the native workspace does not supersede legacy settings.
+            assert_eq!(
+                prefer_existing_path(preferred_settings.clone(), legacy_settings.clone()),
+                legacy_settings
+            );
+            write_json_atomic(&preferred_settings, &Settings::default()).unwrap();
+            assert_eq!(
+                prefer_existing_path(preferred_settings.clone(), legacy_settings),
+                preferred_settings
+            );
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn legacy_paths_keep_xdg_overrides_and_ignore_empty_values() {
+        let root = test_root();
+        let home = root.join("home");
+        for fallback in [".local/share", ".config"] {
+            assert_eq!(
+                xdg_dir_from(home.clone(), None, fallback),
+                home.join(fallback)
+            );
+            assert_eq!(
+                xdg_dir_from(home.clone(), Some(PathBuf::new()), fallback),
+                home.join(fallback)
+            );
+            let override_root = root.join(fallback.trim_start_matches('.'));
+            let legacy =
+                xdg_dir_from(home.clone(), Some(override_root.clone()), fallback).join(APP_DIR);
+            fs::create_dir_all(&legacy).unwrap();
+            assert_eq!(legacy, override_root.join(APP_DIR));
+            assert_eq!(
+                prefer_existing_path(home.join("native"), legacy.clone()),
+                legacy
+            );
+        }
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

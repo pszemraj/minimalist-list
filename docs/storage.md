@@ -41,6 +41,16 @@ Appearance, pinning, and workspace preferences are stored in the local settings 
 
 When the Windows environment variables are absent, paths fall back to `AppData\Local` and `AppData\Roaming` beneath the home directory.
 
+Earlier versions used the Linux-style XDG paths on macOS and Windows too. If the
+native default workspace directory does not exist, an existing
+`${XDG_DATA_HOME:-$HOME/.local/share}/minimalist-list/` is used. Independently, if
+the native settings file does not exist, an existing
+`${XDG_CONFIG_HOME:-$HOME/.config}/minimalist-list/settings.json` remains the
+settings file for both loading and saving. Legacy lookup uses `HOME`, including
+on Windows, as earlier versions did. No files are copied or moved. Fresh installs
+use the native defaults, and launch overrides and saved workspace selections
+keep the precedence shown above.
+
 ## File layout
 
 The workspace contains one JSON file per list and no shared index:
