@@ -53,6 +53,7 @@ impl MinimalistApp {
         if !self.tray.as_ref().is_some_and(Tray::available) {
             return false;
         }
+        self.finish_inline_edit();
         self.drag = None;
         self.hovered_title = None;
         self.window_hidden = true;
@@ -120,11 +121,15 @@ impl MinimalistApp {
         ctx.send_viewport_cmd(ViewportCommand::Close);
     }
 
-    fn finish_pending_changes(&mut self) {
-        self.drag = None;
+    fn finish_inline_edit(&mut self) {
         if let Some((list_id, task_id)) = self.editing {
             self.commit_task_edit(list_id, task_id, &self.edit_text.clone());
         }
+    }
+
+    fn finish_pending_changes(&mut self) {
+        self.drag = None;
+        self.finish_inline_edit();
         if let Some((list_id, task_id, _)) = self.delete_animation.take() {
             self.remove_task(list_id, task_id);
         }
@@ -139,6 +144,32 @@ mod tests {
     use super::*;
     use crate::app::tests::test_app;
     use crate::model::Task;
+
+    #[test]
+    fn finishing_inline_edit_saves_and_unblocks_external_reloads() {
+        let (_, mut app) = test_app();
+        let list_id = app.lists[0].key;
+        let task = Task::new("Before editing");
+        app.editing = Some((list_id, task.id));
+        app.edit_text = "Saved before hiding".into();
+        app.lists[0].data.tasks = vec![task];
+
+        app.finish_inline_edit();
+        assert!(app.editing.is_none());
+        let mut saved = crate::storage::load_workspace(&app.workspace).unwrap();
+        assert_eq!(saved.lists[0].data.tasks[0].text, "Saved before hiding");
+
+        saved.lists[0].data.tasks[0].text = "Changed on another computer".into();
+        crate::storage::save_list(&saved.lists[0]).unwrap();
+        app.window_hidden = true;
+        app.next_scan = Instant::now();
+        app.scan_external_changes();
+        assert_eq!(
+            app.lists[0].data.tasks[0].text,
+            "Changed on another computer"
+        );
+        std::fs::remove_dir_all(&app.workspace).unwrap();
+    }
 
     #[test]
     fn quit_flushes_inline_edit_and_pending_mutations_to_disk() {

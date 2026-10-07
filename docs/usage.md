@@ -36,7 +36,7 @@ Select **Show history**, then **Restore** to return a task to the bottom of the 
 
 The header's `pin` control toggles always-on-top mode. When native window decorations are disabled, drag the title to move the window and use the visible `x` control to close it.
 
-Closing or minimizing the window hides it in the system tray. Open the tray icon's menu and choose **Show Minimalist List** to restore it or **Quit** to exit. Activating the icon also restores the window on desktops that support it. Tasks remain saved, and shared-folder polling continues while hidden.
+Closing or minimizing the window saves any inline edit and hides it in the system tray. Open the tray icon's menu and choose **Show Minimalist List** to restore it or **Quit** to exit. Activating the icon also restores the window on desktops that support it. Shared-folder polling continues while hidden.
 
 Linux uses X11 or XWayland for hiding and restoration. A desktop tray host is required, such as GNOME's AppIndicator extension or KDE's system tray. If tray support is unavailable, the app reports it and close/minimize retain their normal behavior.
 
