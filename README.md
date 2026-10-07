@@ -20,7 +20,7 @@ The interface takes its low-chrome, typography-led interaction style from Minima
 
 ## Install and run
 
-Minimalist List requires Rust 1.92 or newer. On Ubuntu, install the native windowing and OpenGL build dependencies:
+Minimalist List requires Rust 1.95 or newer on Linux, macOS, or Windows. On Ubuntu, install the native windowing and OpenGL build dependencies:
 
 ```bash
 sudo apt install \
@@ -38,6 +38,12 @@ Clone the repository and run the application:
 git clone https://github.com/pszemraj/minimalist-list.git
 cd minimalist-list
 cargo run
+```
+
+Verify the installed version without opening a window:
+
+```bash
+cargo run -- --version
 ```
 
 Build and run an optimized binary with:
@@ -63,11 +69,13 @@ The desktop entry expects `minimalist-list` to be available on the desktop sessi
 
 Open a list and type into the field at the top. Enter adds the task and returns focus to the field.
 
+Long titles stay on one line and scroll while hovered. Choose **Settings -> Appearance -> Long titles -> Wrap** for full, wrapping text instead. The window starts at 85% background opacity; adjust it in Appearance while text and controls remain crisp. The `pin` action keeps the window above other applications.
+
 Quick add and Find work from any screen while the application is focused. The [usage guide](docs/usage.md) covers shortcuts, gestures, navigation, history, and appearance settings.
 
 ## Data and sync
 
-The application uses local JSON files and can place its workspace in Dropbox or a similar service. See [storage and sync](docs/storage.md) for paths, workspace selection, file behavior, and the JSON format.
+Choose any workspace folder through **Settings -> Workspace**. Local folders and temporary directories work directly; for multiple computers, select the same folder inside a file-sync service on each computer. Edits save immediately, and the app checks disk for external changes every five seconds. Dropbox is one compatible option, and no provider integration is required. See [storage and sync](docs/storage.md) for paths, workspace selection, file behavior, and the JSON format.
 
 ## Documentation
 

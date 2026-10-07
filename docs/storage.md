@@ -2,16 +2,18 @@
 
 ## Workspace location
 
-The default workspace is an XDG data directory:
+On Linux, the default workspace is an XDG data directory:
 
 ```text
 ${XDG_DATA_HOME:-$HOME/.local/share}/minimalist-list/
 ```
 
-Change it through **Settings -> Workspace** with the native folder chooser or typed path field. Paths beginning with `~/` are expanded. Relative paths are resolved from the process working directory and stored as absolute runtime paths.
+On macOS it is `~/Library/Application Support/minimalist-list/`; on Windows it is `%LOCALAPPDATA%\minimalist-list\` (falling back to the home directory's `AppData\Local`).
+
+Change it through **Settings -> Workspace** with the native folder chooser or typed path field. The active folder is shown above the field. Any writable folder works, including a temporary directory. Selecting a folder opens its lists without moving the previous workspace's files. Paths beginning with `~/` are expanded. Relative paths are resolved from the process working directory and stored as absolute runtime paths.
 
 > [!TIP]
-> Point the workspace at any folder already managed by your preferred sync service. Minimalist List uses ordinary files and does not require a provider-specific integration.
+> For multiple computers, select the same shared subfolder once on each computer. Each installation remembers its own local path, even when the sync root is different. Minimalist List uses ordinary files and does not require a provider-specific integration.
 
 Use `--data-dir` to select a workspace for one launch:
 
@@ -57,7 +59,9 @@ Edits to different lists write different files, so file-sync services can transf
 
 If a sync service creates a conflict copy containing the same list UUID, the canonical UUID-named file wins. The conflict copy remains untouched and the application reports it.
 
-Every edit is saved automatically through a temporary sibling file that is flushed and renamed over the destination. The workspace is rescanned roughly every 800 ms, and externally changed list files are reloaded. There is no lock file, database, sync protocol, background daemon, or automatic conflict merge.
+Every edit is saved automatically through a temporary sibling file that is flushed and renamed over the destination. While the app is running, the workspace is rescanned every five seconds, and externally changed list files are reloaded. Reloads wait until inline editing or dragging finishes. A sync service controls when a file arrives on another computer; the polling interval starts from the local file's arrival. There is no lock file, database, sync protocol, background daemon, or automatic conflict merge.
+
+Appearance, pinning, and workspace preferences stay local to each computer in `settings.json`: Linux uses `${XDG_CONFIG_HOME:-$HOME/.config}/minimalist-list/`, macOS uses `~/Library/Application Support/minimalist-list/`, and Windows uses `%APPDATA%\minimalist-list\` (falling back to `AppData\Roaming` in the home directory).
 
 ## JSON format
 

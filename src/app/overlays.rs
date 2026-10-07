@@ -1,6 +1,6 @@
 //! Quick-capture and cross-list search overlays.
 
-use super::{MinimalistApp, Screen, theme::Palette};
+use super::{MinimalistApp, Screen, text_input_shortcuts, theme::Palette};
 use crate::model::{Subtask, Task};
 use crate::storage::StoredList;
 use eframe::egui;
@@ -151,55 +151,67 @@ impl MinimalistApp {
 
         let mut submit = false;
         let modal = Modal::new(Id::new("quick-capture-modal")).show(ctx, |ui| {
-            ui.set_width(410.0);
-            ui.label(self.rich("Quick add", 22.0, palette.text));
-            ui.add_space(8.0);
-            let response = ui.add(
-                TextEdit::singleline(&mut state.text)
-                    .font(self.font_id(self.settings.font_size.min(22.0)))
-                    .hint_text("What needs doing?")
-                    .desired_width(f32::INFINITY),
-            );
-            if state.request_focus {
-                response.request_focus();
-                state.request_focus = false;
-            }
+            let available = ctx.content_rect().size() - egui::vec2(32.0, 32.0);
+            ui.set_width(410.0_f32.min(available.x));
+            ScrollArea::vertical()
+                .max_height(available.y - 16.0)
+                .show(ui, |ui| {
+                    ui.label(self.rich("Quick add", 22.0, palette.text));
+                    ui.add_space(8.0);
+                    let response = ui.add(
+                        TextEdit::singleline(&mut state.text)
+                            .id(Id::new("quick-capture-text"))
+                            .font(self.font_id(self.settings.font_size.min(22.0)))
+                            .hint_text("What needs doing?")
+                            .desired_width(f32::INFINITY),
+                    );
+                    if state.request_focus {
+                        response.request_focus();
+                        state.request_focus = false;
+                    }
 
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                ui.label(self.rich("List", 13.0, palette.muted));
-                let selected_title = state
-                    .selected_list_id
-                    .and_then(|id| {
-                        choices
-                            .iter()
-                            .find(|(candidate, _)| *candidate == id)
-                            .map(|(_, title)| title.as_str())
-                    })
-                    .unwrap_or("Choose a list");
-                ComboBox::from_id_salt("quick-capture-list")
-                    .selected_text(self.rich(selected_title, 14.0, palette.text))
-                    .show_ui(ui, |ui| {
-                        for (id, title) in &choices {
-                            ui.selectable_value(
-                                &mut state.selected_list_id,
-                                Some(*id),
-                                self.rich(title, 14.0, palette.text),
-                            );
-                        }
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        ui.label(self.rich("List", 13.0, palette.muted));
+                        let selected_title = state
+                            .selected_list_id
+                            .and_then(|id| {
+                                choices
+                                    .iter()
+                                    .find(|(candidate, _)| *candidate == id)
+                                    .map(|(_, title)| title.as_str())
+                            })
+                            .unwrap_or("Choose a list");
+                        ComboBox::from_id_salt("quick-capture-list")
+                            .width(ui.available_width())
+                            .wrap_mode(egui::TextWrapMode::Truncate)
+                            .selected_text(self.rich(selected_title, 14.0, palette.text))
+                            .show_ui(ui, |ui| {
+                                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+                                for (id, title) in &choices {
+                                    ui.selectable_value(
+                                        &mut state.selected_list_id,
+                                        Some(*id),
+                                        self.rich(title, 14.0, palette.text),
+                                    );
+                                }
+                            });
                     });
-            });
 
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                ui.label(self.rich("Enter adds · Esc cancels", 12.0, palette.muted));
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    submit |= ui
-                        .add(Button::new(self.rich("Add", 14.0, palette.accent)).frame(false))
-                        .clicked();
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        ui.label(self.rich("Enter adds · Esc cancels", 12.0, palette.muted));
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            submit |= ui
+                                .add(
+                                    Button::new(self.rich("Add", 14.0, palette.accent))
+                                        .frame(false),
+                                )
+                                .clicked();
+                        });
+                    });
+                    submit |= text_input_shortcuts(ui, &response).0;
                 });
-            });
-            submit |= response.has_focus() && ui.input(|input| input.key_pressed(Key::Enter));
         });
 
         if submit {
@@ -229,91 +241,104 @@ impl MinimalistApp {
         };
         let mut activated = None;
         let modal = Modal::new(Id::new("find-modal")).show(ctx, |ui| {
-            ui.set_width(500.0);
-            ui.label(self.rich("Find anything", 22.0, palette.text));
-            ui.add_space(8.0);
-            let previous_query = state.query.clone();
-            let response = ui.add(
-                TextEdit::singleline(&mut state.query)
-                    .font(self.font_id(18.0))
-                    .hint_text("Search tasks and history")
-                    .desired_width(f32::INFINITY),
-            );
-            if state.request_focus {
-                response.request_focus();
-                state.request_focus = false;
-            }
-            if state.query != previous_query {
-                state.selected = 0;
-            }
+            let available = ctx.content_rect().size() - egui::vec2(32.0, 32.0);
+            ui.set_width(500.0_f32.min(available.x));
+            ScrollArea::vertical()
+                .max_height(available.y - 16.0)
+                .show(ui, |ui| {
+                    ui.label(self.rich("Find anything", 22.0, palette.text));
+                    ui.add_space(8.0);
+                    let previous_query = state.query.clone();
+                    let response = ui.add(
+                        TextEdit::singleline(&mut state.query)
+                            .id(Id::new("find-query"))
+                            .font(self.font_id(18.0))
+                            .hint_text("Search tasks and history")
+                            .desired_width(f32::INFINITY),
+                    );
+                    if state.request_focus {
+                        response.request_focus();
+                        state.request_focus = false;
+                    }
+                    if state.query != previous_query {
+                        state.selected = 0;
+                    }
 
-            let hits = search_hits(&self.lists, &state.query);
-            if hits.is_empty() {
-                state.selected = 0;
-            } else {
-                state.selected = state.selected.min(hits.len() - 1);
-                let (down, up) = ui.input(|input| {
-                    (
-                        input.key_pressed(Key::ArrowDown),
-                        input.key_pressed(Key::ArrowUp),
-                    )
-                });
-                if down {
-                    state.selected = (state.selected + 1) % hits.len();
-                } else if up {
-                    state.selected = (state.selected + hits.len() - 1) % hits.len();
-                }
-                if response.has_focus() && ui.input(|input| input.key_pressed(Key::Enter)) {
-                    activated = hits.get(state.selected).cloned();
-                }
-            }
-
-            ui.add_space(8.0);
-            if state.query.trim().is_empty() {
-                ui.label(self.rich("Type part of a task or subtask.", 13.0, palette.muted));
-            } else if hits.is_empty() {
-                ui.label(self.rich("No matches.", 14.0, palette.muted));
-            } else {
-                ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
-                    for (index, hit) in hits.iter().enumerate() {
-                        let selected = state.selected == index;
-                        let label = if let Some(subtask) = &hit.subtask_text {
-                            format!(
-                                "{subtask}\n↳ {} · {} · {}",
-                                hit.task_text,
-                                hit.list_title,
-                                hit.state.label()
+                    let hits = search_hits(&self.lists, &state.query);
+                    if hits.is_empty() {
+                        state.selected = 0;
+                    } else {
+                        state.selected = state.selected.min(hits.len() - 1);
+                        let (down, up) = ui.input(|input| {
+                            (
+                                input.key_pressed(Key::ArrowDown),
+                                input.key_pressed(Key::ArrowUp),
                             )
-                        } else {
-                            format!(
-                                "{}\n{} · {}",
-                                hit.task_text,
-                                hit.list_title,
-                                hit.state.label()
-                            )
-                        };
-                        let result = ui.add_sized(
-                            [ui.available_width(), 58.0],
-                            Button::new(self.rich(label, 14.0, palette.text))
-                                .fill(if selected {
-                                    palette.raised
-                                } else {
-                                    palette.surface
-                                })
-                                .corner_radius(CornerRadius::same(10)),
-                        );
-                        if selected {
-                            result.scroll_to_me(Some(Align::Center));
+                        });
+                        if down {
+                            state.selected = (state.selected + 1) % hits.len();
+                        } else if up {
+                            state.selected = (state.selected + hits.len() - 1) % hits.len();
                         }
-                        if result.clicked() {
-                            activated = Some(hit.clone());
+                        if text_input_shortcuts(ui, &response).0 {
+                            activated = hits.get(state.selected).cloned();
                         }
                     }
-                });
-            }
 
-            ui.add_space(6.0);
-            ui.label(self.rich("↑↓ selects · Enter opens · Esc closes", 12.0, palette.muted));
+                    ui.add_space(8.0);
+                    if state.query.trim().is_empty() {
+                        ui.label(self.rich("Type part of a task or subtask.", 13.0, palette.muted));
+                    } else if hits.is_empty() {
+                        ui.label(self.rich("No matches.", 14.0, palette.muted));
+                    } else {
+                        ScrollArea::vertical()
+                            .id_salt("find-results")
+                            .max_height((available.y - 150.0).max(40.0))
+                            .show(ui, |ui| {
+                                for (index, hit) in hits.iter().enumerate() {
+                                    let selected = state.selected == index;
+                                    let label = if let Some(subtask) = &hit.subtask_text {
+                                        format!(
+                                            "{subtask}\n↳ {} · {} · {}",
+                                            hit.task_text,
+                                            hit.list_title,
+                                            hit.state.label()
+                                        )
+                                    } else {
+                                        format!(
+                                            "{}\n{} · {}",
+                                            hit.task_text,
+                                            hit.list_title,
+                                            hit.state.label()
+                                        )
+                                    };
+                                    let result = ui.add_sized(
+                                        [ui.available_width(), 58.0],
+                                        Button::new(self.rich(label, 14.0, palette.text))
+                                            .fill(if selected {
+                                                palette.raised
+                                            } else {
+                                                palette.surface
+                                            })
+                                            .corner_radius(CornerRadius::same(10)),
+                                    );
+                                    if selected {
+                                        result.scroll_to_me(Some(Align::Center));
+                                    }
+                                    if result.clicked() {
+                                        activated = Some(hit.clone());
+                                    }
+                                }
+                            });
+                    }
+
+                    ui.add_space(6.0);
+                    ui.label(self.rich(
+                        "↑↓ selects · Enter opens · Esc closes",
+                        12.0,
+                        palette.muted,
+                    ));
+                });
         });
 
         if let Some(hit) = activated {
@@ -428,6 +453,42 @@ mod tests {
             path: PathBuf::from(format!("{title}.json")),
             data,
         }
+    }
+
+    #[test]
+    fn quick_add_long_list_name_keeps_entry_and_add_inside_small_viewport() {
+        let (ctx, mut app) = super::super::tests::test_app();
+        app.lists[0].data.title = "A very long list name describing preparations for an international workshop and all its participating research groups".to_owned();
+        app.open_quick_capture(Some(app.lists[0].key));
+        let viewport = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(320.0, 280.0));
+        let palette = app.palette();
+        for frame in 0..3 {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(viewport),
+                    ..Default::default()
+                },
+                |_| app.overlay_ui(&ctx, palette),
+            );
+            output.textures_delta.clear();
+            if frame < 2 {
+                continue;
+            }
+            let entry = ctx.read_response(Id::new("quick-capture-text")).unwrap();
+            assert!(viewport.contains_rect(entry.rect));
+            let add = output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::epaint::Shape::Text(text) if text.galley.text() == "Add" => {
+                        Some(egui::Rect::from_min_size(text.pos, text.galley.size()))
+                    }
+                    _ => None,
+                })
+                .expect("Add must remain visible");
+            assert!(viewport.contains_rect(add));
+        }
+        std::fs::remove_dir_all(&app.workspace).unwrap();
     }
 
     #[test]

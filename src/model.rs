@@ -54,6 +54,14 @@ pub enum FontChoice {
     Mono,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// How task titles that exceed their available width are displayed.
+pub enum TitleOverflow {
+    #[default]
+    Scroll,
+    Wrap,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 /// A persisted task list with its live tasks and archive.
 pub struct TodoList {

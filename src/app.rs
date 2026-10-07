@@ -5,6 +5,7 @@ mod overlays;
 mod overview;
 mod settings;
 mod task_details;
+mod task_text;
 mod theme;
 
 use self::overlays::{FindState, QuickCaptureState, Spotlight};
@@ -18,10 +19,9 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use uuid::Uuid;
 
-const SCAN_INTERVAL: Duration = Duration::from_millis(800);
+const SCAN_INTERVAL: Duration = Duration::from_secs(5);
 const SWIPE_COMPLETE: f32 = 78.0;
 const SWIPE_ACTIONS: f32 = 64.0;
-const ROW_HEIGHT: f32 = 58.0;
 const CLEAR_ANIMATION_SECONDS: f32 = 0.24;
 const DELETE_ANIMATION_SECONDS: f32 = 0.20;
 const INSERT_ANIMATION_SECONDS: f32 = 0.28;
@@ -57,6 +57,8 @@ struct DragState {
     source: usize,
     target: usize,
     delta: Vec2,
+    source_center: f32,
+    height: f32,
 }
 
 /// Owns the loaded workspace and all transient state for the native UI.
@@ -104,6 +106,7 @@ pub struct MinimalistApp {
     find: Option<FindState>,
     spotlight: Option<Spotlight>,
     last_motion_tick: Instant,
+    hovered_title: Option<(Uuid, Instant)>,
 }
 
 impl MinimalistApp {
@@ -111,7 +114,7 @@ impl MinimalistApp {
     ///
     /// # Arguments
     ///
-    /// - `cc` - Native application creation context.
+    /// - `ctx` - Egui context used to configure the interface.
     /// - `settings` - Persisted preferences to apply.
     /// - `workspace_override` - Optional workspace path supplied for this launch.
     /// - `startup_warning` - Optional warning to show after startup.
@@ -120,13 +123,15 @@ impl MinimalistApp {
     ///
     /// A fully initialized application state.
     pub fn new(
-        cc: &eframe::CreationContext<'_>,
+        ctx: &egui::Context,
         mut settings: Settings,
         workspace_override: Option<String>,
         startup_warning: Option<String>,
     ) -> Self {
-        cc.egui_ctx.set_visuals(egui::Visuals::dark());
-        cc.egui_ctx.global_style_mut(|style| {
+        let mut visuals = egui::Visuals::dark();
+        visuals.panel_fill = Color32::TRANSPARENT;
+        ctx.set_visuals(visuals);
+        ctx.global_style_mut(|style| {
             style.animation_time = 0.18;
             style.spacing.item_spacing = Vec2::new(8.0, 8.0);
             style.spacing.button_padding = Vec2::new(10.0, 6.0);
@@ -216,6 +221,7 @@ impl MinimalistApp {
             find: None,
             spotlight: None,
             last_motion_tick: Instant::now(),
+            hovered_title: None,
         }
     }
 
@@ -348,6 +354,8 @@ impl MinimalistApp {
     }
 
     fn begin_transition(&mut self, direction: f32) {
+        self.drag = None;
+        self.hovered_title = None;
         self.view_zoom = 0.0;
         self.transition_direction = direction.signum();
         self.last_motion_tick = Instant::now();
@@ -521,6 +529,10 @@ impl MinimalistApp {
 }
 
 impl eframe::App for MinimalistApp {
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        [0.0; 4]
+    }
+
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.apply_window_preferences(ctx);
         self.update_motion(ctx);
@@ -543,7 +555,7 @@ impl eframe::App for MinimalistApp {
             visuals.extreme_bg_color = palette.raised;
             visuals.text_edit_bg_color = Some(palette.raised);
             visuals.code_bg_color = palette.surface;
-            visuals.panel_fill = palette.background;
+            visuals.panel_fill = Color32::TRANSPARENT;
             visuals.window_fill = palette.surface;
             visuals.window_stroke = Stroke::new(1.0, palette.raised);
             visuals.slider_trailing_fill = true;
@@ -580,7 +592,13 @@ impl eframe::App for MinimalistApp {
         }
 
         let viewport = ui.max_rect();
-        ui.painter().rect_filled(viewport, 0.0, palette.background);
+        ui.painter().rect_filled(
+            viewport,
+            0.0,
+            palette
+                .background
+                .linear_multiply(self.settings.background_opacity),
+        );
         ui.painter().circle_filled(
             viewport.right_top() + Vec2::new(-54.0, 24.0),
             210.0,
@@ -594,7 +612,7 @@ impl eframe::App for MinimalistApp {
 
         let presentation = self.view_presentation();
         let eased = egui::emath::easing::cubic_out(presentation);
-        let margin = 22.0 + (1.0 - eased) * 10.0;
+        let margin = 16.0 + (1.0 - eased) * 10.0;
         let offset = Vec2::new(
             (1.0 - eased) * 14.0 * self.transition_direction,
             (1.0 - eased) * 10.0,
@@ -622,13 +640,29 @@ impl eframe::App for MinimalistApp {
 mod tests {
     use super::*;
 
+    /// Runs a headless UI frame and discards texture updates without a renderer.
+    ///
+    /// # Arguments
+    ///
+    /// - `ctx` - Context retaining focus and widget state between frames.
+    /// - `input` - Simulated frame input.
+    /// - `render` - UI to render during the frame.
+    pub(super) fn run_frame(
+        ctx: &egui::Context,
+        input: egui::RawInput,
+        render: impl FnMut(&mut egui::Ui),
+    ) {
+        let mut output = ctx.run_ui(input, render);
+        output.textures_delta.clear();
+    }
+
     #[test]
     fn focused_enter_submits_without_nested_context_input() {
         let ctx = egui::Context::default();
         let field_id = egui::Id::new("text-input-shortcut-test");
         let mut title = "Second".to_owned();
 
-        let _ = ctx.run_ui(Default::default(), |ui| {
+        run_frame(&ctx, Default::default(), |ui| {
             let response = ui.add(egui::TextEdit::singleline(&mut title).id(field_id));
             response.request_focus();
         });
@@ -644,8 +678,10 @@ mod tests {
             ..Default::default()
         };
         let mut submitted = false;
-        let _ = ctx.run_ui(input, |ui| {
+        run_frame(&ctx, input, |ui| {
             let response = ui.add(egui::TextEdit::singleline(&mut title).id(field_id));
+            assert!(response.lost_focus());
+            assert!(!response.has_focus());
             let (submit, cancel) = text_input_shortcuts(ui, &response);
             submitted = submit;
             assert!(!cancel);
@@ -653,5 +689,185 @@ mod tests {
 
         // Nesting the focus query inside `Ui::input` panics or hangs before this can become true.
         assert!(submitted);
+    }
+
+    /// Creates an application whose task files are confined to a temporary workspace.
+    ///
+    /// # Returns
+    ///
+    /// A context and application ready for isolated UI tests.
+    pub(super) fn test_app() -> (egui::Context, MinimalistApp) {
+        let ctx = egui::Context::default();
+        let workspace = std::env::temp_dir().join(format!("minimalist-list-ui-{}", Uuid::new_v4()));
+        let settings = Settings {
+            workspace_path: workspace.to_string_lossy().into_owned(),
+            ..Settings::default()
+        };
+        let app = MinimalistApp::new(&ctx, settings, None, None);
+        (ctx, app)
+    }
+
+    fn enter_events() -> Vec<egui::Event> {
+        [true, false]
+            .into_iter()
+            .map(|pressed| egui::Event::Key {
+                key: egui::Key::Enter,
+                physical_key: None,
+                pressed,
+                repeat: false,
+                modifiers: egui::Modifiers::default(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn view_changes_and_task_removal_cancel_drags() {
+        let (ctx, mut app) = test_app();
+        let list_id = app.lists[0].key;
+        let mut task = crate::model::Task::new("Completed last task");
+        task.completed = true;
+        let task_id = task.id;
+        app.lists[0].data.tasks = vec![crate::model::Task::new("Active"), task];
+        let drag = DragState {
+            list_id,
+            task_id,
+            source: 1,
+            target: 1,
+            delta: Vec2::ZERO,
+            source_center: 200.0,
+            height: 36.0,
+        };
+        app.drag = Some(drag.clone());
+        app.begin_transition(1.0);
+        assert!(app.drag.is_none());
+
+        app.drag = Some(drag);
+        app.archive_completed(list_id);
+        assert!(app.drag.is_none());
+        assert_eq!(app.lists[0].data.tasks.len(), 1);
+        let palette = app.palette();
+        run_frame(&ctx, Default::default(), |ui| {
+            app.list_ui(ui, list_id, palette)
+        });
+
+        app.drag = Some(DragState {
+            list_id,
+            task_id: app.lists[0].data.tasks[0].id,
+            source: 0,
+            target: 0,
+            delta: Vec2::ZERO,
+            source_center: 160.0,
+            height: 36.0,
+        });
+        app.remove_task(list_id, app.lists[0].data.tasks[0].id);
+        assert!(app.drag.is_none());
+        run_frame(&ctx, Default::default(), |ui| {
+            app.list_ui(ui, list_id, palette)
+        });
+        std::fs::remove_dir_all(&app.workspace).unwrap();
+    }
+
+    #[test]
+    fn task_row_focus_survives_insertion_and_reordering() {
+        let (ctx, mut app) = test_app();
+        let list_id = app.lists[0].key;
+        app.lists[0].data.tasks = vec![
+            crate::model::Task::new("Packing"),
+            crate::model::Task::new("Laundry"),
+        ];
+        app.request_task_focus = true;
+        let palette = app.palette();
+        run_frame(&ctx, Default::default(), |ui| {
+            app.list_ui(ui, list_id, palette)
+        });
+        for _ in 0..2 {
+            run_frame(
+                &ctx,
+                egui::RawInput {
+                    events: [true, false]
+                        .into_iter()
+                        .map(|pressed| egui::Event::Key {
+                            key: egui::Key::Tab,
+                            physical_key: None,
+                            pressed,
+                            repeat: false,
+                            modifiers: egui::Modifiers::default(),
+                        })
+                        .collect(),
+                    ..Default::default()
+                },
+                |ui| app.list_ui(ui, list_id, palette),
+            );
+        }
+        let focused = ctx.memory(|memory| memory.focused()).unwrap();
+        let before = ctx.read_response(focused).unwrap().rect;
+        assert!(before.top() > 100.0);
+        assert!(before.height() > 20.0);
+        app.lists[0]
+            .data
+            .tasks
+            .insert(0, crate::model::Task::new("New task"));
+        app.lists[0].data.tasks.reverse();
+        for _ in 0..2 {
+            run_frame(&ctx, Default::default(), |ui| {
+                app.list_ui(ui, list_id, palette)
+            });
+        }
+        let after = ctx.read_response(focused).unwrap();
+        assert!(after.has_focus());
+        assert!(
+            after.rect.top() > before.top(),
+            "{focused:?}: {before:?} -> {:?}",
+            after.rect
+        );
+        std::fs::remove_dir_all(&app.workspace).unwrap();
+    }
+
+    #[test]
+    fn subtask_capture_keeps_focus_after_rows_are_inserted() {
+        let (ctx, mut app) = test_app();
+        let list_id = app.lists[0].key;
+        let task = crate::model::Task::new("Packing");
+        app.lists[0].data.tasks.push(task.clone());
+        let field = egui::Id::new(("new-subtask", list_id, task.id));
+        let palette = app.palette();
+        run_frame(&ctx, Default::default(), |ui| {
+            app.subtasks_panel(ui, list_id, &task, palette, 1.0)
+        });
+        ctx.memory_mut(|memory| memory.request_focus(field));
+        for text in ["Charger", "Passport"] {
+            let task = app.lists[0].data.tasks[0].clone();
+            run_frame(
+                &ctx,
+                egui::RawInput {
+                    events: vec![egui::Event::Text(text.to_owned())],
+                    ..Default::default()
+                },
+                |ui| app.subtasks_panel(ui, list_id, &task, palette, 1.0),
+            );
+            run_frame(
+                &ctx,
+                egui::RawInput {
+                    events: enter_events(),
+                    ..Default::default()
+                },
+                |ui| app.subtasks_panel(ui, list_id, &task, palette, 1.0),
+            );
+            let task = app.lists[0].data.tasks[0].clone();
+            run_frame(&ctx, Default::default(), |ui| {
+                app.subtasks_panel(ui, list_id, &task, palette, 1.0)
+            });
+            assert!(ctx.memory(|memory| memory.has_focus(field)));
+            assert!(app.new_subtask.is_empty());
+        }
+        assert_eq!(
+            app.lists[0].data.tasks[0]
+                .subtasks
+                .iter()
+                .map(|subtask| subtask.text.as_str())
+                .collect::<Vec<_>>(),
+            ["Charger", "Passport"]
+        );
+        std::fs::remove_dir_all(&app.workspace).unwrap();
     }
 }

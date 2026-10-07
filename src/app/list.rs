@@ -1,8 +1,8 @@
 //! Task-list screen and direct task interactions.
 
 use super::{
-    DragState, INSERT_ANIMATION_SECONDS, MinimalistApp, ROW_HEIGHT, SWIPE_ACTIONS, SWIPE_COMPLETE,
-    text_input_shortcuts, theme::Palette,
+    DragState, INSERT_ANIMATION_SECONDS, MinimalistApp, SWIPE_ACTIONS, SWIPE_COMPLETE,
+    task_text::reorder_target, text_input_shortcuts, theme::Palette,
 };
 use crate::model::Task;
 use eframe::egui;
@@ -42,6 +42,7 @@ impl MinimalistApp {
             .show(ui, |ui| {
                 ui.add(
                     TextEdit::singleline(&mut self.new_task)
+                        .id(Id::new(("new-task", list_id)))
                         .font(task_font)
                         .hint_text("Type a task and press Enter")
                         .desired_width(f32::INFINITY)
@@ -86,26 +87,36 @@ impl MinimalistApp {
         let archive_count = self.lists[index].data.archive.len();
         let completed_count = self.lists[index].data.completed_count();
         let mut action: Option<RowAction> = None;
+        let mut row_centers = Vec::new();
+        let mut row_heights = Vec::new();
 
         ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 for (task_index, task) in tasks.iter().enumerate() {
+                    let row_top = ui.next_widget_position().y;
+                    let galley = self.task_galley(ui, &task.text, ui.available_width() - 126.0);
+                    let row_height = self.task_row_height(&galley);
+                    row_centers.push(row_top + row_height * 0.5);
                     let entry_progress = self.task_entry_progress(task.id);
                     let removal_progress = self
                         .clear_progress(list_id, task.completed)
                         .max(self.delete_progress(list_id, task.id));
-                    let row_action = self.task_row(ui, list_id, task_index, task, palette);
+                    let row_action = ui
+                        .scope_builder(
+                            egui::UiBuilder::new().id(Id::new(("task-row", list_id, task.id))),
+                            |ui| self.task_row(ui, list_id, task_index, task, palette),
+                        )
+                        .inner;
+                    row_heights.push(ui.next_widget_position().y - row_top);
                     if row_action.is_some() {
                         action = row_action;
                     }
                     if entry_progress < 1.0 {
-                        ui.add_space(
-                            -(ROW_HEIGHT + self.settings.row_padding) * (1.0 - entry_progress),
-                        );
+                        ui.add_space(-row_height * (1.0 - entry_progress));
                     }
                     if removal_progress > 0.0 {
-                        ui.add_space(-(ROW_HEIGHT + self.settings.row_padding) * removal_progress);
+                        ui.add_space(-row_height * removal_progress);
                     }
                 }
                 if tasks.is_empty() {
@@ -158,6 +169,10 @@ impl MinimalistApp {
                 }
             });
 
+        if let Some(drag) = &mut self.drag {
+            drag.target = reorder_target(&row_centers, drag.source_center + drag.delta.y);
+            drag.height = row_heights[drag.source];
+        }
         if let Some(action) = action {
             self.apply_row_action(action);
         }
@@ -208,7 +223,7 @@ impl MinimalistApp {
 
     fn task_row(
         &mut self,
-        ui: &mut egui::Ui,
+        parent_ui: &mut egui::Ui,
         list_id: Uuid,
         task_index: usize,
         task: &Task,
@@ -218,13 +233,20 @@ impl MinimalistApp {
         let clear_progress = self.clear_progress(list_id, task.completed);
         let delete_progress = self.delete_progress(list_id, task.id);
         let removal_progress = clear_progress.max(delete_progress);
-        let desired = Vec2::new(ui.available_width(), ROW_HEIGHT + self.settings.row_padding);
+        let galley = self.task_galley(parent_ui, &task.text, parent_ui.available_width() - 126.0);
+        let desired = Vec2::new(parent_ui.available_width(), self.task_row_height(&galley));
         let sense = if removal_progress > 0.0 {
             Sense::hover()
         } else {
             Sense::click_and_drag()
         };
-        let (rect, response) = ui.allocate_exact_size(desired, sense);
+        let (rect, response) = parent_ui.allocate_exact_size(desired, sense);
+        let mut row_ui = parent_ui.new_child(
+            egui::UiBuilder::new()
+                .id_salt(("row", task.id))
+                .max_rect(rect),
+        );
+        let ui = &mut row_ui;
         let response = response.on_hover_and_drag_cursor(CursorIcon::Grab);
         let revealed = self.revealed == Some((list_id, task.id));
         let is_editing = self.editing == Some((list_id, task.id));
@@ -247,9 +269,6 @@ impl MinimalistApp {
             .as_ref()
             .filter(|drag| drag.list_id == list_id && drag.task_id == task.id)
             .cloned();
-        let task_count = self
-            .list_index(list_id)
-            .map_or(1, |index| self.lists[index].data.tasks.len().max(1));
         let drag_delta = if response.dragged() {
             response
                 .total_drag_delta()
@@ -275,8 +294,7 @@ impl MinimalistApp {
             animated_x
         };
         let offset_y = if drag_active && !horizontal {
-            let span = desired.y * task_count as f32;
-            drag_delta.y.clamp(-span, span)
+            drag_delta.y
         } else {
             0.0
         };
@@ -289,12 +307,12 @@ impl MinimalistApp {
                     && task_index > drag.source
                     && task_index <= drag.target
                 {
-                    -desired.y
+                    -drag.height
                 } else if drag.source > drag.target
                     && task_index >= drag.target
                     && task_index < drag.source
                 {
-                    desired.y
+                    drag.height
                 } else {
                     0.0
                 }
@@ -382,15 +400,19 @@ impl MinimalistApp {
                 .surface
                 .lerp_to_gamma(paint_palette.raised, hover_progress * 0.24),
         );
-        if hover_progress > 0.0 || response.dragged() {
+        if hover_progress > 0.0 || response.dragged() || response.has_focus() {
             ui.painter().rect_stroke(
                 row_rect,
                 14.0,
                 Stroke::new(
                     1.0,
-                    paint_palette
-                        .raised
-                        .lerp_to_gamma(paint_palette.accent, hover_progress * 0.18),
+                    if response.has_focus() {
+                        paint_palette.accent
+                    } else {
+                        paint_palette
+                            .raised
+                            .lerp_to_gamma(paint_palette.accent, hover_progress * 0.18)
+                    },
                 ),
                 egui::StrokeKind::Inside,
             );
@@ -423,6 +445,7 @@ impl MinimalistApp {
                 task.completed,
                 completion_progress,
                 paint_palette,
+                &task.text,
             );
             if completion.clicked() {
                 return Some(RowAction::Toggle(list_id, task.id));
@@ -435,17 +458,7 @@ impl MinimalistApp {
         let text_clip = Rect::from_min_max(
             Pos2::new(row_rect.left() + 44.0, row_rect.top()),
             Pos2::new(row_rect.right() - 82.0, row_rect.bottom()),
-        )
-        .intersect(ui.clip_rect());
-        let text_pos = Pos2::new(row_rect.left() + 46.0, row_rect.center().y);
-        let text_rect = ui.painter().with_clip_rect(text_clip).text(
-            text_pos,
-            Align2::LEFT_CENTER,
-            &task.text,
-            self.font_id(self.settings.font_size),
-            text_color,
         );
-        let text_width = text_rect.width().min(text_clip.width().max(0.0));
         let strike_progress = if task.completed {
             if drag_active && horizontal && drag_delta.x > 0.0 {
                 1.0 - (drag_delta.x / SWIPE_COMPLETE).clamp(0.0, 1.0)
@@ -457,22 +470,18 @@ impl MinimalistApp {
         } else {
             0.0
         };
-        if strike_progress > 0.0 {
-            ui.painter().line_segment(
-                [
-                    Pos2::new(text_pos.x, text_pos.y),
-                    Pos2::new(text_pos.x + text_width * strike_progress, text_pos.y),
-                ],
-                Stroke::new(2.0, paint_palette.accent),
-            );
-        }
         let text_response = (!is_editing).then(|| {
-            ui.interact(
-                text_rect.expand2(Vec2::new(4.0, 10.0)).intersect(text_clip),
-                Id::new(("task-text", list_id, task.id)),
-                Sense::click(),
+            self.paint_task_title(
+                ui,
+                task,
+                text_clip,
+                galley,
+                Palette {
+                    text: text_color,
+                    ..paint_palette
+                },
+                strike_progress,
             )
-            .on_hover_cursor(CursorIcon::Text)
         });
 
         if !is_editing {
@@ -483,11 +492,7 @@ impl MinimalistApp {
             let checklist_label = task
                 .progress()
                 .map_or_else(|| "+".to_owned(), |(done, total)| format!("{done}/{total}"));
-            let checklist_opacity = if task.progress().is_some() {
-                0.72 + hover_progress * 0.28
-            } else {
-                0.24 + hover_progress * 0.76
-            };
+            let checklist_opacity = 0.72 + hover_progress * 0.28;
             let checklist = ui
                 .put(
                     checklist_rect,
@@ -499,6 +504,21 @@ impl MinimalistApp {
                     .frame(false),
                 )
                 .on_hover_text("Subtasks");
+            checklist.widget_info(|| {
+                egui::WidgetInfo::labeled(
+                    egui::WidgetType::Button,
+                    true,
+                    format!("Subtasks: {}", task.text),
+                )
+            });
+            if checklist.has_focus() {
+                ui.painter().rect_stroke(
+                    checklist.rect,
+                    4.0,
+                    Stroke::new(1.0, palette.accent),
+                    egui::StrokeKind::Inside,
+                );
+            }
             if checklist.clicked() {
                 return Some(RowAction::Subtasks(list_id, task.id));
             }
@@ -516,19 +536,34 @@ impl MinimalistApp {
                             14.0,
                             paint_palette
                                 .danger
-                                .linear_multiply(0.16 + hover_progress * 0.84),
+                                .linear_multiply(0.72 + hover_progress * 0.28),
                         ),
                     )
                     .frame(false),
                 )
                 .on_hover_text("Delete task");
+            delete.widget_info(|| {
+                egui::WidgetInfo::labeled(
+                    egui::WidgetType::Button,
+                    true,
+                    format!("Delete task: {}", task.text),
+                )
+            });
+            if delete.has_focus() {
+                ui.painter().rect_stroke(
+                    delete.rect,
+                    4.0,
+                    Stroke::new(1.0, palette.accent),
+                    egui::StrokeKind::Inside,
+                );
+            }
             if delete.clicked() {
                 return Some(RowAction::Delete(list_id, task.id));
             }
         }
 
         if is_editing {
-            let editor_rect = row_rect.shrink2(Vec2::new(12.0, 8.0));
+            let editor_rect = row_rect.shrink2(Vec2::new(12.0, 4.0));
             ui.painter().rect_filled(editor_rect, 10.0, palette.raised);
             let mut editor_ui = ui.new_child(
                 egui::UiBuilder::new()
@@ -538,6 +573,7 @@ impl MinimalistApp {
             let edit_font = self.font_id(self.settings.font_size);
             let edit_response = editor_ui.add(
                 TextEdit::singleline(&mut self.edit_text)
+                    .id(Id::new(("edit-task", list_id, task.id)))
                     .font(edit_font)
                     .desired_width(f32::INFINITY)
                     .frame(Frame::NONE),
@@ -576,6 +612,8 @@ impl MinimalistApp {
                     source: task_index,
                     target: task_index,
                     delta: Vec2::ZERO,
+                    source_center: rect.center().y,
+                    height: rect.height(),
                 });
             }
             if response.dragged()
@@ -585,34 +623,9 @@ impl MinimalistApp {
                     .filter(|drag| drag.list_id == list_id && drag.task_id == task.id)
             {
                 drag.delta = drag_delta;
-                if !horizontal && task_count > 0 {
-                    let shift = (drag_delta.y / desired.y).round() as isize;
-                    drag.target = (drag.source as isize + shift)
-                        .clamp(0, task_count.saturating_sub(1) as isize)
-                        as usize;
-                }
             }
             if response.drag_stopped() {
-                let drag = self
-                    .drag
-                    .take()
-                    .filter(|drag| drag.list_id == list_id && drag.task_id == task.id);
-                if let Some(drag) = drag {
-                    let drag_is_horizontal = drag.delta.x.abs() > drag.delta.y.abs() * 1.25;
-                    if drag_is_horizontal {
-                        if revealed {
-                            if drag.delta.x > SWIPE_ACTIONS * 0.35 {
-                                self.revealed = None;
-                            }
-                        } else if drag.delta.x >= SWIPE_COMPLETE {
-                            return Some(RowAction::Toggle(list_id, task.id));
-                        } else if drag.delta.x <= -SWIPE_ACTIONS {
-                            self.revealed = Some((list_id, task.id));
-                        }
-                    } else if drag.target != drag.source {
-                        return Some(RowAction::Reorder(list_id, drag.task_id, drag.target));
-                    }
-                }
+                return Some(RowAction::FinishDrag);
             }
 
             if text_response
@@ -632,7 +645,7 @@ impl MinimalistApp {
             egui::emath::easing::cubic_out,
         );
         if subtasks_progress > 0.001 {
-            self.subtasks_panel(ui, list_id, task, palette, subtasks_progress);
+            self.subtasks_panel(parent_ui, list_id, task, palette, subtasks_progress);
         }
 
         None
@@ -694,12 +707,34 @@ impl MinimalistApp {
                 };
                 self.new_subtask.clear();
             }
+            RowAction::FinishDrag => {
+                if let Some(drag) = self.drag.take() {
+                    if drag.delta.x.abs() > drag.delta.y.abs() * 1.25 {
+                        if self.revealed == Some((drag.list_id, drag.task_id)) {
+                            if drag.delta.x > SWIPE_ACTIONS * 0.35 {
+                                self.revealed = None;
+                            }
+                        } else if drag.delta.x >= SWIPE_COMPLETE {
+                            self.apply_row_action(RowAction::Toggle(drag.list_id, drag.task_id));
+                        } else if drag.delta.x <= -SWIPE_ACTIONS {
+                            self.revealed = Some((drag.list_id, drag.task_id));
+                        }
+                    } else if drag.target != drag.source {
+                        self.apply_row_action(RowAction::Reorder(
+                            drag.list_id,
+                            drag.task_id,
+                            drag.target,
+                        ));
+                    }
+                }
+            }
         }
     }
 }
 
 #[derive(Clone)]
 enum RowAction {
+    FinishDrag,
     Toggle(Uuid, Uuid),
     Delete(Uuid, Uuid),
     BeginEdit(Uuid, Uuid, String),

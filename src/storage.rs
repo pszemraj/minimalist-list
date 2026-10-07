@@ -1,6 +1,6 @@
 //! Settings and folder-backed list persistence.
 
-use crate::model::{Accent, FontChoice, TodoList};
+use crate::model::{Accent, FontChoice, TitleOverflow, TodoList};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 use std::env;
@@ -23,6 +23,8 @@ pub struct Settings {
     pub font_size: f32,
     pub bold_text: bool,
     pub row_padding: f32,
+    pub title_overflow: TitleOverflow,
+    pub background_opacity: f32,
     pub last_list_id: Option<Uuid>,
     pub last_capture_list_id: Option<Uuid>,
 }
@@ -36,7 +38,9 @@ impl Default for Settings {
             font: FontChoice::Sans,
             font_size: 19.0,
             bold_text: false,
-            row_padding: 12.0,
+            row_padding: 6.0,
+            title_overflow: TitleOverflow::Scroll,
+            background_opacity: 0.85,
             last_list_id: None,
             last_capture_list_id: None,
         }
@@ -383,13 +387,27 @@ fn stamp_from_metadata(metadata: &fs::Metadata) -> FileStamp {
 ///
 /// The application's directory beneath the platform data root.
 pub fn default_workspace_dir() -> PathBuf {
-    xdg_dir("XDG_DATA_HOME", ".local/share").join(APP_DIR)
+    #[cfg(target_os = "windows")]
+    let root = env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home_dir().join("AppData/Local"));
+    #[cfg(target_os = "macos")]
+    let root = home_dir().join("Library/Application Support");
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    let root = xdg_dir("XDG_DATA_HOME", ".local/share");
+    root.join(APP_DIR)
 }
 
 fn settings_path() -> PathBuf {
-    xdg_dir("XDG_CONFIG_HOME", ".config")
-        .join(APP_DIR)
-        .join("settings.json")
+    #[cfg(target_os = "windows")]
+    let root = env::var_os("APPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home_dir().join("AppData/Roaming"));
+    #[cfg(target_os = "macos")]
+    let root = home_dir().join("Library/Application Support");
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    let root = xdg_dir("XDG_CONFIG_HOME", ".config");
+    root.join(APP_DIR).join("settings.json")
 }
 
 fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
@@ -433,6 +451,7 @@ fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> Result<(), String>
     write_result
 }
 
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 fn xdg_dir(variable: &str, fallback: &str) -> PathBuf {
     env::var_os(variable)
         .filter(|value| !value.is_empty())
@@ -441,8 +460,11 @@ fn xdg_dir(variable: &str, fallback: &str) -> PathBuf {
 }
 
 fn home_dir() -> PathBuf {
-    env::var_os("HOME")
-        .map(PathBuf::from)
+    #[cfg(target_os = "windows")]
+    let home = env::var_os("USERPROFILE").or_else(|| env::var_os("HOME"));
+    #[cfg(not(target_os = "windows"))]
+    let home = env::var_os("HOME");
+    home.map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
@@ -459,6 +481,23 @@ fn expand_tilde(raw: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn old_settings_keep_typography_and_default_new_preferences() {
+        let settings: Settings =
+            serde_json::from_str(r#"{"font_size":24.0,"row_padding":12.0}"#).unwrap();
+        assert_eq!(settings.font_size, 24.0);
+        assert_eq!(settings.row_padding, 12.0);
+        assert_eq!(settings.title_overflow, TitleOverflow::Scroll);
+        assert_eq!(settings.background_opacity, 0.85);
+        let mut saved = settings;
+        saved.title_overflow = TitleOverflow::Wrap;
+        saved.background_opacity = 0.2;
+        let reloaded: Settings =
+            serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
+        assert_eq!(reloaded.title_overflow, TitleOverflow::Wrap);
+        assert_eq!(reloaded.background_opacity, 0.2);
+    }
 
     fn test_root() -> PathBuf {
         env::temp_dir().join(format!("minimalist-list-test-{}", Uuid::new_v4()))

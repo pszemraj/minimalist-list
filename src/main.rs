@@ -107,7 +107,8 @@ fn main() -> eframe::Result {
         viewport: egui::ViewportBuilder::default()
             .with_app_id("minimalist-list")
             .with_inner_size([520.0, 760.0])
-            .with_min_inner_size([380.0, 460.0])
+            .with_min_inner_size([320.0, 280.0])
+            .with_transparent(true)
             .with_decorations(settings.window_decorations)
             .with_window_level(level),
         renderer: eframe::Renderer::Glow,
@@ -118,7 +119,7 @@ fn main() -> eframe::Result {
         options,
         Box::new(move |cc| {
             Ok(Box::new(MinimalistApp::new(
-                cc,
+                &cc.egui_ctx,
                 settings,
                 workspace_override,
                 warning,

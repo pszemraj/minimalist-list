@@ -2,7 +2,7 @@
 
 ## Capture and edit tasks
 
-The field at the top of a list receives focus when the list opens. Enter adds the task at the top and returns focus to the field.
+The field at the top of a list receives focus when the list opens. Enter adds the task at the top and returns focus to the field. Subtask entry also stays focused after Enter so you can add several items in succession.
 
 `Ctrl+N` opens Quick add from any screen while the application is focused. Choose a destination list and press Enter to save one task, or Escape to cancel. The selector remembers the last successful destination. The header's `add` action opens the same overlay.
 
@@ -29,10 +29,16 @@ Use the back control or double-click a list title to return to the overview. `Ct
 
 The header's `pin` control toggles always-on-top mode. When native window decorations are disabled, drag the title to move the window and use the visible `x` control to close it.
 
-Typography settings control proportional or monospace text, weight, size, and row spacing. Each list has its own accent color. User-facing settings save immediately to:
+Typography settings control proportional or monospace text, weight, size, and row spacing. Each list has its own accent color.
+
+**Long titles** has two modes: **Scroll** (the default) keeps one line, uses an ellipsis at rest, and scrolls horizontally after a short hover delay; **Wrap** shows the full title across as many lines as needed. Scrolling stops when you leave the title, edit, or drag.
+
+**Background opacity** starts at 85% and can be adjusted from 20% to 100%. It affects background surfaces while task text and controls stay readable, including in pinned mode. Desktop transparency depends on the operating system's compositor.
+
+On Linux, settings save immediately to:
 
 ```text
 ${XDG_CONFIG_HOME:-$HOME/.config}/minimalist-list/settings.json
 ```
 
-Workspace selection and launch-time overrides are described in [storage and sync](storage.md#workspace-location).
+The [storage and sync guide](storage.md#workspace-location) also lists macOS and Windows settings paths, workspace selection, and launch-time overrides. On macOS, use Command in place of Ctrl for the shortcuts above.
