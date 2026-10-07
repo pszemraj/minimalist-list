@@ -36,10 +36,10 @@ impl MinimalistApp {
                 if !self.settings.window_decorations
                     && ui
                         .add(Button::new(self.rich("x", 18.0, palette.muted)).frame(false))
-                        .on_hover_text("Close")
+                        .on_hover_text(self.close_hint())
                         .clicked()
                 {
-                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+                    self.close_window(ui.ctx());
                 }
             });
         });
@@ -130,6 +130,13 @@ impl MinimalistApp {
                 12.0,
                 palette.muted,
             ));
+            if self.tray.is_some() {
+                ui.label(self.rich(
+                    "Close or minimize hides the window. Use the tray menu to Show or Quit.",
+                    12.0,
+                    palette.muted,
+                ));
+            }
         });
         if window_changed {
             self.last_pin_state = None;

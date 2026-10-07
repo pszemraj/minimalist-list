@@ -673,20 +673,7 @@ impl MinimalistApp {
                 self.revealed = None;
             }
             RowAction::CommitEdit(list_id, task_id, text) => {
-                let text = text.trim();
-                if let Some(index) = self.list_index(list_id)
-                    && let Some(task) = self.lists[index]
-                        .data
-                        .tasks
-                        .iter_mut()
-                        .find(|task| task.id == task_id)
-                    && !text.is_empty()
-                    && task.text != text
-                {
-                    task.text = text.to_owned();
-                    self.save_list_index(index);
-                }
-                self.editing = None;
+                self.commit_task_edit(list_id, task_id, &text);
             }
             RowAction::Reorder(list_id, task_id, target) => {
                 if let Some(index) = self.list_index(list_id) {
@@ -729,6 +716,34 @@ impl MinimalistApp {
                 }
             }
         }
+    }
+
+    /// Saves an inline edit and ends the editing session.
+    ///
+    /// # Arguments
+    ///
+    /// - `list_id` - List containing the edited task.
+    /// - `task_id` - Identity of the edited task.
+    /// - `text` - Proposed title; empty titles leave the existing title intact.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the resolved list index becomes invalid during the edit.
+    pub(super) fn commit_task_edit(&mut self, list_id: Uuid, task_id: Uuid, text: &str) {
+        let text = text.trim();
+        if let Some(index) = self.list_index(list_id)
+            && let Some(task) = self.lists[index]
+                .data
+                .tasks
+                .iter_mut()
+                .find(|task| task.id == task_id)
+            && !text.is_empty()
+            && task.text != text
+        {
+            task.text = text.to_owned();
+            self.save_list_index(index);
+        }
+        self.editing = None;
     }
 }
 

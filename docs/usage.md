@@ -36,6 +36,10 @@ Select **Show history**, then **Restore** to return a task to the bottom of the 
 
 The header's `pin` control toggles always-on-top mode. When native window decorations are disabled, drag the title to move the window and use the visible `x` control to close it.
 
+Closing or minimizing the window hides it in the system tray. Open the tray icon's menu and choose **Show Minimalist List** to restore it or **Quit** to exit. Activating the icon also restores the window on desktops that support it. Tasks remain saved, and shared-folder polling continues while hidden.
+
+Linux uses X11 or XWayland for hiding and restoration. A desktop tray host is required, such as GNOME's AppIndicator extension or KDE's system tray. If tray support is unavailable, the app reports it and close/minimize retain their normal behavior.
+
 Typography settings control proportional or monospace text, weight, size, and row spacing. Existing typography preferences are retained; reduce row spacing to fit more tasks on screen.
 
 **Long titles** has two modes: **Scroll** (the default) keeps one line, uses an ellipsis at rest, and scrolls horizontally after a short hover delay; **Wrap** shows the full title across as many lines as needed. Scrolling stops when you leave the title, edit, or drag.

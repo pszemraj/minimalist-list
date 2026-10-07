@@ -7,6 +7,7 @@ mod settings;
 mod task_details;
 mod task_text;
 mod theme;
+mod window;
 
 use self::overlays::{FindState, QuickCaptureState, Spotlight};
 use self::theme::Palette;
@@ -107,6 +108,9 @@ pub struct MinimalistApp {
     spotlight: Option<Spotlight>,
     last_motion_tick: Instant,
     hovered_title: Option<(Uuid, Instant)>,
+    tray: Option<crate::tray::Tray>,
+    window_hidden: bool,
+    quitting: bool,
 }
 
 impl MinimalistApp {
@@ -222,6 +226,9 @@ impl MinimalistApp {
             spotlight: None,
             last_motion_tick: Instant::now(),
             hovered_title: None,
+            tray: None,
+            window_hidden: false,
+            quitting: false,
         }
     }
 
@@ -533,7 +540,11 @@ impl eframe::App for MinimalistApp {
         [0.0; 4]
     }
 
-    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        let minimized = frame
+            .winit_window()
+            .is_some_and(|window| window.is_minimized().unwrap_or(false));
+        self.handle_window_actions(ctx, minimized);
         self.apply_window_preferences(ctx);
         self.update_motion(ctx);
         self.scan_external_changes();

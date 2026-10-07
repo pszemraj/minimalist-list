@@ -3,6 +3,7 @@
 mod app;
 mod model;
 mod storage;
+mod tray;
 
 use app::MinimalistApp;
 use eframe::egui;
@@ -114,16 +115,29 @@ fn main() -> eframe::Result {
         renderer: eframe::Renderer::Glow,
         ..Default::default()
     };
+    // Winit cannot hide or restore native Wayland windows. Use XWayland when available.
+    #[cfg(target_os = "linux")]
+    let tray_supported = x11rb::connect(None).is_ok();
+    #[cfg(not(target_os = "linux"))]
+    let tray_supported = true;
+    #[cfg(target_os = "linux")]
+    let options = {
+        let mut options = options;
+        if tray_supported {
+            options.event_loop_builder = Some(Box::new(|builder| {
+                use winit::platform::x11::EventLoopBuilderExtX11;
+                builder.with_x11();
+            }));
+        }
+        options
+    };
     eframe::run_native(
         "Minimalist List",
         options,
         Box::new(move |cc| {
-            Ok(Box::new(MinimalistApp::new(
-                &cc.egui_ctx,
-                settings,
-                workspace_override,
-                warning,
-            )))
+            let mut app = MinimalistApp::new(&cc.egui_ctx, settings, workspace_override, warning);
+            app.setup_tray(&cc.egui_ctx, tray_supported);
+            Ok(Box::new(app))
         }),
     )
 }

@@ -12,8 +12,10 @@ src/app/settings.rs        Workspace, appearance, and list settings
 src/app/task_details.rs    Subtasks, deletion, clearing, and history
 src/app/task_text.rs       Title wrapping, hover scrolling, and reorder geometry
 src/app/theme.rs           Accent palettes and shared rendering helpers
+src/app/window.rs          Tray hiding, restoration, and shutdown
 src/model.rs               Serializable list and task model
 src/storage.rs             Platform paths, list files, polling, and atomic writes
+src/tray.rs                Native tray icon and menu actions
 ```
 
 Keep source files below 1,000 lines and split by actual responsibilities rather than generic layers or arbitrary line counts.
@@ -47,3 +49,5 @@ cargo run --locked --features eframe/inspection -- --data-dir target/gui-check/w
 Attach the GUI inspector to port 5741. Use a distinct port and settings directory for a second instance. XDG overrides apply to Linux; see [platform paths](storage.md#default-directories) for other systems.
 
 Exercise the [task interactions](usage.md), both title modes, narrow dialogs, large fonts, pinned mode, and opacity over bright and dark backgrounds. Inspect saved JSON after mutations, restart to check persistence, and repeat the [shared-folder flows](storage.md#file-sync-behavior) with two instances. Check paths, shortcuts, and transparency on native macOS and Windows as well as Linux.
+
+Close and minimize the test window: it should disappear from the taskbar while its tray icon remains. Restore it through the icon's Show action, then Quit while hidden and verify that the process and icon disappear. Repeat with decorations disabled and while editing a task; check that Quit saves the edit and pending clear/delete actions.
