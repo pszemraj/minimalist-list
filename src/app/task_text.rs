@@ -17,24 +17,6 @@ fn scroll_offset(elapsed: f32, overflow: f32) -> f32 {
     ((phase - HOVER_DELAY) * SCROLL_SPEED).clamp(0.0, overflow)
 }
 
-/// Finds the closest task center, accounting for rows of different heights.
-///
-/// # Arguments
-///
-/// - `centers` - Visible row centers in list order.
-/// - `position` - Dragged row center in the same coordinates.
-///
-/// # Returns
-///
-/// The nearest row index, or zero for an empty list.
-pub(super) fn reorder_target(centers: &[f32], position: f32) -> usize {
-    centers
-        .iter()
-        .enumerate()
-        .min_by(|(_, a), (_, b)| ((*a - position).abs()).total_cmp(&(*b - position).abs()))
-        .map_or(0, |(index, _)| index)
-}
-
 impl MinimalistApp {
     /// Lays out a title with either unlimited horizontal space or full wrapping.
     ///
@@ -182,16 +164,6 @@ mod tests {
         assert!((scroll_offset(1.6, 60.0) - 30.0).abs() < 0.001);
         assert_eq!(scroll_offset(3.0, 60.0), 60.0);
         assert!(scroll_offset(3.9, 60.0) < 0.001);
-    }
-
-    #[test]
-    fn reorder_uses_actual_centers_of_unequal_rows() {
-        let centers = [18.0, 108.0, 198.0];
-        assert_eq!(reorder_target(&centers, -50.0), 0);
-        assert_eq!(reorder_target(&centers, 70.0), 1);
-        assert_eq!(reorder_target(&centers, 135.0), 1);
-        assert_eq!(reorder_target(&centers, 180.0), 2);
-        assert_eq!(reorder_target(&centers, 500.0), 2);
     }
 
     #[test]

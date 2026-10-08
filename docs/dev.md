@@ -10,7 +10,7 @@ src/app/overlays.rs        Quick add and cross-list search
 src/app/overview.rs        List-card overview
 src/app/settings.rs        Workspace, appearance, and list settings
 src/app/task_details.rs    Subtasks, deletion, clearing, and history
-src/app/task_text.rs       Title wrapping, hover scrolling, and reorder geometry
+src/app/task_text.rs       Title wrapping and hover scrolling
 src/app/theme.rs           Accent palettes and shared rendering helpers
 src/app/window.rs          Tray hiding, restoration, and shutdown
 src/model.rs               Serializable list and task model
@@ -51,3 +51,5 @@ Attach the GUI inspector to port 5741. Use a distinct port and settings director
 Exercise the [task interactions](usage.md), both title modes, narrow dialogs, large fonts, pinned mode, and opacity over bright and dark backgrounds. Inspect saved JSON after mutations, restart to check persistence, and repeat the [shared-folder flows](storage.md#file-sync-behavior) with two instances. Check paths, shortcuts, and transparency on native macOS and Windows as well as Linux.
 
 Close and minimize the test window: it should disappear from the taskbar while its tray icon remains. Repeat with decorations disabled and while editing a task; hiding should save the edit and allow external-file reloads while hidden. Restore it through the icon's Show action, then Quit while hidden and verify that the process and icon disappear and pending clear/delete actions are saved.
+
+Repeat without a tray host: the normal backend and close/minimize behavior should remain, with no startup warning. Close during an inline edit or pending clear/delete and inspect the saved JSON after restart. If the tray host disappears while hidden, the window should restore at the next scan.

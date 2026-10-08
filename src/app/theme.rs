@@ -427,45 +427,6 @@ impl MinimalistApp {
             } else {
                 "pin"
             };
-            let mut controls_width = [("...", 18.0), ("find", 14.0), ("add", 14.0), (pin, 14.0)]
-                .into_iter()
-                .map(|(text, size)| {
-                    ui.painter()
-                        .layout_no_wrap(text.to_owned(), self.font_id(size), palette.text)
-                        .size()
-                        .x
-                        + ui.spacing().item_spacing.x
-                })
-                .sum::<f32>();
-            if !self.settings.window_decorations {
-                controls_width += ui
-                    .painter()
-                    .layout_no_wrap("x".to_owned(), self.font_id(18.0), palette.text)
-                    .size()
-                    .x
-                    + ui.spacing().item_spacing.x;
-            }
-            let title_width = (ui.available_width() - controls_width).max(24.0);
-            let title_response = ui
-                .allocate_ui_with_layout(
-                    Vec2::new(title_width, 36.0),
-                    Layout::left_to_right(Align::Center),
-                    |ui| {
-                        ui.add(
-                            Label::new(self.rich(title, 28.0, palette.text))
-                                .truncate()
-                                .sense(Sense::click_and_drag()),
-                        )
-                    },
-                )
-                .inner
-                .on_hover_cursor(CursorIcon::Grab);
-            if title_response.double_clicked() {
-                self.go_to_overview();
-            } else if title_response.drag_started() {
-                ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
-            }
-
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if !self.settings.window_decorations
                     && ui
@@ -505,6 +466,26 @@ impl MinimalistApp {
                     self.last_pin_state = None;
                     self.save_settings();
                 }
+
+                let title_response = ui
+                    .allocate_ui_with_layout(
+                        Vec2::new(ui.available_width(), 36.0),
+                        Layout::left_to_right(Align::Center),
+                        |ui| {
+                            ui.add(
+                                Label::new(self.rich(title, 28.0, palette.text))
+                                    .truncate()
+                                    .sense(Sense::click_and_drag()),
+                            )
+                        },
+                    )
+                    .inner
+                    .on_hover_cursor(CursorIcon::Grab);
+                if title_response.double_clicked() {
+                    self.go_to_overview();
+                } else if title_response.drag_started() {
+                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
+                }
             });
         });
     }
@@ -517,49 +498,114 @@ mod tests {
     #[test]
     fn small_header_keeps_title_clear_of_controls_with_both_fonts_and_pin_states() {
         let title = "A long list title describing the upcoming research workshop";
-        for font in [FontChoice::Sans, FontChoice::Mono] {
-            for pinned in [false, true] {
-                for decorations in [false, true] {
-                    let (ctx, mut app) = super::super::tests::test_app();
-                    app.settings.font = font;
-                    app.settings.always_on_top = pinned;
-                    app.settings.window_decorations = decorations;
-                    let palette = app.palette();
-                    let viewport = Rect::from_min_size(Pos2::ZERO, egui::vec2(320.0, 280.0));
-                    let mut output = ctx.run_ui(
-                        egui::RawInput {
-                            screen_rect: Some(viewport),
-                            ..Default::default()
-                        },
-                        |ui| {
-                            let mut header = ui
-                                .new_child(egui::UiBuilder::new().max_rect(viewport.shrink(16.0)));
-                            app.header(&mut header, palette, title, Some(app.lists[0].key));
-                        },
-                    );
-                    output.textures_delta.clear();
-                    let text_rect = |label: &str| {
-                        output
-                            .shapes
-                            .iter()
-                            .find_map(|shape| match &shape.shape {
-                                egui::epaint::Shape::Text(text) if text.galley.text() == label => {
-                                    Some(Rect::from_min_size(text.pos, text.galley.size()))
+        for width in [280.0, 320.0] {
+            for font in [FontChoice::Sans, FontChoice::Mono] {
+                for pinned in [false, true] {
+                    for decorations in [false, true] {
+                        let (ctx, mut app) = super::super::tests::test_app();
+                        app.settings.font = font;
+                        app.settings.always_on_top = pinned;
+                        app.settings.window_decorations = decorations;
+                        let palette = app.palette();
+                        let viewport = Rect::from_min_size(Pos2::ZERO, egui::vec2(width, 280.0));
+                        let frame = |app: &mut MinimalistApp, events| {
+                            let mut output = ctx.run_ui(
+                                egui::RawInput {
+                                    screen_rect: Some(viewport),
+                                    events,
+                                    ..Default::default()
+                                },
+                                |ui| {
+                                    let mut header = ui.new_child(
+                                        egui::UiBuilder::new().max_rect(viewport.shrink(16.0)),
+                                    );
+                                    app.header(&mut header, palette, title, Some(app.lists[0].key));
+                                },
+                            );
+                            output.textures_delta.clear();
+                            output
+                        };
+                        let output = frame(&mut app, Vec::new());
+                        let text_rect = |label: &str| {
+                            output
+                                .shapes
+                                .iter()
+                                .find_map(|shape| match &shape.shape {
+                                    egui::epaint::Shape::Text(text)
+                                        if text.galley.text() == label =>
+                                    {
+                                        Some(Rect::from_min_size(text.pos, text.galley.size()))
+                                    }
+                                    _ => None,
+                                })
+                                .unwrap()
+                        };
+                        let title_rect = text_rect(title);
+                        let mut controls =
+                            vec!["...", "find", "add", if pinned { "pinned" } else { "pin" }];
+                        if !decorations {
+                            controls.push("x");
+                        }
+                        for control in &controls {
+                            let rect = text_rect(control);
+                            assert!(viewport.contains_rect(rect));
+                            assert!(
+                                title_rect.right() < rect.left(),
+                                "width={width}, {font:?}, pinned={pinned}, decorations={decorations}: {title_rect:?}, {rect:?}"
+                            );
+                        }
+                        let back_rect = text_rect("<");
+                        assert!(viewport.contains_rect(back_rect));
+                        assert!(back_rect.right() < title_rect.left());
+                        controls.push("<");
+                        let mut focused_controls = std::collections::HashSet::new();
+                        for _ in 0..controls.len() + 2 {
+                            frame(
+                                &mut app,
+                                [true, false]
+                                    .into_iter()
+                                    .map(|pressed| egui::Event::Key {
+                                        key: egui::Key::Tab,
+                                        physical_key: None,
+                                        pressed,
+                                        repeat: false,
+                                        modifiers: egui::Modifiers::default(),
+                                    })
+                                    .collect(),
+                            );
+                            frame(&mut app, Vec::new());
+                            if let Some(response) = ctx
+                                .memory(|memory| memory.focused())
+                                .and_then(|id| ctx.read_response(id))
+                            {
+                                assert!(viewport.contains_rect(response.rect));
+                                for control in &controls {
+                                    if response.rect.contains(text_rect(control).center()) {
+                                        focused_controls.insert(*control);
+                                    }
                                 }
-                                _ => None,
-                            })
-                            .unwrap()
-                    };
-                    let title_rect = text_rect(title);
-                    for control in ["...", "find", "add", if pinned { "pinned" } else { "pin" }] {
-                        let rect = text_rect(control);
-                        assert!(viewport.contains_rect(rect));
-                        assert!(
-                            title_rect.right() < rect.left(),
-                            "{font:?}, pinned={pinned}, decorations={decorations}: {title_rect:?}, {rect:?}"
-                        );
+                            }
+                        }
+                        assert_eq!(focused_controls.len(), controls.len());
+
+                        let position = text_rect("find").center();
+                        for pressed in [true, false] {
+                            frame(
+                                &mut app,
+                                vec![
+                                    egui::Event::PointerMoved(position),
+                                    egui::Event::PointerButton {
+                                        pos: position,
+                                        button: egui::PointerButton::Primary,
+                                        pressed,
+                                        modifiers: egui::Modifiers::default(),
+                                    },
+                                ],
+                            );
+                        }
+                        assert!(app.find.is_some());
+                        std::fs::remove_dir_all(&app.workspace).unwrap();
                     }
-                    std::fs::remove_dir_all(&app.workspace).unwrap();
                 }
             }
         }

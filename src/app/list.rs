@@ -2,7 +2,7 @@
 
 use super::{
     DragState, INSERT_ANIMATION_SECONDS, MinimalistApp, SWIPE_ACTIONS, SWIPE_COMPLETE,
-    task_text::reorder_target, text_input_shortcuts, theme::Palette,
+    text_input_shortcuts, theme::Palette,
 };
 use crate::model::Task;
 use eframe::egui;
@@ -12,6 +12,24 @@ use egui::{
 };
 use std::time::Instant;
 use uuid::Uuid;
+
+/// Finds the closest task center, accounting for rows of different heights.
+///
+/// # Arguments
+///
+/// - `centers` - Visible row centers in list order.
+/// - `position` - Dragged row center in the same coordinates.
+///
+/// # Returns
+///
+/// The nearest row index, or zero for an empty list.
+fn reorder_target(centers: &[f32], position: f32) -> usize {
+    centers
+        .iter()
+        .enumerate()
+        .min_by(|(_, a), (_, b)| ((*a - position).abs()).total_cmp(&(*b - position).abs()))
+        .map_or(0, |(index, _)| index)
+}
 
 impl MinimalistApp {
     /// Renders one list and handles task creation, editing, completion, and ordering.
@@ -756,4 +774,19 @@ enum RowAction {
     CommitEdit(Uuid, Uuid, String),
     Reorder(Uuid, Uuid, usize),
     Subtasks(Uuid, Uuid),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reorder_uses_actual_centers_of_unequal_rows() {
+        let centers = [18.0, 108.0, 198.0];
+        assert_eq!(reorder_target(&centers, -50.0), 0);
+        assert_eq!(reorder_target(&centers, 70.0), 1);
+        assert_eq!(reorder_target(&centers, 135.0), 1);
+        assert_eq!(reorder_target(&centers, 180.0), 2);
+        assert_eq!(reorder_target(&centers, 500.0), 2);
+    }
 }
