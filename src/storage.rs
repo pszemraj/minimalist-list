@@ -4,6 +4,7 @@ use crate::model::{Accent, FontChoice, TitleOverflow, TodoList};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 use std::env;
+use std::ffi::OsString;
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -388,41 +389,86 @@ fn stamp_from_metadata(metadata: &fs::Metadata) -> FileStamp {
 /// The application's directory beneath the platform data root, or an existing
 /// legacy workspace when the native directory does not exist.
 pub fn default_workspace_dir() -> PathBuf {
-    #[cfg(target_os = "windows")]
-    let root = env::var_os("LOCALAPPDATA")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home_dir().join("AppData/Local"));
-    #[cfg(target_os = "macos")]
-    let root = home_dir().join("Library/Application Support");
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    let root = xdg_dir("XDG_DATA_HOME", ".local/share");
+    default_workspace_dir_from(PathPlatform::current(), &|name| env::var_os(name))
+}
+
+#[derive(Clone, Copy)]
+enum PathPlatform {
+    #[cfg(any(target_os = "windows", test))]
+    Windows,
+    #[cfg(any(target_os = "macos", test))]
+    Macos,
+    #[cfg(any(not(any(target_os = "windows", target_os = "macos")), test))]
+    Xdg,
+}
+
+impl PathPlatform {
+    fn current() -> Self {
+        #[cfg(target_os = "windows")]
+        return Self::Windows;
+        #[cfg(target_os = "macos")]
+        return Self::Macos;
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        Self::Xdg
+    }
+}
+
+fn default_workspace_dir_from(
+    platform: PathPlatform,
+    lookup: &impl Fn(&str) -> Option<OsString>,
+) -> PathBuf {
+    let root = match platform {
+        #[cfg(any(target_os = "windows", test))]
+        PathPlatform::Windows => lookup("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home_dir_from(platform, lookup).join("AppData/Local")),
+        #[cfg(any(target_os = "macos", test))]
+        PathPlatform::Macos => home_dir_from(platform, lookup).join("Library/Application Support"),
+        #[cfg(any(not(any(target_os = "windows", target_os = "macos")), test))]
+        PathPlatform::Xdg => xdg_dir_from(lookup, "XDG_DATA_HOME", ".local/share"),
+    };
     let preferred = root.join(APP_DIR);
-    #[cfg(any(target_os = "windows", target_os = "macos"))]
-    let preferred = prefer_existing_path(
-        preferred,
-        xdg_dir("XDG_DATA_HOME", ".local/share").join(APP_DIR),
-    );
-    preferred
+    match platform {
+        #[cfg(any(not(any(target_os = "windows", target_os = "macos")), test))]
+        PathPlatform::Xdg => preferred,
+        #[cfg(any(target_os = "windows", target_os = "macos", test))]
+        _ => prefer_existing_path(
+            preferred,
+            xdg_dir_from(lookup, "XDG_DATA_HOME", ".local/share").join(APP_DIR),
+        ),
+    }
 }
 
 fn settings_path() -> PathBuf {
-    #[cfg(target_os = "windows")]
-    let root = env::var_os("APPDATA")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home_dir().join("AppData/Roaming"));
-    #[cfg(target_os = "macos")]
-    let root = home_dir().join("Library/Application Support");
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    let root = xdg_dir("XDG_CONFIG_HOME", ".config");
+    settings_path_from(PathPlatform::current(), &|name| env::var_os(name))
+}
+
+fn settings_path_from(
+    platform: PathPlatform,
+    lookup: &impl Fn(&str) -> Option<OsString>,
+) -> PathBuf {
+    let root = match platform {
+        #[cfg(any(target_os = "windows", test))]
+        PathPlatform::Windows => lookup("APPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home_dir_from(platform, lookup).join("AppData/Roaming")),
+        #[cfg(any(target_os = "macos", test))]
+        PathPlatform::Macos => home_dir_from(platform, lookup).join("Library/Application Support"),
+        #[cfg(any(not(any(target_os = "windows", target_os = "macos")), test))]
+        PathPlatform::Xdg => xdg_dir_from(lookup, "XDG_CONFIG_HOME", ".config"),
+    };
     let preferred = root.join(APP_DIR).join("settings.json");
-    #[cfg(any(target_os = "windows", target_os = "macos"))]
-    let preferred = prefer_existing_path(
-        preferred,
-        xdg_dir("XDG_CONFIG_HOME", ".config")
-            .join(APP_DIR)
-            .join("settings.json"),
-    );
-    preferred
+    match platform {
+        #[cfg(any(not(any(target_os = "windows", target_os = "macos")), test))]
+        PathPlatform::Xdg => preferred,
+        #[cfg(any(target_os = "windows", target_os = "macos", test))]
+        _ => prefer_existing_path(
+            preferred,
+            xdg_dir_from(lookup, "XDG_CONFIG_HOME", ".config")
+                .join(APP_DIR)
+                .join("settings.json"),
+        ),
+    }
 }
 
 #[cfg(any(target_os = "windows", target_os = "macos", test))]
@@ -475,25 +521,34 @@ fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> Result<(), String>
     write_result
 }
 
-fn xdg_dir(variable: &str, fallback: &str) -> PathBuf {
+fn xdg_dir_from(
+    lookup: &impl Fn(&str) -> Option<OsString>,
+    variable: &str,
+    fallback: &str,
+) -> PathBuf {
     // Earlier versions used HOME on every platform, including Windows.
-    let home = env::var_os("HOME")
+    let home = lookup("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
-    xdg_dir_from(home, env::var_os(variable).map(PathBuf::from), fallback)
-}
-
-fn xdg_dir_from(home: PathBuf, override_dir: Option<PathBuf>, fallback: &str) -> PathBuf {
-    override_dir
+    lookup(variable)
+        .map(PathBuf::from)
         .filter(|path| !path.as_os_str().is_empty())
         .unwrap_or_else(|| home.join(fallback))
 }
 
 fn home_dir() -> PathBuf {
-    #[cfg(target_os = "windows")]
-    let home = env::var_os("USERPROFILE").or_else(|| env::var_os("HOME"));
-    #[cfg(not(target_os = "windows"))]
-    let home = env::var_os("HOME");
+    home_dir_from(PathPlatform::current(), &|name| env::var_os(name))
+}
+
+fn home_dir_from(platform: PathPlatform, lookup: &impl Fn(&str) -> Option<OsString>) -> PathBuf {
+    let home = match platform {
+        #[cfg(any(target_os = "windows", test))]
+        PathPlatform::Windows => lookup("USERPROFILE").or_else(|| lookup("HOME")),
+        #[cfg(any(target_os = "macos", test))]
+        PathPlatform::Macos => lookup("HOME"),
+        #[cfg(any(not(any(target_os = "windows", target_os = "macos")), test))]
+        PathPlatform::Xdg => lookup("HOME"),
+    };
     home.map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."))
 }
@@ -536,70 +591,115 @@ mod tests {
     #[test]
     fn native_paths_reuse_legacy_locations_independently() {
         let root = test_root();
-        for (native_root, settings_root) in [
-            ("Library/Application Support", "Library/Application Support"),
-            ("AppData/Local", "AppData/Roaming"),
+        for (platform, name) in [
+            (PathPlatform::Macos, "macos"),
+            (PathPlatform::Windows, "windows"),
         ] {
-            let home = root.join(native_root.replace('/', "-"));
-            let preferred_workspace = home.join(native_root).join(APP_DIR);
-            let preferred_settings = home.join(settings_root).join(APP_DIR).join("settings.json");
-            let legacy_workspace = xdg_dir_from(home.clone(), None, ".local/share").join(APP_DIR);
-            let legacy_settings = xdg_dir_from(home.clone(), None, ".config")
-                .join(APP_DIR)
-                .join("settings.json");
+            for overrides in [false, true] {
+                let case = root.join(format!("{name}-{overrides}"));
+                let home = case.join("home");
+                let profile = case.join("profile");
+                let mut environment = BTreeMap::from([
+                    ("HOME", home.clone().into_os_string()),
+                    ("USERPROFILE", profile.clone().into_os_string()),
+                ]);
+                let (native_data, native_config) = match platform {
+                    PathPlatform::Macos => {
+                        let native = home.join("Library/Application Support");
+                        (native.clone(), native)
+                    }
+                    PathPlatform::Windows => (
+                        profile.join("AppData/Local"),
+                        profile.join("AppData/Roaming"),
+                    ),
+                    PathPlatform::Xdg => unreachable!(),
+                };
+                let (native_data, native_config, legacy_data, legacy_config) = if overrides {
+                    let data = case.join("native-data");
+                    let config = case.join("native-config");
+                    let xdg_data = case.join("xdg-data");
+                    let xdg_config = case.join("xdg-config");
+                    environment.extend([
+                        ("LOCALAPPDATA", data.clone().into_os_string()),
+                        ("APPDATA", config.clone().into_os_string()),
+                        ("XDG_DATA_HOME", xdg_data.clone().into_os_string()),
+                        ("XDG_CONFIG_HOME", xdg_config.clone().into_os_string()),
+                    ]);
+                    match platform {
+                        PathPlatform::Windows => (data, config, xdg_data, xdg_config),
+                        _ => (native_data, native_config, xdg_data, xdg_config),
+                    }
+                } else {
+                    (
+                        native_data,
+                        native_config,
+                        home.join(".local/share"),
+                        home.join(".config"),
+                    )
+                };
+                let lookup = |name: &str| environment.get(name).cloned();
+                let preferred_workspace = native_data.join(APP_DIR);
+                let preferred_settings = native_config.join(APP_DIR).join("settings.json");
+                let legacy_workspace = legacy_data.join(APP_DIR);
+                let legacy_settings = legacy_config.join(APP_DIR).join("settings.json");
 
-            assert_eq!(
-                prefer_existing_path(preferred_workspace.clone(), legacy_workspace.clone()),
-                preferred_workspace
-            );
-            assert_eq!(
-                prefer_existing_path(preferred_settings.clone(), legacy_settings.clone()),
-                preferred_settings
-            );
-            assert!(!preferred_workspace.exists());
+                assert_eq!(
+                    default_workspace_dir_from(platform, &lookup),
+                    preferred_workspace
+                );
+                assert_eq!(settings_path_from(platform, &lookup), preferred_settings);
+                assert!(!preferred_workspace.exists());
 
-            let legacy_list =
-                create_list(&legacy_workspace, "Existing tasks", Accent::Mint).unwrap();
-            let settings = Settings {
-                workspace_path: home.join("chosen-workspace").to_string_lossy().into_owned(),
-                font_size: 24.0,
-                ..Settings::default()
-            };
-            write_json_atomic(&legacy_settings, &settings).unwrap();
-            let selected_workspace =
-                prefer_existing_path(preferred_workspace.clone(), legacy_workspace.clone());
-            assert_eq!(selected_workspace, legacy_workspace);
-            assert_eq!(
-                load_workspace(&selected_workspace).unwrap().lists[0]
-                    .data
-                    .title,
-                "Existing tasks"
-            );
-            let selected_settings =
-                prefer_existing_path(preferred_settings.clone(), legacy_settings.clone());
-            let reloaded: Settings =
-                serde_json::from_slice(&fs::read(&selected_settings).unwrap()).unwrap();
-            assert_eq!(selected_settings, legacy_settings);
-            assert_eq!(reloaded.workspace_path, settings.workspace_path);
-            assert_eq!(reloaded.font_size, 24.0);
-            assert!(legacy_list.path.exists());
-            assert!(!preferred_workspace.exists());
+                let legacy_list =
+                    create_list(&legacy_workspace, "Existing tasks", Accent::Mint).unwrap();
+                let settings = Settings {
+                    workspace_path: home.join("chosen-workspace").to_string_lossy().into_owned(),
+                    font_size: 24.0,
+                    ..Settings::default()
+                };
+                write_json_atomic(&legacy_settings, &settings).unwrap();
+                let selected_workspace = default_workspace_dir_from(platform, &lookup);
+                assert_eq!(selected_workspace, legacy_workspace);
+                assert_eq!(
+                    load_workspace(&selected_workspace).unwrap().lists[0]
+                        .data
+                        .title,
+                    "Existing tasks"
+                );
+                let selected_settings = settings_path_from(platform, &lookup);
+                let reloaded: Settings =
+                    serde_json::from_slice(&fs::read(&selected_settings).unwrap()).unwrap();
+                assert_eq!(selected_settings, legacy_settings);
+                assert_eq!(reloaded.workspace_path, settings.workspace_path);
+                assert_eq!(reloaded.font_size, 24.0);
+                assert!(legacy_list.path.exists());
+                assert!(!preferred_workspace.exists());
 
-            fs::create_dir_all(&preferred_workspace).unwrap();
-            assert_eq!(
-                prefer_existing_path(preferred_workspace.clone(), legacy_workspace),
-                preferred_workspace
-            );
-            // Creating the native workspace does not supersede legacy settings.
-            assert_eq!(
-                prefer_existing_path(preferred_settings.clone(), legacy_settings.clone()),
-                legacy_settings
-            );
-            write_json_atomic(&preferred_settings, &Settings::default()).unwrap();
-            assert_eq!(
-                prefer_existing_path(preferred_settings.clone(), legacy_settings),
-                preferred_settings
-            );
+                fs::create_dir_all(&preferred_workspace).unwrap();
+                assert_eq!(
+                    default_workspace_dir_from(platform, &lookup),
+                    preferred_workspace
+                );
+                // Creating the native workspace does not supersede legacy settings.
+                assert_eq!(settings_path_from(platform, &lookup), legacy_settings);
+                let mut changed = reloaded;
+                changed.font_size = 28.0;
+                write_json_atomic(&settings_path_from(platform, &lookup), &changed).unwrap();
+                let reloaded: Settings =
+                    serde_json::from_slice(&fs::read(&legacy_settings).unwrap()).unwrap();
+                assert_eq!(reloaded.font_size, 28.0);
+                assert!(!preferred_settings.exists());
+                write_json_atomic(&preferred_settings, &Settings::default()).unwrap();
+                assert_eq!(settings_path_from(platform, &lookup), preferred_settings);
+                // Settings precedence does not make an absent native workspace win.
+                if matches!(platform, PathPlatform::Windows) {
+                    fs::remove_dir_all(&preferred_workspace).unwrap();
+                    assert_eq!(
+                        default_workspace_dir_from(platform, &lookup),
+                        legacy_workspace
+                    );
+                }
+            }
         }
         fs::remove_dir_all(root).unwrap();
     }
@@ -608,25 +708,104 @@ mod tests {
     fn legacy_paths_keep_xdg_overrides_and_ignore_empty_values() {
         let root = test_root();
         let home = root.join("home");
-        for fallback in [".local/share", ".config"] {
+        let profile = root.join("profile");
+        for xdg_override in [None, Some(PathBuf::new()), Some(root.join("override"))] {
+            let mut environment = BTreeMap::from([
+                ("HOME", home.clone().into_os_string()),
+                ("USERPROFILE", profile.clone().into_os_string()),
+            ]);
+            if let Some(ref override_root) = xdg_override {
+                let (data, config) = if override_root.as_os_str().is_empty() {
+                    (PathBuf::new(), PathBuf::new())
+                } else {
+                    (override_root.join("data"), override_root.join("config"))
+                };
+                environment.extend([
+                    ("XDG_DATA_HOME", data.into_os_string()),
+                    ("XDG_CONFIG_HOME", config.into_os_string()),
+                ]);
+            }
+            let lookup = |name: &str| environment.get(name).cloned();
+            let (data, config) = match xdg_override {
+                Some(path) if !path.as_os_str().is_empty() => {
+                    (path.join("data"), path.join("config"))
+                }
+                _ => (home.join(".local/share"), home.join(".config")),
+            };
+            let workspace = data.join(APP_DIR);
+            let settings = config.join(APP_DIR).join("settings.json");
             assert_eq!(
-                xdg_dir_from(home.clone(), None, fallback),
-                home.join(fallback)
+                default_workspace_dir_from(PathPlatform::Xdg, &lookup),
+                workspace
+            );
+            assert_eq!(settings_path_from(PathPlatform::Xdg, &lookup), settings);
+            fs::create_dir_all(&workspace).unwrap();
+            write_json_atomic(&settings, &Settings::default()).unwrap();
+            for platform in [
+                PathPlatform::Xdg,
+                PathPlatform::Macos,
+                PathPlatform::Windows,
+            ] {
+                assert_eq!(default_workspace_dir_from(platform, &lookup), workspace);
+                assert_eq!(settings_path_from(platform, &lookup), settings);
+            }
+        }
+        fs::remove_dir_all(&home).unwrap();
+        for environment in [
+            BTreeMap::from([("HOME", home.clone().into_os_string())]),
+            BTreeMap::from([("USERPROFILE", profile.into_os_string())]),
+            BTreeMap::new(),
+        ] {
+            let lookup = |name: &str| environment.get(name).cloned();
+            let native_home = environment
+                .get("USERPROFILE")
+                .or_else(|| environment.get("HOME"))
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("."));
+            assert_eq!(home_dir_from(PathPlatform::Windows, &lookup), native_home);
+            let legacy_home = environment
+                .get("HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("."));
+            assert_eq!(
+                xdg_dir_from(&lookup, "XDG_DATA_HOME", ".local/share"),
+                legacy_home.join(".local/share")
             );
             assert_eq!(
-                xdg_dir_from(home.clone(), Some(PathBuf::new()), fallback),
-                home.join(fallback)
+                xdg_dir_from(&lookup, "XDG_CONFIG_HOME", ".config"),
+                legacy_home.join(".config")
             );
-            let override_root = root.join(fallback.trim_start_matches('.'));
-            let legacy =
-                xdg_dir_from(home.clone(), Some(override_root.clone()), fallback).join(APP_DIR);
-            fs::create_dir_all(&legacy).unwrap();
-            assert_eq!(legacy, override_root.join(APP_DIR));
             assert_eq!(
-                prefer_existing_path(home.join("native"), legacy.clone()),
-                legacy
+                default_workspace_dir_from(PathPlatform::Windows, &lookup),
+                native_home.join("AppData/Local").join(APP_DIR)
+            );
+            assert_eq!(
+                settings_path_from(PathPlatform::Windows, &lookup),
+                native_home
+                    .join("AppData/Roaming")
+                    .join(APP_DIR)
+                    .join("settings.json")
             );
         }
+        let environment = BTreeMap::from([
+            ("HOME", home.into_os_string()),
+            ("USERPROFILE", OsString::new()),
+            ("LOCALAPPDATA", OsString::new()),
+            ("APPDATA", OsString::new()),
+        ]);
+        let lookup = |name: &str| environment.get(name).cloned();
+        assert_eq!(
+            home_dir_from(PathPlatform::Windows, &lookup),
+            PathBuf::new()
+        );
+        assert_eq!(
+            default_workspace_dir_from(PathPlatform::Windows, &lookup),
+            PathBuf::from(APP_DIR)
+        );
+        assert_eq!(
+            settings_path_from(PathPlatform::Windows, &lookup),
+            PathBuf::from(APP_DIR).join("settings.json")
+        );
         fs::remove_dir_all(root).unwrap();
     }
 
