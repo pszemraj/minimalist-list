@@ -536,6 +536,10 @@ impl MinimalistApp {
 }
 
 impl eframe::App for MinimalistApp {
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.finish_pending_changes();
+    }
+
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
         [0.0; 4]
     }

@@ -13,6 +13,10 @@ impl MinimalistApp {
     /// - `ctx` - Native application's egui context.
     /// - `supports_hiding` - Whether the selected window backend supports hide and restore.
     pub fn setup_tray(&mut self, ctx: &egui::Context, supports_hiding: bool) {
+        // A desktop without a usable tray uses ordinary window behavior quietly.
+        if !supports_hiding {
+            return;
+        }
         match Tray::new(ctx, supports_hiding) {
             Ok(tray) => self.tray = Some(tray),
             Err(error) => {
@@ -44,13 +48,14 @@ impl MinimalistApp {
     ///
     /// - `ctx` - Context receiving native window commands.
     pub(super) fn close_window(&mut self, ctx: &egui::Context) {
-        if !self.hide_window(ctx) {
+        let available = self.tray.as_ref().is_some_and(Tray::available);
+        if !self.hide_window(ctx, available) {
             ctx.send_viewport_cmd(ViewportCommand::Close);
         }
     }
 
-    fn hide_window(&mut self, ctx: &egui::Context) -> bool {
-        if !self.tray.as_ref().is_some_and(Tray::available) {
+    fn hide_window(&mut self, ctx: &egui::Context, tray_available: bool) -> bool {
+        if !tray_available {
             return false;
         }
         self.finish_inline_edit();
@@ -75,8 +80,28 @@ impl MinimalistApp {
     /// - `ctx` - Context containing the close request and receiving window commands.
     /// - `minimized` - Current minimized state from the native window.
     pub(super) fn handle_window_actions(&mut self, ctx: &egui::Context, minimized: bool) {
+        let actions: Vec<_> =
+            std::iter::from_fn(|| self.tray.as_ref().and_then(Tray::next_action)).collect();
+        let close_requested = ctx.input(|input| input.viewport().close_requested());
+        // Show and Quit take precedence; idle visible ticks need no D-Bus probe.
+        let check_host = actions.is_empty()
+            && !self.quitting
+            && (close_requested
+                || (minimized && !self.window_hidden)
+                || (self.window_hidden && Instant::now() >= self.next_scan));
+        let tray_available = check_host && self.tray.as_ref().is_some_and(Tray::available);
+        self.handle_window_events(ctx, minimized, &actions, tray_available);
+    }
+
+    fn handle_window_events(
+        &mut self,
+        ctx: &egui::Context,
+        minimized: bool,
+        actions: &[Action],
+        tray_available: bool,
+    ) {
         let mut shown = false;
-        while let Some(action) = self.tray.as_ref().and_then(Tray::next_action) {
+        for action in actions {
             match action {
                 Action::Show => {
                     self.show_window(ctx);
@@ -99,15 +124,12 @@ impl MinimalistApp {
             return;
         }
         if close_requested {
-            if self.hide_window(ctx) {
+            if self.hide_window(ctx, tray_available) {
                 ctx.send_viewport_cmd(ViewportCommand::CancelClose);
             }
         } else if minimized && !self.window_hidden {
-            self.hide_window(ctx);
-        } else if self.window_hidden
-            && Instant::now() >= self.next_scan
-            && !self.tray.as_ref().is_some_and(Tray::available)
-        {
+            self.hide_window(ctx, tray_available);
+        } else if self.window_hidden && Instant::now() >= self.next_scan && !tray_available {
             self.show_window(ctx);
             self.status =
                 Some("The desktop tray is unavailable; the window has been restored.".into());
@@ -127,7 +149,8 @@ impl MinimalistApp {
         }
     }
 
-    fn finish_pending_changes(&mut self) {
+    /// Saves inline text and accepted delete/archive actions before native shutdown.
+    pub(super) fn finish_pending_changes(&mut self) {
         self.drag = None;
         self.finish_inline_edit();
         if let Some((list_id, task_id, _)) = self.delete_animation.take() {
@@ -146,69 +169,151 @@ mod tests {
     use crate::model::Task;
 
     #[test]
-    fn finishing_inline_edit_saves_and_unblocks_external_reloads() {
-        let (_, mut app) = test_app();
+    fn window_events_save_hide_restore_and_reload() {
+        let (ctx, mut app) = test_app();
         let list_id = app.lists[0].key;
         let task = Task::new("Before editing");
         app.editing = Some((list_id, task.id));
         app.edit_text = "Saved before hiding".into();
         app.lists[0].data.tasks = vec![task];
 
-        app.finish_inline_edit();
+        let output = ctx.run_logic(&Default::default(), |ctx| {
+            app.handle_window_events(ctx, true, &[], true);
+        });
+        assert!(app.window_hidden);
+        assert!(
+            output.viewport_commands[&egui::ViewportId::ROOT]
+                .contains(&ViewportCommand::Visible(false))
+        );
         assert!(app.editing.is_none());
         let mut saved = crate::storage::load_workspace(&app.workspace).unwrap();
         assert_eq!(saved.lists[0].data.tasks[0].text, "Saved before hiding");
 
         saved.lists[0].data.tasks[0].text = "Changed on another computer".into();
         crate::storage::save_list(&saved.lists[0]).unwrap();
-        app.window_hidden = true;
         app.next_scan = Instant::now();
         app.scan_external_changes();
         assert_eq!(
             app.lists[0].data.tasks[0].text,
             "Changed on another computer"
         );
-        std::fs::remove_dir_all(&app.workspace).unwrap();
-    }
 
-    #[test]
-    fn quit_flushes_inline_edit_and_pending_mutations_to_disk() {
-        let (ctx, mut app) = test_app();
-        let list_id = app.lists[0].key;
-        let edited = Task::new("Before editing");
-        let mut completed = Task::new("Archive on quit");
-        completed.completed = true;
-        let deleted = Task::new("Delete on quit");
-        app.editing = Some((list_id, edited.id));
-        app.edit_text = "After editing".into();
-        app.lists[0].data.tasks = vec![edited, completed, deleted.clone()];
-        app.delete_animation = Some((list_id, deleted.id, Instant::now()));
-        app.clear_animation = Some((list_id, Instant::now()));
-        app.window_hidden = true;
-        let output = ctx.run_logic(&Default::default(), |ctx| app.quit(ctx));
-        assert!(app.quitting);
-        assert!(
-            output.viewport_commands[&egui::ViewportId::ROOT].contains(&ViewportCommand::Close)
-        );
-        let saved = crate::storage::load_workspace(&app.workspace).unwrap();
-        assert_eq!(saved.lists[0].data.tasks.len(), 1);
-        assert_eq!(saved.lists[0].data.tasks[0].text, "After editing");
-        assert_eq!(saved.lists[0].data.archive.len(), 1);
-        assert_eq!(saved.lists[0].data.archive[0].task.text, "Archive on quit");
-        let mut input = egui::RawInput::default();
-        input
+        // A tray Show wins over stale minimize and close input in the same tick.
+        let mut close_input = egui::RawInput::default();
+        close_input
             .viewports
             .get_mut(&egui::ViewportId::ROOT)
             .unwrap()
             .events = vec![egui::ViewportEvent::Close];
-        let output = ctx.run_logic(&input, |ctx| app.handle_window_actions(ctx, true));
+        let output = ctx.run_logic(&close_input, |ctx| {
+            app.handle_window_events(ctx, true, &[Action::Show], false);
+        });
+        assert!(!app.window_hidden);
+        let commands = &output.viewport_commands[&egui::ViewportId::ROOT];
+        for command in [
+            ViewportCommand::Visible(true),
+            ViewportCommand::Minimized(false),
+            ViewportCommand::Focus,
+            ViewportCommand::CancelClose,
+        ] {
+            assert!(commands.contains(&command));
+        }
+        assert!(!commands.contains(&ViewportCommand::Visible(false)));
+
+        let _ = ctx.run_logic(&Default::default(), |ctx| {
+            app.handle_window_events(ctx, true, &[], true);
+        });
+        app.next_scan = Instant::now() + SCAN_INTERVAL;
+        let _ = ctx.run_logic(&Default::default(), |ctx| {
+            app.handle_window_events(ctx, false, &[], false);
+        });
+        assert!(app.window_hidden);
+        app.next_scan = Instant::now();
+        let output = ctx.run_logic(&Default::default(), |ctx| {
+            app.handle_window_events(ctx, false, &[], false);
+        });
+        assert!(!app.window_hidden);
         assert!(
-            !output
+            output.viewport_commands[&egui::ViewportId::ROOT]
+                .contains(&ViewportCommand::Visible(true))
+        );
+
+        // No tray is an ordinary fallback: minimize stays visible to the taskbar,
+        // and native close is not canceled.
+        app.status = None;
+        app.setup_tray(&ctx, false);
+        assert!(app.status.is_none());
+        let output = ctx.run_logic(&Default::default(), |ctx| {
+            app.handle_window_events(ctx, true, &[], false);
+        });
+        assert!(!app.window_hidden);
+        assert!(
+            output
                 .viewport_commands
                 .values()
                 .flatten()
-                .any(|cmd| *cmd == ViewportCommand::CancelClose)
+                .all(|command| *command != ViewportCommand::Visible(false))
+        );
+        let output = ctx.run_logic(&close_input, |ctx| {
+            app.handle_window_events(ctx, false, &[], false);
+        });
+        assert!(
+            output
+                .viewport_commands
+                .values()
+                .flatten()
+                .all(|command| *command != ViewportCommand::CancelClose)
         );
         std::fs::remove_dir_all(&app.workspace).unwrap();
+    }
+
+    #[test]
+    fn shutdown_flushes_inline_edit_and_pending_mutations_to_disk() {
+        for tray_quit in [false, true] {
+            let (ctx, mut app) = test_app();
+            let list_id = app.lists[0].key;
+            let edited = Task::new("Before editing");
+            let mut completed = Task::new("Archive on quit");
+            completed.completed = true;
+            let deleted = Task::new("Delete on quit");
+            app.editing = Some((list_id, edited.id));
+            app.edit_text = "After editing".into();
+            app.lists[0].data.tasks = vec![edited, completed, deleted.clone()];
+            app.delete_animation = Some((list_id, deleted.id, Instant::now()));
+            app.clear_animation = Some((list_id, Instant::now()));
+            app.window_hidden = true;
+            let output = ctx.run_logic(&Default::default(), |ctx| {
+                if tray_quit {
+                    app.quit(ctx);
+                } else {
+                    app.close_window(ctx);
+                }
+            });
+            assert_eq!(app.quitting, tray_quit);
+            assert!(
+                output.viewport_commands[&egui::ViewportId::ROOT].contains(&ViewportCommand::Close)
+            );
+            eframe::App::on_exit(&mut app, None);
+            let saved = crate::storage::load_workspace(&app.workspace).unwrap();
+            assert_eq!(saved.lists[0].data.tasks.len(), 1);
+            assert_eq!(saved.lists[0].data.tasks[0].text, "After editing");
+            assert_eq!(saved.lists[0].data.archive.len(), 1);
+            assert_eq!(saved.lists[0].data.archive[0].task.text, "Archive on quit");
+            let mut input = egui::RawInput::default();
+            input
+                .viewports
+                .get_mut(&egui::ViewportId::ROOT)
+                .unwrap()
+                .events = vec![egui::ViewportEvent::Close];
+            let output = ctx.run_logic(&input, |ctx| app.handle_window_actions(ctx, true));
+            assert!(
+                !output
+                    .viewport_commands
+                    .values()
+                    .flatten()
+                    .any(|cmd| *cmd == ViewportCommand::CancelClose)
+            );
+            std::fs::remove_dir_all(&app.workspace).unwrap();
+        }
     }
 }

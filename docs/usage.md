@@ -38,7 +38,7 @@ The header's `pin` control toggles always-on-top mode. When native window decora
 
 Closing or minimizing the window saves any inline edit and hides it in the system tray. Open the tray icon's menu and choose **Show Minimalist List** to restore it or **Quit** to exit. Activating the icon also restores the window on desktops that support it. Shared-folder polling continues while hidden.
 
-Linux uses X11 or XWayland for hiding and restoration. A desktop tray host is required, such as GNOME's AppIndicator extension or KDE's system tray. If tray support is unavailable, the app reports it and close/minimize retain their normal behavior.
+Linux uses X11 or XWayland for hiding and restoration when a desktop tray host is available, such as GNOME's AppIndicator extension or KDE's system tray. Without a usable tray, the app keeps the normal window backend and close/minimize behavior without a startup warning. Exiting saves inline edits and pending clear/delete actions.
 
 Typography settings control proportional or monospace text, weight, size, and row spacing. Existing typography preferences are retained; reduce row spacing to fit more tasks on screen.
 

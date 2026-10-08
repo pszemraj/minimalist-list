@@ -120,6 +120,16 @@ impl Tray {
     }
 }
 
+/// Reports whether Linux has a registered desktop tray host.
+///
+/// # Returns
+///
+/// Whether the desktop exposes a usable StatusNotifier host.
+#[cfg(target_os = "linux")]
+pub(crate) fn linux_host_available() -> bool {
+    linux_host().is_ok()
+}
+
 #[cfg(target_os = "linux")]
 fn linux_host() -> Result<zbus::blocking::Proxy<'static>, String> {
     let connection = zbus::blocking::connection::Builder::session()

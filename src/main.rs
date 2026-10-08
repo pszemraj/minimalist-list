@@ -76,6 +76,11 @@ fn select_workspace_override(
     })
 }
 
+#[cfg(target_os = "linux")]
+fn linux_tray_supported(x11_available: bool, host_available: bool) -> bool {
+    x11_available && host_available
+}
+
 fn main() -> eframe::Result {
     let data_dir = match parse_launch_args(env::args_os().skip(1)) {
         Ok(LaunchAction::Run { data_dir }) => data_dir,
@@ -115,9 +120,10 @@ fn main() -> eframe::Result {
         renderer: eframe::Renderer::Glow,
         ..Default::default()
     };
-    // Winit cannot hide or restore native Wayland windows. Use XWayland when available.
+    // Winit cannot hide or restore native Wayland windows. Prefer X11 only for a usable tray.
     #[cfg(target_os = "linux")]
-    let tray_supported = x11rb::connect(None).is_ok();
+    let tray_supported =
+        linux_tray_supported(x11rb::connect(None).is_ok(), tray::linux_host_available());
     #[cfg(not(target_os = "linux"))]
     let tray_supported = true;
     #[cfg(target_os = "linux")]
@@ -145,6 +151,15 @@ fn main() -> eframe::Result {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn x11_tray_requires_both_display_and_host() {
+        assert!(linux_tray_supported(true, true));
+        assert!(!linux_tray_supported(true, false));
+        assert!(!linux_tray_supported(false, true));
+        assert!(!linux_tray_supported(false, false));
+    }
 
     #[test]
     fn parses_data_dir_argument() {
