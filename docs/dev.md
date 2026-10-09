@@ -15,6 +15,7 @@ src/app/theme.rs           Accent palettes and shared rendering helpers
 src/app/window.rs          Tray hiding, restoration, and shutdown
 src/model.rs               Serializable list and task model
 src/storage.rs             Platform paths, list files, polling, and atomic writes
+src/storage_tests.rs       Storage and platform-path regression tests
 src/tray.rs                Native tray icon and menu actions
 ```
 

@@ -39,7 +39,7 @@ Appearance, pinning, and workspace preferences are stored in the local settings 
 | macOS | `~/Library/Application Support/minimalist-list/` | `~/Library/Application Support/minimalist-list/settings.json` |
 | Windows | `%LOCALAPPDATA%\minimalist-list\` | `%APPDATA%\minimalist-list\settings.json` |
 
-When the Windows environment variables are absent, paths fall back to `AppData\Local` and `AppData\Roaming` beneath the home directory.
+When the Windows environment variables are absent or empty, paths fall back to `AppData\Local` and `AppData\Roaming` beneath the home directory. An absent or empty `USERPROFILE` falls back to `HOME`.
 
 Earlier versions used the Linux-style XDG paths on macOS and Windows too. If the
 native default workspace directory does not exist, an existing
