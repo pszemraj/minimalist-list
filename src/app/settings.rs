@@ -1,7 +1,7 @@
 //! In-app workspace, appearance, and list settings.
 
 use super::{MinimalistApp, text_input_shortcuts, theme::Palette};
-use crate::model::{Accent, FontChoice};
+use crate::model::{Accent, FontChoice, TitleOverflow};
 use crate::storage;
 use eframe::egui;
 use egui::{Align, Button, CursorIcon, Id, Label, Layout, ScrollArea, Sense, Stroke};
@@ -36,10 +36,10 @@ impl MinimalistApp {
                 if !self.settings.window_decorations
                     && ui
                         .add(Button::new(self.rich("x", 18.0, palette.muted)).frame(false))
-                        .on_hover_text("Close")
+                        .on_hover_text(self.close_hint())
                         .clicked()
                 {
-                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+                    self.close_window(ui.ctx());
                 }
             });
         });
@@ -54,6 +54,14 @@ impl MinimalistApp {
         let workspace_font = self.font_id(15.0);
         Self::surface_card(ui, palette, |ui| {
             ui.label(self.rich("Workspace", 18.0, palette.text));
+            ui.add(
+                egui::Label::new(self.rich(
+                    self.workspace.display().to_string(),
+                    12.0,
+                    palette.accent,
+                ))
+                .wrap(),
+            );
             ui.label(self.rich(
                 "One readable JSON file per list. Any shared folder can sync it.",
                 13.0,
@@ -68,7 +76,7 @@ impl MinimalistApp {
                 workspace_font,
                 palette,
             );
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 let choose_folder = ui
                     .add(Button::new(self.rich("Choose folder", 15.0, palette.accent)).frame(false))
                     .clicked();
@@ -122,6 +130,13 @@ impl MinimalistApp {
                 12.0,
                 palette.muted,
             ));
+            if self.tray.is_some() {
+                ui.label(self.rich(
+                    "Close or minimize hides the window. Use the tray menu to Show or Quit.",
+                    12.0,
+                    palette.muted,
+                ));
+            }
         });
         if window_changed {
             self.last_pin_state = None;
@@ -133,6 +148,7 @@ impl MinimalistApp {
         let mut appearance_changed = false;
         Self::surface_card(ui, palette, |ui| {
             ui.label(self.rich("Appearance", 18.0, palette.text));
+            ui.spacing_mut().slider_width = ui.available_width();
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 for (choice, label) in [(FontChoice::Sans, "Sans"), (FontChoice::Mono, "Mono")] {
@@ -212,6 +228,52 @@ impl MinimalistApp {
                 .add_sized(
                     [ui.available_width(), 18.0],
                     egui::Slider::new(&mut self.settings.row_padding, 4.0..=24.0)
+                        .show_value(false)
+                        .trailing_fill(true),
+                )
+                .changed();
+
+            ui.add_space(10.0);
+            ui.label(self.rich("Long titles", 14.0, palette.text));
+            ui.horizontal_wrapped(|ui| {
+                appearance_changed |= ui
+                    .selectable_value(
+                        &mut self.settings.title_overflow,
+                        TitleOverflow::Scroll,
+                        "Scroll",
+                    )
+                    .changed();
+                appearance_changed |= ui
+                    .selectable_value(
+                        &mut self.settings.title_overflow,
+                        TitleOverflow::Wrap,
+                        "Wrap",
+                    )
+                    .changed();
+            });
+            ui.label(self.rich(
+                match self.settings.title_overflow {
+                    TitleOverflow::Scroll => "One line. Hover to scroll long titles.",
+                    TitleOverflow::Wrap => "Full titles wrap onto additional lines.",
+                },
+                12.0,
+                palette.muted,
+            ));
+
+            ui.add_space(10.0);
+            ui.horizontal(|ui| {
+                ui.label(self.rich("Background opacity", 14.0, palette.text));
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.label(self.rich(
+                        format!("{:.0}%", self.settings.background_opacity * 100.0),
+                        13.0,
+                        palette.accent,
+                    ));
+                });
+            });
+            appearance_changed |= ui
+                .add(
+                    egui::Slider::new(&mut self.settings.background_opacity, 0.2..=1.0)
                         .show_value(false)
                         .trailing_fill(true),
                 )

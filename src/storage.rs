@@ -1,9 +1,10 @@
 //! Settings and folder-backed list persistence.
 
-use crate::model::{Accent, FontChoice, TodoList};
+use crate::model::{Accent, FontChoice, TitleOverflow, TodoList};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 use std::env;
+use std::ffi::OsString;
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -23,6 +24,8 @@ pub struct Settings {
     pub font_size: f32,
     pub bold_text: bool,
     pub row_padding: f32,
+    pub title_overflow: TitleOverflow,
+    pub background_opacity: f32,
     pub last_list_id: Option<Uuid>,
     pub last_capture_list_id: Option<Uuid>,
 }
@@ -36,7 +39,9 @@ impl Default for Settings {
             font: FontChoice::Sans,
             font_size: 19.0,
             bold_text: false,
-            row_padding: 12.0,
+            row_padding: 6.0,
+            title_overflow: TitleOverflow::Scroll,
+            background_opacity: 0.85,
             last_list_id: None,
             last_capture_list_id: None,
         }
@@ -381,15 +386,100 @@ fn stamp_from_metadata(metadata: &fs::Metadata) -> FileStamp {
 ///
 /// # Returns
 ///
-/// The application's directory beneath the platform data root.
+/// The application's directory beneath the platform data root, or an existing
+/// legacy workspace when the native directory does not exist.
 pub fn default_workspace_dir() -> PathBuf {
-    xdg_dir("XDG_DATA_HOME", ".local/share").join(APP_DIR)
+    default_workspace_dir_from(PathPlatform::current(), &|name| env::var_os(name))
+}
+
+#[derive(Clone, Copy)]
+enum PathPlatform {
+    #[cfg(any(target_os = "windows", test))]
+    Windows,
+    #[cfg(any(target_os = "macos", test))]
+    Macos,
+    #[cfg(any(not(any(target_os = "windows", target_os = "macos")), test))]
+    Xdg,
+}
+
+impl PathPlatform {
+    fn current() -> Self {
+        #[cfg(target_os = "windows")]
+        return Self::Windows;
+        #[cfg(target_os = "macos")]
+        return Self::Macos;
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        Self::Xdg
+    }
+}
+
+fn default_workspace_dir_from(
+    platform: PathPlatform,
+    lookup: &impl Fn(&str) -> Option<OsString>,
+) -> PathBuf {
+    let root = match platform {
+        #[cfg(any(target_os = "windows", test))]
+        PathPlatform::Windows => lookup("LOCALAPPDATA")
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home_dir_from(platform, lookup).join("AppData/Local")),
+        #[cfg(any(target_os = "macos", test))]
+        PathPlatform::Macos => home_dir_from(platform, lookup).join("Library/Application Support"),
+        #[cfg(any(not(any(target_os = "windows", target_os = "macos")), test))]
+        PathPlatform::Xdg => xdg_dir_from(lookup, "XDG_DATA_HOME", ".local/share"),
+    };
+    let preferred = root.join(APP_DIR);
+    match platform {
+        #[cfg(any(not(any(target_os = "windows", target_os = "macos")), test))]
+        PathPlatform::Xdg => preferred,
+        #[cfg(any(target_os = "windows", target_os = "macos", test))]
+        _ => prefer_existing_path(
+            preferred,
+            xdg_dir_from(lookup, "XDG_DATA_HOME", ".local/share").join(APP_DIR),
+        ),
+    }
 }
 
 fn settings_path() -> PathBuf {
-    xdg_dir("XDG_CONFIG_HOME", ".config")
-        .join(APP_DIR)
-        .join("settings.json")
+    settings_path_from(PathPlatform::current(), &|name| env::var_os(name))
+}
+
+fn settings_path_from(
+    platform: PathPlatform,
+    lookup: &impl Fn(&str) -> Option<OsString>,
+) -> PathBuf {
+    let root = match platform {
+        #[cfg(any(target_os = "windows", test))]
+        PathPlatform::Windows => lookup("APPDATA")
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home_dir_from(platform, lookup).join("AppData/Roaming")),
+        #[cfg(any(target_os = "macos", test))]
+        PathPlatform::Macos => home_dir_from(platform, lookup).join("Library/Application Support"),
+        #[cfg(any(not(any(target_os = "windows", target_os = "macos")), test))]
+        PathPlatform::Xdg => xdg_dir_from(lookup, "XDG_CONFIG_HOME", ".config"),
+    };
+    let preferred = root.join(APP_DIR).join("settings.json");
+    match platform {
+        #[cfg(any(not(any(target_os = "windows", target_os = "macos")), test))]
+        PathPlatform::Xdg => preferred,
+        #[cfg(any(target_os = "windows", target_os = "macos", test))]
+        _ => prefer_existing_path(
+            preferred,
+            xdg_dir_from(lookup, "XDG_CONFIG_HOME", ".config")
+                .join(APP_DIR)
+                .join("settings.json"),
+        ),
+    }
+}
+
+#[cfg(any(target_os = "windows", target_os = "macos", test))]
+fn prefer_existing_path(preferred: PathBuf, legacy: PathBuf) -> PathBuf {
+    if !preferred.exists() && legacy.exists() {
+        legacy
+    } else {
+        preferred
+    }
 }
 
 fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
@@ -433,15 +523,38 @@ fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> Result<(), String>
     write_result
 }
 
-fn xdg_dir(variable: &str, fallback: &str) -> PathBuf {
-    env::var_os(variable)
+fn xdg_dir_from(
+    lookup: &impl Fn(&str) -> Option<OsString>,
+    variable: &str,
+    fallback: &str,
+) -> PathBuf {
+    // Earlier versions used HOME on every platform, including Windows.
+    let home = lookup("HOME")
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
-        .unwrap_or_else(|| home_dir().join(fallback))
+        .unwrap_or_else(|| PathBuf::from("."));
+    lookup(variable)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join(fallback))
 }
 
 fn home_dir() -> PathBuf {
-    env::var_os("HOME")
+    home_dir_from(PathPlatform::current(), &|name| env::var_os(name))
+}
+
+fn home_dir_from(platform: PathPlatform, lookup: &impl Fn(&str) -> Option<OsString>) -> PathBuf {
+    let home = match platform {
+        #[cfg(any(target_os = "windows", test))]
+        PathPlatform::Windows => lookup("USERPROFILE")
+            .filter(|value| !value.is_empty())
+            .or_else(|| lookup("HOME")),
+        #[cfg(any(target_os = "macos", test))]
+        PathPlatform::Macos => lookup("HOME"),
+        #[cfg(any(not(any(target_os = "windows", target_os = "macos")), test))]
+        PathPlatform::Xdg => lookup("HOME"),
+    };
+    home.filter(|value| !value.is_empty())
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."))
 }
@@ -457,155 +570,5 @@ fn expand_tilde(raw: &str) -> PathBuf {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn test_root() -> PathBuf {
-        env::temp_dir().join(format!("minimalist-list-test-{}", Uuid::new_v4()))
-    }
-
-    #[test]
-    fn sort_lists_orders_by_creation_then_identity() {
-        let stored = |title, created_at_unix, key| {
-            let mut data = TodoList::new(title, Accent::Mint);
-            data.id = key;
-            data.created_at_unix = created_at_unix;
-            StoredList {
-                key,
-                path: PathBuf::new(),
-                data,
-            }
-        };
-        let first_id = Uuid::from_u128(1);
-        let second_id = Uuid::from_u128(2);
-        let later_id = Uuid::from_u128(3);
-        let mut lists = vec![
-            stored("Later", 20, later_id),
-            stored("Second", 10, second_id),
-            stored("First", 10, first_id),
-        ];
-
-        sort_lists(&mut lists);
-
-        let actual = lists.iter().map(|list| list.key).collect::<Vec<_>>();
-        assert_eq!(actual, vec![first_id, second_id, later_id]);
-    }
-
-    #[test]
-    fn stores_and_reloads_multiple_lists() {
-        let root = test_root();
-        let root =
-            normalize_workspace_path(&root.to_string_lossy()).expect("create test workspace");
-        let first = create_list(&root, "First", Accent::Mint).expect("create first list");
-        let second = create_list(&root, "Second", Accent::Sky).expect("create second list");
-
-        assert_ne!(first.path, second.path);
-        assert!(first.path.exists());
-        assert!(second.path.exists());
-        assert_eq!(first.path.parent(), second.path.parent());
-
-        let mut expected = vec![
-            (
-                first.data.created_at_unix,
-                first.key,
-                first.data.title.clone(),
-            ),
-            (
-                second.data.created_at_unix,
-                second.key,
-                second.data.title.clone(),
-            ),
-        ];
-        expected.sort_by_key(|(created_at, id, _)| (*created_at, *id));
-        let snapshot = load_workspace(&root).expect("reload workspace");
-        let actual = snapshot
-            .lists
-            .iter()
-            .map(|list| (list.data.created_at_unix, list.key, list.data.title.clone()))
-            .collect::<Vec<_>>();
-        assert_eq!(actual, expected);
-
-        fs::remove_dir_all(root).expect("remove test workspace");
-    }
-
-    #[test]
-    fn updating_one_file_keeps_other_changes_detectable() {
-        let root = test_root();
-        let root =
-            normalize_workspace_path(&root.to_string_lossy()).expect("create test workspace");
-        let mut first = create_list(&root, "First", Accent::Mint).expect("create first list");
-        let mut second = create_list(&root, "Second", Accent::Sky).expect("create second list");
-        let mut known = workspace_fingerprint(&root).expect("fingerprint workspace");
-
-        second.data.title = "Second changed on another machine".to_owned();
-        save_list(&second).expect("save external change");
-        first.data.title = "First changed locally".to_owned();
-        save_list(&first).expect("save local change");
-        update_fingerprint_for_file(&mut known, &first.path).expect("record local write");
-
-        let current = workspace_fingerprint(&root).expect("fingerprint current workspace");
-        let second_name = second
-            .path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .expect("second filename");
-        assert_ne!(known.0.get(second_name), current.0.get(second_name));
-
-        fs::remove_dir_all(root).expect("remove test workspace");
-    }
-
-    #[test]
-    fn canonical_file_wins_over_sync_conflict_copy() {
-        let root = test_root();
-        let root =
-            normalize_workspace_path(&root.to_string_lossy()).expect("create test workspace");
-        let canonical = create_list(&root, "Canonical", Accent::Mint).expect("create list");
-        let conflict_path = root
-            .join("lists")
-            .join(format!("{} (conflicted copy).json", canonical.key));
-        let mut conflict = canonical.clone();
-        conflict.path = conflict_path;
-        conflict.data.title = "Conflict".to_owned();
-        save_list(&conflict).expect("write conflict copy");
-
-        let snapshot = load_workspace(&root).expect("load workspace");
-        assert_eq!(snapshot.lists.len(), 1);
-        assert_eq!(snapshot.lists[0].data.title, "Canonical");
-        assert_eq!(snapshot.warnings.len(), 1);
-        assert!(conflict.path.exists());
-
-        fs::remove_dir_all(root).expect("remove test workspace");
-    }
-
-    #[test]
-    fn atomic_write_leaves_no_temporary_file() {
-        let root = test_root();
-        let root =
-            normalize_workspace_path(&root.to_string_lossy()).expect("create test workspace");
-        let mut list = create_list(&root, "Tasks", Accent::Mint).expect("create list");
-        list.data.title = "Changed".to_owned();
-        save_list(&list).expect("save list");
-
-        let entries = fs::read_dir(root.join("lists"))
-            .expect("read lists directory")
-            .filter_map(Result::ok)
-            .collect::<Vec<_>>();
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].path(), list.path);
-
-        fs::remove_dir_all(root).expect("remove test workspace");
-    }
-
-    #[test]
-    fn legacy_focus_settings_are_ignored() {
-        let settings = serde_json::from_str::<Settings>(
-            r#"{
-                "focus_fullscreen": true,
-                "focus_minutes": 25
-            }"#,
-        )
-        .expect("parse legacy settings");
-
-        assert!(settings.last_capture_list_id.is_none());
-    }
-}
+#[path = "storage_tests.rs"]
+mod tests;

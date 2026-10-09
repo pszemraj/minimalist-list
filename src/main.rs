@@ -3,6 +3,7 @@
 mod app;
 mod model;
 mod storage;
+mod tray;
 
 use app::MinimalistApp;
 use eframe::egui;
@@ -22,7 +23,7 @@ const HELP: &str = concat!(
     "      --data-dir <PATH>  Use PATH as the workspace for this launch\n",
     "  -h, --help             Print help\n",
     "  -V, --version          Print version\n\n",
-    "Workspace precedence: --data-dir, MINIMALIST_LIST_WORKSPACE, saved setting, XDG default.\n",
+    "Workspace precedence: --data-dir, MINIMALIST_LIST_WORKSPACE, saved setting, platform default.\n",
 );
 
 #[derive(Debug, PartialEq, Eq)]
@@ -107,22 +108,36 @@ fn main() -> eframe::Result {
         viewport: egui::ViewportBuilder::default()
             .with_app_id("minimalist-list")
             .with_inner_size([520.0, 760.0])
-            .with_min_inner_size([380.0, 460.0])
+            .with_min_inner_size([320.0, 280.0])
+            .with_transparent(true)
             .with_decorations(settings.window_decorations)
             .with_window_level(level),
         renderer: eframe::Renderer::Glow,
         ..Default::default()
     };
+    // Winit cannot hide or restore native Wayland windows. Prefer X11 only for a usable tray.
+    #[cfg(target_os = "linux")]
+    let tray_supported = x11rb::connect(None).is_ok() && tray::linux_host_available();
+    #[cfg(not(target_os = "linux"))]
+    let tray_supported = true;
+    #[cfg(target_os = "linux")]
+    let options = {
+        let mut options = options;
+        if tray_supported {
+            options.event_loop_builder = Some(Box::new(|builder| {
+                use winit::platform::x11::EventLoopBuilderExtX11;
+                builder.with_x11();
+            }));
+        }
+        options
+    };
     eframe::run_native(
         "Minimalist List",
         options,
         Box::new(move |cc| {
-            Ok(Box::new(MinimalistApp::new(
-                cc,
-                settings,
-                workspace_override,
-                warning,
-            )))
+            let mut app = MinimalistApp::new(&cc.egui_ctx, settings, workspace_override, warning);
+            app.setup_tray(&cc.egui_ctx, tray_supported);
+            Ok(Box::new(app))
         }),
     )
 }

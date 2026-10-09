@@ -59,42 +59,78 @@ impl MinimalistApp {
             .inner_margin(Margin::same(12))
             .show(&mut panel_ui, |ui| {
                 for subtask in &task.subtasks {
-                    let row = ui.horizontal(|ui| {
-                        let completion_progress = ui.ctx().animate_bool_with_time_and_easing(
-                            Id::new(("subtask-complete", list_id, task.id, subtask.id)),
-                            subtask.completed,
-                            0.20,
-                            egui::emath::easing::cubic_out,
-                        );
-                        let completion = ui.add_sized([26.0, 26.0], Button::new("").frame(false));
-                        let completion = self.completion_control(
-                            ui,
-                            completion,
-                            subtask.completed,
-                            completion_progress,
-                            palette,
-                        );
-                        if completion.clicked() {
-                            self.toggle_subtask(list_id, task.id, subtask.id);
-                        }
-                        ui.label(
-                            self.rich(
-                                &subtask.text,
-                                15.0,
-                                palette
-                                    .text
-                                    .lerp_to_gamma(palette.muted, completion_progress),
-                            ),
-                        );
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if ui
-                                .add(Button::new(self.rich("x", 14.0, palette.muted)).frame(false))
-                                .clicked()
-                            {
-                                self.delete_subtask(list_id, task.id, subtask.id);
-                            }
-                        });
-                    });
+                    let row = ui
+                        .scope_builder(
+                            egui::UiBuilder::new().id(Id::new((
+                                "subtask-row",
+                                list_id,
+                                task.id,
+                                subtask.id,
+                            ))),
+                            |ui| {
+                                ui.horizontal(|ui| {
+                                    let completion_progress =
+                                        ui.ctx().animate_bool_with_time_and_easing(
+                                            Id::new((
+                                                "subtask-complete",
+                                                list_id,
+                                                task.id,
+                                                subtask.id,
+                                            )),
+                                            subtask.completed,
+                                            0.20,
+                                            egui::emath::easing::cubic_out,
+                                        );
+                                    let completion =
+                                        ui.add_sized([26.0, 26.0], Button::new("").frame(false));
+                                    let completion = self.completion_control(
+                                        ui,
+                                        completion,
+                                        subtask.completed,
+                                        completion_progress,
+                                        palette,
+                                        &subtask.text,
+                                    );
+                                    if completion.clicked() {
+                                        self.toggle_subtask(list_id, task.id, subtask.id);
+                                    }
+                                    ui.label(
+                                        self.rich(
+                                            &subtask.text,
+                                            15.0,
+                                            palette
+                                                .text
+                                                .lerp_to_gamma(palette.muted, completion_progress),
+                                        ),
+                                    );
+                                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                        let delete = ui.add(
+                                            Button::new(self.rich("x", 14.0, palette.muted))
+                                                .frame(false),
+                                        );
+                                        delete.widget_info(|| {
+                                            egui::WidgetInfo::labeled(
+                                                egui::WidgetType::Button,
+                                                true,
+                                                format!("Delete subtask: {}", subtask.text),
+                                            )
+                                        });
+                                        if delete.has_focus() {
+                                            ui.painter().rect_stroke(
+                                                delete.rect,
+                                                4.0,
+                                                Stroke::new(1.0, palette.accent),
+                                                egui::StrokeKind::Inside,
+                                            );
+                                        }
+                                        if delete.clicked() {
+                                            self.delete_subtask(list_id, task.id, subtask.id);
+                                        }
+                                    });
+                                })
+                            },
+                        )
+                        .inner;
                     if let Some(spotlight) = self.spotlight.as_mut().filter(|spotlight| {
                         !spotlight.archived
                             && spotlight.list_id == list_id
@@ -117,6 +153,7 @@ impl MinimalistApp {
                 }
                 let subtask_response = ui.add(
                     TextEdit::singleline(&mut self.new_subtask)
+                        .id(Id::new(("new-subtask", list_id, task.id)))
                         .hint_text("Add subtask")
                         .desired_width(f32::INFINITY),
                 );
@@ -239,6 +276,13 @@ impl MinimalistApp {
     /// Panics if an internally resolved list index is invalid.
     pub(super) fn remove_task(&mut self, list_id: Uuid, task_id: Uuid) {
         if let Some(index) = self.list_index(list_id) {
+            if self
+                .drag
+                .as_ref()
+                .is_some_and(|drag| drag.list_id == list_id)
+            {
+                self.drag = None;
+            }
             self.lists[index]
                 .data
                 .tasks
@@ -283,6 +327,13 @@ impl MinimalistApp {
     /// Panics if an internally resolved list index is invalid.
     pub(super) fn archive_completed(&mut self, list_id: Uuid) {
         if let Some(index) = self.list_index(list_id) {
+            if self
+                .drag
+                .as_ref()
+                .is_some_and(|drag| drag.list_id == list_id)
+            {
+                self.drag = None;
+            }
             let mut active = Vec::new();
             let mut completed = Vec::new();
             for task in self.lists[index].data.tasks.drain(..) {
