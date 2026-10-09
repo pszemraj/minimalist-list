@@ -1,6 +1,6 @@
 [package]
 name = "minimalist-list"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.95"
 description = "A native, gesture-oriented minimalist task list built with egui"
