@@ -427,6 +427,7 @@ impl MinimalistApp {
             } else {
                 "pin"
             };
+            // Controls precede the title in accessibility order so its width uses their actual layout.
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if !self.settings.window_decorations
                     && ui
