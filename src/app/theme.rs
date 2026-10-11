@@ -1,6 +1,7 @@
 //! Accent-derived colors and shared rendering helpers.
 
 use super::MinimalistApp;
+use super::keyboard::shortcut;
 use crate::model::{Accent, FontChoice};
 use eframe::egui;
 use egui::{
@@ -439,21 +440,21 @@ impl MinimalistApp {
                 }
                 if ui
                     .add(Button::new(self.rich("...", 18.0, palette.muted)).frame(false))
-                    .on_hover_text("Settings")
+                    .on_hover_text(format!("Settings ({})", shortcut(",")))
                     .clicked()
                 {
                     self.open_settings(list_id);
                 }
                 if ui
                     .add(Button::new(self.rich("find", 14.0, palette.muted)).frame(false))
-                    .on_hover_text("Find anything (Ctrl+F)")
+                    .on_hover_text(format!("Find anything ({})", shortcut("F")))
                     .clicked()
                 {
                     self.open_find();
                 }
                 if ui
                     .add(Button::new(self.rich("add", 14.0, palette.accent)).frame(false))
-                    .on_hover_text("Quick add (Ctrl+N)")
+                    .on_hover_text(format!("Quick add ({})", shortcut("N")))
                     .clicked()
                 {
                     self.open_quick_capture(list_id);

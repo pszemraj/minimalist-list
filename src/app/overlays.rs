@@ -1,6 +1,11 @@
 //! Quick-capture and cross-list search overlays.
 
-use super::{MinimalistApp, Screen, text_input_shortcuts, theme::Palette};
+use super::{
+    MinimalistApp,
+    keyboard::{FocusItem, take_key},
+    text_input_shortcuts,
+    theme::Palette,
+};
 use crate::model::{Subtask, Task};
 use crate::storage::StoredList;
 use eframe::egui;
@@ -62,27 +67,13 @@ struct SearchHit {
 }
 
 impl MinimalistApp {
-    /// Opens quick capture or global search when their app-scoped shortcuts fire.
-    pub(super) fn handle_app_shortcuts(&mut self, ctx: &egui::Context) {
-        let (quick_capture, find) = ctx.input(|input| {
-            (
-                input.modifiers.command && input.key_pressed(Key::N),
-                input.modifiers.command && input.key_pressed(Key::F),
-            )
-        });
-        if quick_capture {
-            let current_list = match self.screen {
-                Screen::List(id) => Some(id),
-                Screen::Overview | Screen::Settings => None,
-            };
-            self.open_quick_capture(current_list);
-        } else if find {
-            self.open_find();
-        }
-    }
-
     /// Opens quick capture, preferring the hinted list when no saved destination applies.
     pub(super) fn open_quick_capture(&mut self, hinted_list_id: Option<Uuid>) {
+        if self.quick_capture.is_none() && self.find.is_none() {
+            self.keyboard.overlay_return = self.navigation_return_focus();
+        }
+        self.keyboard.pending = None;
+        self.finish_inline_edit();
         self.find = None;
         if let Some(state) = &mut self.quick_capture {
             state.request_focus = true;
@@ -102,6 +93,11 @@ impl MinimalistApp {
 
     /// Opens global search and requests focus for its query field.
     pub(super) fn open_find(&mut self) {
+        if self.quick_capture.is_none() && self.find.is_none() {
+            self.keyboard.overlay_return = self.navigation_return_focus();
+        }
+        self.keyboard.pending = None;
+        self.finish_inline_edit();
         self.quick_capture = None;
         if let Some(state) = &mut self.find {
             state.request_focus = true;
@@ -150,6 +146,9 @@ impl MinimalistApp {
         }
 
         let mut submit = false;
+        if state.request_focus {
+            ctx.memory_mut(|memory| memory.request_focus(Id::new("quick-capture-text")));
+        }
         let modal = Modal::new(Id::new("quick-capture-modal")).show(ctx, |ui| {
             let available = ctx.content_rect().size() - egui::vec2(32.0, 32.0);
             ui.set_width(410.0_f32.min(available.x));
@@ -189,11 +188,19 @@ impl MinimalistApp {
                             .show_ui(ui, |ui| {
                                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
                                 for (id, title) in &choices {
-                                    ui.selectable_value(
-                                        &mut state.selected_list_id,
-                                        Some(*id),
-                                        self.rich(title, 14.0, palette.text),
-                                    );
+                                    if ui
+                                        .selectable_value(
+                                            &mut state.selected_list_id,
+                                            Some(*id),
+                                            self.rich(title, 14.0, palette.text),
+                                        )
+                                        .clicked()
+                                    {
+                                        take_key(ctx, Key::Enter, egui::Modifiers::NONE);
+                                        take_key(ctx, Key::Space, egui::Modifiers::NONE);
+                                        state.request_focus = true;
+                                        ui.close();
+                                    }
                                 }
                             });
                     });
@@ -211,6 +218,7 @@ impl MinimalistApp {
                         });
                     });
                     submit |= text_input_shortcuts(ui, &response).0;
+                    self.keyboard_focus_ui(ui, palette);
                 });
         });
 
@@ -226,12 +234,15 @@ impl MinimalistApp {
                 self.save_list_index(index);
                 self.settings.last_capture_list_id = Some(list_id);
                 self.save_settings();
+                self.restore_overlay_focus();
                 return;
             }
         }
 
         if !modal.should_close() {
             self.quick_capture = Some(state);
+        } else {
+            self.restore_overlay_focus();
         }
     }
 
@@ -269,12 +280,8 @@ impl MinimalistApp {
                         state.selected = 0;
                     } else {
                         state.selected = state.selected.min(hits.len() - 1);
-                        let (down, up) = ui.input(|input| {
-                            (
-                                input.key_pressed(Key::ArrowDown),
-                                input.key_pressed(Key::ArrowUp),
-                            )
-                        });
+                        let down = take_key(ctx, Key::ArrowDown, egui::Modifiers::NONE);
+                        let up = take_key(ctx, Key::ArrowUp, egui::Modifiers::NONE);
                         if down {
                             state.selected = (state.selected + 1) % hits.len();
                         } else if up {
@@ -338,6 +345,7 @@ impl MinimalistApp {
                         12.0,
                         palette.muted,
                     ));
+                    self.keyboard_focus_ui(ui, palette);
                 });
         });
 
@@ -345,12 +353,22 @@ impl MinimalistApp {
             self.activate_search_hit(hit);
         } else if !modal.should_close() {
             self.find = Some(state);
+        } else {
+            self.restore_overlay_focus();
         }
     }
 
     fn activate_search_hit(&mut self, hit: SearchHit) {
         self.open_list(hit.list_id);
         self.request_task_focus = false;
+        self.keyboard.overlay_return = None;
+        self.keyboard.pending = Some(if hit.state == HitState::Archived {
+            FocusItem::Archived(hit.list_id, hit.task_id).id()
+        } else if let Some(subtask) = hit.subtask_id {
+            FocusItem::Subtask(hit.list_id, hit.task_id, subtask).id()
+        } else {
+            FocusItem::Task(hit.list_id, hit.task_id).id()
+        });
         self.history_open = hit.state == HitState::Archived;
         self.subtasks_for = (hit.state != HitState::Archived)
             .then_some(hit.subtask_id)

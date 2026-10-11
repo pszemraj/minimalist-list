@@ -4,13 +4,17 @@ Shortcuts work while the application has keyboard focus. On macOS, use Command i
 
 ## Manage lists
 
-Use the back control or double-click a list title to open the overview. Select **+ New list**, enter a name, optionally choose an accent, and press Enter to create it. Escape cancels.
+Press Escape from a list to open the overview. Arrow keys move between list cards in the displayed grid; Enter or Space opens the focused list and puts the cursor in task entry. Escape returns to the card you left. The back control and double-clicking a list title also open the overview.
 
-Open a list card's settings to rename, recolor, or delete it. **Delete list** requires a second click on **Confirm delete list**; at least one list must remain.
+`Ctrl+Shift+N` opens list creation from any main screen. You can also select **+ New list**. Enter a name, optionally choose an accent, and press Enter to create it. Escape cancels.
+
+Open a list card's settings to rename, recolor, or delete it. **Delete list** requires activating **Confirm delete list** a second time; at least one list must remain.
 
 ## Capture and edit tasks
 
 Add tasks through the [list entry field](../README.md#start-using-it). Subtask entry stays focused after Enter so you can add several items in succession.
+
+Down from task entry focuses the first task. Up and Down move between task rows; Home and End focus the first and last task. Up from the first task returns to entry. Enter on a task row edits its title; Enter saves and returns focus to that row, while Escape cancels the edit. Right opens subtasks and focuses their entry; Escape closes the panel and returns to its task. Left on a task row also collapses subtasks.
 
 `Ctrl+N` opens Quick add from any screen. Choose a destination list and press Enter to save one task, or Escape to cancel. The selector remembers the last successful destination. The header's `add` action opens the same overlay.
 
@@ -19,6 +23,8 @@ Click task text to edit it inline. Enter or leaving the field saves; Escape canc
 ## Complete, reorder, and remove tasks
 
 Use the circle on the left to complete or reactivate a task. It is keyboard-focusable, so Space or Enter also toggles it.
+
+Space on a focused task row toggles completion. `Alt+Up` and `Alt+Down` move that task one position (Option on macOS), keeping it focused. Delete on a focused task row removes it. These row commands do not apply while editing text.
 
 Drag a task vertically to reorder it. Drag right past the threshold to complete or reactivate it. Drag left to reveal Edit and Delete, then drag right to close those actions.
 
@@ -32,7 +38,13 @@ Select **Show history**, then **Restore** to return a task to the bottom of the 
 
 `Ctrl+Tab` and `Ctrl+Shift+Tab` move between lists.
 
+Tab and Shift+Tab reach individual controls, including list-card settings, task completion, subtasks, delete actions, History restoration, and Settings. Focused controls are outlined and scroll into view. Arrow keys inside text fields and Settings sliders retain their usual editing behavior.
+
+Escape dismisses one layer at a time: an open dropdown, Quick add or Find, an inline edit, list creation, subtasks, revealed task actions, History, then the current screen. Closing an overlay restores its opening control; opening a search result focuses the matching task, subtask, or History restore action. Screen navigation saves an active inline task edit, like leaving its field.
+
 ## Window and appearance settings
+
+`Ctrl+,` opens Settings from Lists or a list. Escape returns to the previous screen and restores focus. Applied preferences remain saved; leaving a list-name field applies its rename. Typing a workspace path still requires Enter or **Use typed path** to switch folders.
 
 The header's `pin` control toggles always-on-top mode. When native window decorations are disabled, drag the title to move the window and use the visible `x` control to close it.
 

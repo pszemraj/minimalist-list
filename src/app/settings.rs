@@ -47,7 +47,10 @@ impl MinimalistApp {
 
         ScrollArea::vertical()
             .auto_shrink([false, false])
-            .show(ui, |ui| self.settings_contents(ui, palette));
+            .show(ui, |ui| {
+                self.settings_contents(ui, palette);
+                self.keyboard_focus_ui(ui, palette);
+            });
     }
 
     fn settings_contents(&mut self, ui: &mut egui::Ui, palette: Palette) {
@@ -348,7 +351,12 @@ impl MinimalistApp {
         }
     }
 
-    fn rename_list(&mut self, list_id: Uuid) {
+    /// Saves a nonempty changed list name when its field is submitted or left.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an internally resolved list index becomes invalid.
+    pub(super) fn rename_list(&mut self, list_id: Uuid) {
         let title = self.rename_input.trim();
         if title.is_empty() {
             return;
@@ -376,6 +384,7 @@ impl MinimalistApp {
             return;
         }
         if let Some(index) = self.list_index(list_id) {
+            let neighbors = self.focus_neighbors();
             let list = self.lists.remove(index);
             match storage::delete_list(&list) {
                 Ok(()) => {
@@ -385,6 +394,7 @@ impl MinimalistApp {
                     self.go_to_overview();
                     self.return_screen = None;
                     self.settings_list_id = None;
+                    self.repair_focus(&neighbors);
                 }
                 Err(error) => {
                     self.status = Some(error);

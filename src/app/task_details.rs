@@ -1,8 +1,8 @@
 //! Subtask, deletion, completion-clearing, and history views.
 
 use super::{
-    CLEAR_ANIMATION_SECONDS, DELETE_ANIMATION_SECONDS, MinimalistApp, text_input_shortcuts,
-    theme::Palette,
+    CLEAR_ANIMATION_SECONDS, DELETE_ANIMATION_SECONDS, MinimalistApp, keyboard::FocusItem,
+    text_input_shortcuts, theme::Palette,
 };
 use crate::model::{ArchivedTask, Subtask, Task};
 use eframe::egui;
@@ -81,8 +81,13 @@ impl MinimalistApp {
                                             0.20,
                                             egui::emath::easing::cubic_out,
                                         );
-                                    let completion =
-                                        ui.add_sized([26.0, 26.0], Button::new("").frame(false));
+                                    let (rect, _) =
+                                        ui.allocate_exact_size(Vec2::splat(26.0), Sense::hover());
+                                    let completion = ui.interact(
+                                        rect,
+                                        FocusItem::Subtask(list_id, task.id, subtask.id).id(),
+                                        Sense::click(),
+                                    );
                                     let completion = self.completion_control(
                                         ui,
                                         completion,
@@ -90,6 +95,10 @@ impl MinimalistApp {
                                         completion_progress,
                                         palette,
                                         &subtask.text,
+                                    );
+                                    self.track_focus(
+                                        &completion,
+                                        FocusItem::Subtask(list_id, task.id, subtask.id),
                                     );
                                     if completion.clicked() {
                                         self.toggle_subtask(list_id, task.id, subtask.id);
@@ -107,6 +116,10 @@ impl MinimalistApp {
                                         let delete = ui.add(
                                             Button::new(self.rich("x", 14.0, palette.muted))
                                                 .frame(false),
+                                        );
+                                        self.track_focus(
+                                            &delete,
+                                            FocusItem::Subtask(list_id, task.id, subtask.id),
                                         );
                                         delete.widget_info(|| {
                                             egui::WidgetInfo::labeled(
@@ -158,6 +171,7 @@ impl MinimalistApp {
                         .desired_width(f32::INFINITY),
                 );
                 let (submit, _) = text_input_shortcuts(ui, &subtask_response);
+                self.track_focus(&subtask_response, FocusItem::Task(list_id, task.id));
                 if submit {
                     self.add_subtask(list_id, task.id);
                     subtask_response.request_focus();
@@ -202,6 +216,7 @@ impl MinimalistApp {
     }
 
     fn delete_subtask(&mut self, list_id: Uuid, task_id: Uuid, subtask_id: Uuid) {
+        let neighbors = self.focus_neighbors();
         if let Some(index) = self.list_index(list_id)
             && let Some(task) = self.lists[index]
                 .data
@@ -211,6 +226,7 @@ impl MinimalistApp {
         {
             task.subtasks.retain(|subtask| subtask.id != subtask_id);
             self.save_list_index(index);
+            self.repair_focus(&neighbors);
         }
     }
 
@@ -275,6 +291,7 @@ impl MinimalistApp {
     ///
     /// Panics if an internally resolved list index is invalid.
     pub(super) fn remove_task(&mut self, list_id: Uuid, task_id: Uuid) {
+        let neighbors = self.focus_neighbors();
         if let Some(index) = self.list_index(list_id) {
             if self
                 .drag
@@ -288,6 +305,7 @@ impl MinimalistApp {
                 .tasks
                 .retain(|task| task.id != task_id);
             self.save_list_index(index);
+            self.repair_focus(&neighbors);
         }
     }
 
@@ -326,6 +344,7 @@ impl MinimalistApp {
     ///
     /// Panics if an internally resolved list index is invalid.
     pub(super) fn archive_completed(&mut self, list_id: Uuid) {
+        let neighbors = self.focus_neighbors();
         if let Some(index) = self.list_index(list_id) {
             if self
                 .drag
@@ -346,6 +365,7 @@ impl MinimalistApp {
             self.lists[index].data.tasks = active;
             self.lists[index].data.archive.splice(0..0, completed);
             self.save_list_index(index);
+            self.repair_focus(&neighbors);
         }
     }
 
@@ -404,13 +424,29 @@ impl MinimalistApp {
                                 .strikethrough(),
                         );
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if ui
-                                .add(
-                                    Button::new(self.rich("Restore", 13.0, palette.accent))
-                                        .frame(false),
+                            let (rect, _) =
+                                ui.allocate_exact_size(Vec2::new(68.0, 28.0), Sense::hover());
+                            let restore = ui.interact(
+                                rect,
+                                FocusItem::Archived(list_id, item.task.id).id(),
+                                Sense::click(),
+                            );
+                            ui.painter().text(
+                                rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                "Restore",
+                                self.font_id(13.0),
+                                palette.accent,
+                            );
+                            restore.widget_info(|| {
+                                egui::WidgetInfo::labeled(
+                                    egui::WidgetType::Button,
+                                    true,
+                                    format!("Restore: {}", item.task.text),
                                 )
-                                .clicked()
-                            {
+                            });
+                            self.track_focus(&restore, FocusItem::Archived(list_id, item.task.id));
+                            if restore.clicked() {
                                 self.restore_archived(list_id, item.task.id);
                             }
                         });
@@ -450,6 +486,7 @@ impl MinimalistApp {
             task.completed_at_unix = None;
             self.lists[index].data.tasks.push(task);
             self.save_list_index(index);
+            self.keyboard.pending = Some(FocusItem::Task(list_id, task_id).id());
         }
     }
 }

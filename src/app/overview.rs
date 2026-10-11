@@ -1,6 +1,11 @@
 //! Workspace overview and list-card interactions.
 
-use super::{MinimalistApp, text_input_shortcuts, theme::Palette};
+use super::{
+    MinimalistApp,
+    keyboard::{FocusItem, shortcut, take_key},
+    text_input_shortcuts,
+    theme::Palette,
+};
 use crate::model::Accent;
 use crate::storage;
 use eframe::egui;
@@ -36,6 +41,7 @@ impl MinimalistApp {
                     1
                 };
                 let card_width = (width - 12.0 * (columns as f32 - 1.0)) / columns as f32;
+                self.overview_keyboard(ui.ctx(), columns);
 
                 let cards: Vec<(Uuid, String, Accent, usize, usize, Vec<String>)> = self
                     .lists
@@ -67,6 +73,8 @@ impl MinimalistApp {
                             if settings_clicked {
                                 self.open_settings(Some(*id));
                             } else if response.clicked() {
+                                take_key(ui.ctx(), egui::Key::Enter, egui::Modifiers::NONE);
+                                take_key(ui.ctx(), egui::Key::Space, egui::Modifiers::NONE);
                                 self.open_list(*id);
                             }
                         }
@@ -93,6 +101,9 @@ impl MinimalistApp {
                         .inner_margin(Margin::same(14))
                         .show(ui, |ui| {
                             ui.set_opacity(create_progress);
+                            if !self.creating_list {
+                                ui.disable();
+                            }
                             ui.add_space((1.0 - create_progress) * 8.0);
                             let response = Self::flat_text_input(
                                 ui,
@@ -135,18 +146,25 @@ impl MinimalistApp {
                             }
                         });
                 } else if ui
-                    .add(Button::new(self.rich("+ New list", 18.0, palette.accent)).frame(false))
+                    .push_id("new-list", |ui| {
+                        ui.add(
+                            Button::new(self.rich("+ New list", 18.0, palette.accent)).frame(false),
+                        )
+                    })
+                    .inner
+                    .on_hover_text(format!("New list ({})", shortcut("Shift+N")))
                     .clicked()
                 {
                     self.creating_list = true;
                     self.request_list_focus = true;
                 }
+                self.keyboard_focus_ui(ui, palette);
             });
     }
 
     #[allow(clippy::too_many_arguments)]
     fn list_card(
-        &self,
+        &mut self,
         ui: &mut egui::Ui,
         id: Uuid,
         title: &str,
@@ -157,7 +175,16 @@ impl MinimalistApp {
         width: f32,
     ) -> (egui::Response, bool) {
         let card_palette = Palette::from_accent(accent);
-        let (slot_rect, response) = ui.allocate_exact_size(Vec2::new(width, 166.0), Sense::click());
+        let (slot_rect, _) = ui.allocate_exact_size(Vec2::new(width, 166.0), Sense::hover());
+        let response = ui.interact(slot_rect, FocusItem::Card(id).id(), Sense::click());
+        response.widget_info(|| {
+            egui::WidgetInfo::labeled(
+                egui::WidgetType::Button,
+                true,
+                format!("Open list: {title}"),
+            )
+        });
+        self.track_focus(&response, FocusItem::Card(id));
         let response = response.on_hover_cursor(CursorIcon::PointingHand);
         let hover = ui.ctx().animate_bool_with_time_and_easing(
             Id::new(("list-card-hover", id)),
@@ -191,8 +218,14 @@ impl MinimalistApp {
                 .surface
                 .lerp_to_gamma(card_palette.raised, hover * 0.48),
             Stroke::new(
-                1.0,
-                card_palette.accent.linear_multiply(0.14 + hover * 0.46),
+                if response.has_focus() { 2.0 } else { 1.0 },
+                card_palette
+                    .accent
+                    .linear_multiply(if response.has_focus() {
+                        1.0
+                    } else {
+                        0.14 + hover * 0.46
+                    }),
             ),
             egui::StrokeKind::Inside,
         );
@@ -228,16 +261,23 @@ impl MinimalistApp {
             Vec2::splat(30.0),
         );
         let settings = ui
-            .put(
-                settings_rect,
-                Button::new(self.rich(
-                    "...",
-                    14.0,
-                    card_palette.muted.linear_multiply(0.24 + hover * 0.76),
-                ))
-                .frame(false),
+            .scope_builder(
+                egui::UiBuilder::new().id(Id::new(("list-card-settings", id))),
+                |ui| {
+                    ui.put(
+                        settings_rect,
+                        Button::new(self.rich(
+                            "...",
+                            14.0,
+                            card_palette.muted.linear_multiply(0.24 + hover * 0.76),
+                        ))
+                        .frame(false),
+                    )
+                },
             )
+            .inner
             .on_hover_text("List settings");
+        self.track_focus(&settings, FocusItem::Card(id));
 
         (response, settings.clicked())
     }

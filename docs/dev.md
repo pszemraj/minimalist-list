@@ -5,6 +5,8 @@
 ```text
 src/main.rs                Native eframe window setup
 src/app.rs                 Application state, navigation, syncing, and eframe wiring
+src/app/keyboard.rs        Keyboard commands and transient focus restoration
+src/app/keyboard_tests.rs  Headless keyboard interaction journeys
 src/app/list.rs            List screen and task interactions
 src/app/overlays.rs        Quick add and cross-list search
 src/app/overview.rs        List-card overview
