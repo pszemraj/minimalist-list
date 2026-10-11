@@ -57,6 +57,8 @@ The desktop entry expects `minimalist-list` to be available on the desktop sessi
 
 Open a list and type `Buy groceries` into the field at the top. Enter adds the task at the top of the list and returns focus to the field. See [list management](docs/usage.md#manage-lists) to create more lists.
 
+Press `Ctrl+/` (`Cmd+/` on macOS) to see the keyboard shortcuts in the app.
+
 ## Documentation
 
 - [Tasks, subtasks, search, history, and appearance](docs/usage.md)

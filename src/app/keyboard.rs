@@ -103,6 +103,13 @@ impl MinimalistApp {
         if egui::Popup::is_any_open(ctx) {
             return;
         }
+        if take_key(ctx, Key::Slash, Modifiers::COMMAND) {
+            self.open_shortcuts();
+            return;
+        }
+        if self.shortcuts.is_some() {
+            return;
+        }
         if take_key(ctx, Key::N, Modifiers::COMMAND | Modifiers::SHIFT) {
             if self.quick_capture.is_none() && self.find.is_none() {
                 self.go_to_overview();
@@ -469,21 +476,21 @@ impl MinimalistApp {
 
     /// Remembers focus after rendering, discarding stale logical anchors.
     pub(super) fn finish_keyboard_frame(&mut self, ctx: &egui::Context) {
-        self.keyboard.last_focus = ctx.memory(|memory| memory.focused());
         // A delivered request is complete even if Tab moved on in the same pass.
         // Keep requests queued this pass, and retries blocked by a closing modal.
         if self.keyboard.pending == self.keyboard.requested
-            && self
-                .keyboard
-                .pending
-                .and_then(|id| ctx.read_response(id))
-                .is_some_and(|response| {
-                    response.enabled()
-                        && ctx.memory(|memory| memory.is_above_modal_layer(response.layer_id))
-                })
+            && let Some(response) = self.keyboard.pending.and_then(|id| ctx.read_response(id))
+            && response.enabled()
         {
-            self.keyboard.pending = None;
+            if ctx.memory(|memory| memory.is_above_modal_layer(response.layer_id)) {
+                self.keyboard.pending = None;
+            } else {
+                // The closing modal blocked this widget while it was rendered.
+                // Retain focus so its next input sees the restored field already focused.
+                ctx.memory_mut(|memory| memory.request_focus(response.id));
+            }
         }
+        self.keyboard.last_focus = ctx.memory(|memory| memory.focused());
         if self.keyboard.last_focus.is_some()
             && self
                 .keyboard

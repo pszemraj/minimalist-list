@@ -2,6 +2,8 @@
 
 Shortcuts work while the application has keyboard focus. On macOS, use Command in place of Ctrl.
 
+Press `Ctrl+/` (`Cmd+/` on macOS) to show the in-app keyboard shortcut reference. Use Up/Down, Page Up/Page Down, or Home/End to scroll it. Escape or **Close** returns focus to the control you left. Quick add drafts and Find queries remain available underneath the reference.
+
 ## Manage lists
 
 Press Escape from a list to open the overview. Arrow keys move between list cards in the displayed grid; Enter or Space opens the focused list and puts the cursor in task entry. Escape returns to the card you left. The back control and double-clicking a list title also open the overview.
@@ -40,7 +42,7 @@ Select **Show history**, then **Restore** to return a task to the bottom of the 
 
 Tab and Shift+Tab reach individual controls, including list-card settings, task completion, subtasks, delete actions, History restoration, and Settings. Focused controls are outlined and scroll into view. Arrow keys inside text fields and Settings sliders retain their usual editing behavior.
 
-Escape dismisses one layer at a time: an open dropdown, Quick add or Find, an inline edit, list creation, subtasks, revealed task actions, History, then the current screen. Closing an overlay restores its opening control; opening a search result focuses the matching task, subtask, or History restore action. Screen navigation saves an active inline task edit, like leaving its field.
+Escape dismisses one layer at a time: an open dropdown, the shortcut reference, Quick add or Find, an inline edit, list creation, subtasks, revealed task actions, History, then the current screen. Closing an overlay restores its opening control; opening a search result focuses the matching task, subtask, or History restore action. Screen navigation saves an active inline task edit, like leaving its field.
 
 ## Window and appearance settings
 

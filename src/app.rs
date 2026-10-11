@@ -11,7 +11,7 @@ mod theme;
 mod window;
 
 use self::keyboard::KeyboardState;
-use self::overlays::{FindState, QuickCaptureState, Spotlight};
+use self::overlays::{FindState, QuickCaptureState, ShortcutsState, Spotlight};
 use self::theme::Palette;
 use crate::model::Accent;
 use crate::storage::{self, Settings, StoredList, WorkspaceFingerprint};
@@ -108,6 +108,7 @@ pub struct MinimalistApp {
     delete_animation: Option<(Uuid, Uuid, Instant)>,
     quick_capture: Option<QuickCaptureState>,
     find: Option<FindState>,
+    shortcuts: Option<ShortcutsState>,
     spotlight: Option<Spotlight>,
     last_motion_tick: Instant,
     hovered_title: Option<(Uuid, Instant)>,
@@ -227,6 +228,7 @@ impl MinimalistApp {
             delete_animation: None,
             quick_capture: None,
             find: None,
+            shortcuts: None,
             spotlight: None,
             last_motion_tick: Instant::now(),
             hovered_title: None,
@@ -667,7 +669,7 @@ impl eframe::App for MinimalistApp {
                 .layout(Layout::top_down(Align::LEFT)),
         );
         content_ui.set_opacity(0.14 + eased * 0.86);
-        if self.quick_capture.is_some() || self.find.is_some() {
+        if self.quick_capture.is_some() || self.find.is_some() || self.shortcuts.is_some() {
             content_ui.disable();
         }
         let screen = self.screen.clone();

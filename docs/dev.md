@@ -8,7 +8,7 @@ src/app.rs                 Application state, navigation, syncing, and eframe wi
 src/app/keyboard.rs        Keyboard commands and transient focus restoration
 src/app/keyboard_tests.rs  Headless keyboard interaction journeys
 src/app/list.rs            List screen and task interactions
-src/app/overlays.rs        Quick add and cross-list search
+src/app/overlays.rs        Quick add, cross-list search, and keyboard reference
 src/app/overview.rs        List-card overview
 src/app/settings.rs        Workspace, appearance, and list settings
 src/app/task_details.rs    Subtasks, deletion, clearing, and history

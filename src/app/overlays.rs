@@ -1,4 +1,4 @@
-//! Quick-capture and cross-list search overlays.
+//! Quick-capture, cross-list search, and keyboard-reference overlays.
 
 use super::{
     MinimalistApp,
@@ -12,6 +12,71 @@ use eframe::egui;
 use egui::{Align, Button, ComboBox, CornerRadius, Id, Key, Layout, Modal, ScrollArea, TextEdit};
 use std::time::Instant;
 use uuid::Uuid;
+
+const SHORTCUT_GROUPS: &[(&str, &[(&str, &str)])] = &[
+    (
+        "General",
+        &[
+            ("Keyboard shortcuts", "Mod+/"),
+            ("Settings (main screens)", "Mod+,"),
+            ("Quick add", "Mod+N"),
+            ("Find tasks and History", "Mod+F"),
+            ("New list (main screens)", "Mod+Shift+N"),
+            ("Next / previous control", "Tab / Shift+Tab"),
+            ("Close the active layer / go back", "Escape"),
+        ],
+    ),
+    (
+        "Lists overview",
+        &[
+            ("Move between cards", "Arrow keys"),
+            ("Open the focused list", "Enter / Space"),
+        ],
+    ),
+    (
+        "Inside a list",
+        &[
+            ("Add a task from entry", "Enter"),
+            ("Focus the first task from entry", "Down"),
+            ("Next / previous list", "Mod+Tab / Mod+Shift+Tab"),
+            ("Move completed tasks to History", "Mod+Shift+Backspace"),
+        ],
+    ),
+    (
+        "Focused task row",
+        &[
+            ("Previous / next task", "Up / Down"),
+            ("First / last task", "Home / End"),
+            ("Return to entry from the first task", "Up"),
+            ("Edit the title", "Enter"),
+            ("Toggle completion", "Space"),
+            ("Open / collapse subtasks", "Right / Left"),
+            ("Move the task up / down", "Alt+Up / Alt+Down"),
+            ("Delete the task", "Delete"),
+        ],
+    ),
+    (
+        "Text and forms",
+        &[
+            ("Save an edit / submit a form", "Enter"),
+            ("Save an inline edit and continue", "Tab"),
+            ("Cancel an inline edit or list creation", "Escape"),
+        ],
+    ),
+    (
+        "Find",
+        &[
+            ("Select a result", "Up / Down"),
+            ("Open the selected result", "Enter"),
+        ],
+    ),
+];
+
+/// Remembers the control underneath the keyboard-reference modal.
+pub(super) struct ShortcutsState {
+    return_focus: Option<Id>,
+    request_focus: bool,
+}
 
 /// Holds the draft and destination selected in the quick-capture overlay.
 pub(super) struct QuickCaptureState {
@@ -67,6 +132,20 @@ struct SearchHit {
 }
 
 impl MinimalistApp {
+    /// Opens the keyboard reference without discarding a capture or search draft.
+    pub(super) fn open_shortcuts(&mut self) {
+        if self.shortcuts.is_some() {
+            return;
+        }
+        let return_focus = self.navigation_return_focus();
+        self.finish_inline_edit();
+        self.keyboard.pending = None;
+        self.shortcuts = Some(ShortcutsState {
+            return_focus,
+            request_focus: true,
+        });
+    }
+
     /// Opens quick capture, preferring the hinted list when no saved destination applies.
     pub(super) fn open_quick_capture(&mut self, hinted_list_id: Option<Uuid>) {
         if self.quick_capture.is_none() && self.find.is_none() {
@@ -110,17 +189,116 @@ impl MinimalistApp {
         });
     }
 
-    /// Renders whichever modal capture or search overlay is active.
+    /// Renders the keyboard reference or the active capture/search overlay.
     ///
     /// # Arguments
     ///
     /// - `ctx` - Egui context used to display the modal.
     /// - `palette` - Colors used to render the active overlay.
     pub(super) fn overlay_ui(&mut self, ctx: &egui::Context, palette: Palette) {
-        if self.quick_capture.is_some() {
+        if self.shortcuts.is_some() {
+            self.shortcuts_ui(ctx, palette);
+        } else if self.quick_capture.is_some() {
             self.quick_capture_ui(ctx, palette);
         } else if self.find.is_some() {
             self.find_ui(ctx, palette);
+        }
+    }
+
+    fn shortcuts_ui(&mut self, ctx: &egui::Context, palette: Palette) {
+        let Some(mut state) = self.shortcuts.take() else {
+            return;
+        };
+        let available = ctx.content_rect().size() - egui::vec2(32.0, 32.0);
+        let scroll = if take_key(ctx, Key::ArrowDown, egui::Modifiers::NONE) {
+            -40.0
+        } else if take_key(ctx, Key::ArrowUp, egui::Modifiers::NONE) {
+            40.0
+        } else if take_key(ctx, Key::PageDown, egui::Modifiers::NONE) {
+            -available.y * 0.8
+        } else if take_key(ctx, Key::PageUp, egui::Modifiers::NONE) {
+            available.y * 0.8
+        } else {
+            0.0
+        };
+        let home = take_key(ctx, Key::Home, egui::Modifiers::NONE);
+        let end = take_key(ctx, Key::End, egui::Modifiers::NONE);
+        let modal = Modal::new(Id::new("keyboard-shortcuts-modal")).show(ctx, |ui| {
+            ui.set_width(500.0_f32.min(available.x));
+            ui.horizontal(|ui| {
+                ui.label(self.rich("Keyboard shortcuts", 20.0, palette.text));
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    let close = ui.add(Button::new(self.rich("Close", 13.0, palette.accent)));
+                    if state.request_focus {
+                        close.request_focus();
+                        self.keyboard.pending = Some(close.id);
+                        state.request_focus = false;
+                    }
+                    if close.clicked() {
+                        ui.close();
+                    }
+                });
+            });
+            ui.label(self.rich(
+                "Up/Down or Page Up/Down scroll · Esc closes",
+                12.0,
+                palette.muted,
+            ));
+            ui.separator();
+            ScrollArea::vertical()
+                .id_salt("keyboard-shortcuts-scroll")
+                .max_height(available.y - 90.0)
+                .show(ui, |ui| {
+                    ui.scroll_with_delta(egui::vec2(0.0, scroll));
+                    if home {
+                        ui.scroll_to_cursor(Some(Align::Min));
+                    }
+                    for (heading, shortcuts) in SHORTCUT_GROUPS {
+                        ui.add_space(10.0);
+                        ui.label(self.rich(*heading, 17.0, palette.accent));
+                        for (action, keys) in *shortcuts {
+                            let keys = keys
+                                .replace(
+                                    "Mod",
+                                    if cfg!(target_os = "macos") {
+                                        "Cmd"
+                                    } else {
+                                        "Ctrl"
+                                    },
+                                )
+                                .replace(
+                                    "Alt",
+                                    if cfg!(target_os = "macos") {
+                                        "Option"
+                                    } else {
+                                        "Alt"
+                                    },
+                                );
+                            if ui.available_width() < 380.0 {
+                                ui.label(self.rich(*action, 14.0, palette.text));
+                                ui.label(self.rich(keys, 13.0, palette.muted));
+                            } else {
+                                ui.horizontal(|ui| {
+                                    ui.label(self.rich(*action, 14.0, palette.text));
+                                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                        ui.label(self.rich(keys, 13.0, palette.muted));
+                                    });
+                                });
+                            }
+                        }
+                    }
+                    if end {
+                        ui.scroll_to_cursor(Some(Align::Max));
+                    }
+                });
+            self.keyboard_focus_ui(ui, palette);
+        });
+        if modal.should_close() {
+            self.keyboard.pending = state.return_focus;
+            // Clear egui's previous-pass modal barrier before the next input arrives.
+            ctx.request_discard("Restore focus after closing keyboard shortcuts");
+        } else {
+            self.shortcuts = Some(state);
         }
     }
 
@@ -463,6 +641,84 @@ mod tests {
     use super::*;
     use crate::model::{Accent, ArchivedTask, Subtask, TodoList};
     use std::path::PathBuf;
+
+    #[test]
+    fn shortcut_reference_keyboard_scrolls_within_a_narrow_viewport() {
+        let (ctx, mut app) = super::super::tests::test_app();
+        app.open_shortcuts();
+        let viewport = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(320.0, 420.0));
+        let mut draw = |key: Option<Key>| {
+            let events = key
+                .map(|key| egui::Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                })
+                .into_iter()
+                .collect();
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(viewport),
+                    time: Some(ctx.input(|input| input.time) + 0.3),
+                    events,
+                    ..Default::default()
+                },
+                |_| {
+                    app.handle_app_shortcuts(&ctx);
+                    app.overlay_ui(&ctx, app.palette());
+                    app.finish_keyboard_frame(&ctx);
+                },
+            );
+            output.textures_delta.clear();
+            output
+                .shapes
+                .into_iter()
+                .filter_map(|clipped| {
+                    if let egui::epaint::Shape::Text(text) = clipped.shape
+                        && clipped
+                            .clip_rect
+                            .intersects(egui::Rect::from_min_size(text.pos, text.galley.size()))
+                    {
+                        Some((text.galley.text().to_owned(), text.pos))
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>()
+        };
+        for _ in 0..3 {
+            draw(None);
+        }
+        let top = draw(None);
+        assert!(top.iter().any(|(text, _)| text == "General"));
+        assert!(
+            !top.iter()
+                .any(|(text, _)| text == "Open the selected result")
+        );
+        assert!(top.iter().all(|(_, pos)| viewport.contains(*pos)));
+        draw(Some(Key::PageDown));
+        for _ in 0..3 {
+            draw(None);
+        }
+        assert!(!draw(None).iter().any(|(text, _)| text == "General"));
+        draw(Some(Key::End));
+        for _ in 0..3 {
+            draw(None);
+        }
+        assert!(
+            draw(None)
+                .iter()
+                .any(|(text, _)| text == "Open the selected result")
+        );
+        draw(Some(Key::Home));
+        for _ in 0..3 {
+            draw(None);
+        }
+        assert!(draw(None).iter().any(|(text, _)| text == "General"));
+        std::fs::remove_dir_all(&app.workspace).unwrap();
+    }
 
     fn stored_list(title: &str) -> StoredList {
         let data = TodoList::new(title, Accent::Mint);

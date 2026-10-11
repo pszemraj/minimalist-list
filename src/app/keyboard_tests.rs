@@ -19,7 +19,7 @@ fn frame(ctx: &egui::Context, app: &mut MinimalistApp, events: Vec<Event>, width
     run_frame(ctx, input, |ui| {
         app.handle_app_shortcuts(ctx);
         let palette = app.palette();
-        if app.quick_capture.is_some() || app.find.is_some() {
+        if app.quick_capture.is_some() || app.find.is_some() || app.shortcuts.is_some() {
             ui.disable();
         }
         match app.screen {
@@ -771,6 +771,160 @@ fn tab_saves_edits_and_cancelled_list_creation_restores_card() {
     assert_eq!(
         ctx.memory(|m| m.focused()),
         Some(FocusItem::Card(list).id())
+    );
+    cleanup(&app);
+}
+
+#[test]
+fn shortcuts_reference_round_trips_from_main_screens_for_ctrl_and_cmd() {
+    for command in [
+        Modifiers {
+            ctrl: true,
+            command: true,
+            ..Modifiers::NONE
+        },
+        Modifiers {
+            mac_cmd: true,
+            command: true,
+            ..Modifiers::NONE
+        },
+    ] {
+        let (ctx, mut app) = test_app();
+        let list = app.lists[0].key;
+        app.lists[0].data.tasks.push(Task::new("Keep this task"));
+        idle(&ctx, &mut app);
+        key(&ctx, &mut app, Key::Slash, Modifiers::NONE);
+        assert!(app.shortcuts.is_none());
+        for screen in 0..3 {
+            match screen {
+                0 => type_text(&ctx, &mut app, "Draft / text"),
+                1 => key(&ctx, &mut app, Key::Escape, Modifiers::NONE),
+                _ => key(&ctx, &mut app, Key::Comma, command),
+            }
+            let original = ctx.memory(|memory| memory.focused());
+            key(&ctx, &mut app, Key::Slash, command);
+            assert!(app.shortcuts.is_some());
+            assert_ne!(ctx.memory(|memory| memory.focused()), original);
+            key(&ctx, &mut app, Key::Slash, command);
+            key(&ctx, &mut app, Key::Delete, Modifiers::NONE);
+            key(&ctx, &mut app, Key::N, command);
+            assert!(app.shortcuts.is_some());
+            assert!(app.quick_capture.is_none());
+            assert_eq!(app.lists[0].data.tasks.len(), 1);
+            key(&ctx, &mut app, Key::Escape, Modifiers::NONE);
+            assert!(app.shortcuts.is_none());
+            assert_eq!(ctx.memory(|memory| memory.focused()), original);
+            assert_eq!(app.new_task, "Draft / text");
+            assert!(match screen {
+                0 => matches!(app.screen, Screen::List(id) if id == list),
+                1 => matches!(app.screen, Screen::Overview),
+                _ => matches!(app.screen, Screen::Settings),
+            });
+        }
+        cleanup(&app);
+    }
+}
+
+#[test]
+fn shortcuts_reference_preserves_capture_and_find_drafts_and_return_focus() {
+    let (ctx, mut app) = test_app();
+    let list = app.lists[0].key;
+    idle(&ctx, &mut app);
+    key(&ctx, &mut app, Key::N, Modifiers::COMMAND);
+    type_text(&ctx, &mut app, "Captured after reading shortcuts");
+    let query = ctx.memory(|memory| memory.focused());
+    key(&ctx, &mut app, Key::Slash, Modifiers::COMMAND);
+    key(&ctx, &mut app, Key::Escape, Modifiers::NONE);
+    assert!(app.quick_capture.is_some());
+    assert_eq!(ctx.memory(|memory| memory.focused()), query);
+    key(&ctx, &mut app, Key::Enter, Modifiers::NONE);
+    assert_eq!(
+        app.lists[0].data.tasks[0].text,
+        "Captured after reading shortcuts"
+    );
+    let task = app.lists[0].data.tasks[0].id;
+    key(&ctx, &mut app, Key::F, Modifiers::COMMAND);
+    type_text(&ctx, &mut app, "Captured after");
+    let query = ctx.memory(|memory| memory.focused());
+    key(&ctx, &mut app, Key::Slash, Modifiers::COMMAND);
+    key(&ctx, &mut app, Key::Escape, Modifiers::NONE);
+    assert!(app.find.is_some());
+    assert_eq!(ctx.memory(|memory| memory.focused()), query);
+    key(&ctx, &mut app, Key::Enter, Modifiers::NONE);
+    assert_eq!(
+        ctx.memory(|memory| memory.focused()),
+        Some(FocusItem::Task(list, task).id())
+    );
+    cleanup(&app);
+}
+
+#[test]
+fn shortcuts_reference_close_button_returns_to_saved_inline_edit() {
+    let (ctx, mut app) = test_app();
+    let list = app.lists[0].key;
+    let task = Task::new("Before");
+    app.lists[0].data.tasks.push(task.clone());
+    focus(&ctx, &mut app, FocusItem::Task(list, task.id).id());
+    key(&ctx, &mut app, Key::Enter, Modifiers::NONE);
+    key(&ctx, &mut app, Key::A, Modifiers::COMMAND);
+    type_text(&ctx, &mut app, "After / editing");
+    key(&ctx, &mut app, Key::Slash, Modifiers::COMMAND);
+    assert!(app.editing.is_none());
+    assert_eq!(app.lists[0].data.tasks[0].text, "After / editing");
+    key(&ctx, &mut app, Key::Enter, Modifiers::NONE);
+    assert!(app.shortcuts.is_none());
+    assert!(app.editing.is_none());
+    assert_eq!(
+        ctx.memory(|memory| memory.focused()),
+        Some(FocusItem::Task(list, task.id).id())
+    );
+    assert_eq!(
+        storage::load_workspace(&app.workspace).unwrap().lists[0]
+            .data
+            .tasks[0]
+            .text,
+        "After / editing"
+    );
+    cleanup(&app);
+}
+
+#[test]
+fn shortcuts_reference_dismissal_accepts_the_very_next_input() {
+    let (ctx, mut app) = test_app();
+    idle(&ctx, &mut app);
+    type_text(&ctx, &mut app, "Start");
+    key(&ctx, &mut app, Key::Slash, Modifiers::COMMAND);
+    let press = |key| {
+        vec![Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        }]
+    };
+    frame(&ctx, &mut app, press(Key::Escape), 430.0);
+    type_text(&ctx, &mut app, " finish");
+    assert_eq!(app.new_task, "Start finish");
+    key(&ctx, &mut app, Key::N, Modifiers::COMMAND);
+    type_text(&ctx, &mut app, "Immediate capture");
+    key(&ctx, &mut app, Key::Slash, Modifiers::COMMAND);
+    frame(&ctx, &mut app, press(Key::Escape), 430.0);
+    frame(&ctx, &mut app, press(Key::Enter), 430.0);
+    assert!(app.quick_capture.is_none());
+    assert_eq!(app.lists[0].data.tasks[0].text, "Immediate capture");
+    let task = app.lists[0].data.tasks[0].id;
+    let list = app.lists[0].key;
+    key(&ctx, &mut app, Key::F, Modifiers::COMMAND);
+    type_text(&ctx, &mut app, "Immediate capture");
+    key(&ctx, &mut app, Key::Slash, Modifiers::COMMAND);
+    frame(&ctx, &mut app, press(Key::Escape), 430.0);
+    frame(&ctx, &mut app, press(Key::Enter), 430.0);
+    assert!(app.find.is_none());
+    idle(&ctx, &mut app);
+    assert_eq!(
+        ctx.memory(|memory| memory.focused()),
+        Some(FocusItem::Task(list, task).id())
     );
     cleanup(&app);
 }
