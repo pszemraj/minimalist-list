@@ -1,6 +1,6 @@
 # AGENTS.md - Minimalist List
 
-Edit this file only with the user's explicit permission for that request.
+This file is intentionally tracked. Edit it only with the user's explicit permission for that request.
 - The user's current instructions take precedence over this file.
 - In turn, this file takes precendence over any user-level AGENTS, CLAUDE, etc files.
 
@@ -103,7 +103,7 @@ On macOS use Command for application shortcuts. Validate platform-specific paths
 
 - Use a feature branch for implementation work and make atomic Conventional Commits at logical completion points after validation.
 - Commit verified work locally without waiting for another request. Include companion documentation with its behavior change when appropriate.
-- Never stage this file, personal configuration, test data, or generated artifacts.
+- Stage changes to this file only with the user's explicit permission for that request. Never stage personal configuration, test data, or generated artifacts.
 - Never push without an explicit request authorizing that push.
 - Never merge locally or remotely, enable auto-merge, or create releases or tags. The user performs GitHub squash merges.
 - Do not make minor or major version changes without specific approval. Keep the application version unchanged when requested.
