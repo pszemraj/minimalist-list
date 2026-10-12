@@ -46,6 +46,7 @@ impl MinimalistApp {
     ///
     /// Panics if an internally resolved list index becomes invalid while the screen is rendered.
     pub(super) fn list_ui(&mut self, ui: &mut egui::Ui, list_id: Uuid, palette: Palette) {
+        self.keyboard.history_toggle = None;
         let Some(index) = self.list_index(list_id) else {
             self.go_to_overview();
             return;
@@ -161,8 +162,8 @@ impl MinimalistApp {
                 {
                     self.begin_clear_completed(list_id);
                 }
-                if archive_count > 0
-                    && ui
+                if archive_count > 0 {
+                    let history = ui
                         .push_id(("history-toggle", list_id), |ui| {
                             ui.add(
                                 Button::new(self.rich(
@@ -176,10 +177,20 @@ impl MinimalistApp {
                                 .frame(false),
                             )
                         })
-                        .inner
-                        .clicked()
-                {
-                    self.history_open = !self.history_open;
+                        .inner;
+                    self.keyboard.history_toggle = Some(history.id);
+                    if history.clicked() {
+                        self.history_open = !self.history_open;
+                        if self.history_open && !history.clicked_by(egui::PointerButton::Primary) {
+                            self.keyboard.pending = Some(
+                                FocusItem::Archived(
+                                    list_id,
+                                    self.lists[index].data.archive[0].task.id,
+                                )
+                                .id(),
+                            );
+                        }
+                    }
                 }
                 let history_progress = ui.ctx().animate_bool_with_time_and_easing(
                     Id::new(("history-panel", list_id)),
@@ -527,7 +538,7 @@ impl MinimalistApp {
                     ))
                     .frame(false),
                 )
-                .on_hover_text("Subtasks");
+                .on_hover_text("Subtasks (Right enters; Left or Esc returns)");
             self.track_focus(&checklist, FocusItem::Task(list_id, task.id));
             checklist.widget_info(|| {
                 egui::WidgetInfo::labeled(

@@ -6,6 +6,9 @@ use eframe::egui::{
 };
 use uuid::Uuid;
 
+#[path = "keyboard_levels.rs"]
+mod levels;
+
 /// Opens the in-app shortcut reference.
 pub(super) const SHOW_SHORTCUTS: KeyboardShortcut =
     KeyboardShortcut::new(Modifiers::COMMAND, Key::Slash);
@@ -100,6 +103,8 @@ pub(super) struct KeyboardState {
     pub(super) overview_list: Option<Uuid>,
     pub(super) settings_rows: Vec<Vec<Id>>,
     pub(super) settings_sections: Vec<usize>,
+    pub(super) history_toggle: Option<Id>,
+    pub(super) creation_choices: Vec<Id>,
     anchor: Option<(Id, FocusItem)>,
 }
 
@@ -242,6 +247,40 @@ pub(super) fn shortcut_groups() -> Vec<ShortcutGroup> {
                     pair(MOVE_TASK_UP, MOVE_TASK_DOWN),
                 ),
                 ("Delete the task", shortcut(DELETE_TASK)),
+                ("Reach History from the last task", plain(Key::ArrowDown)),
+            ],
+        ),
+        (
+            "Subtasks",
+            vec![
+                ("Previous / next child or add field", "Up / Down".into()),
+                (
+                    "First child / add field (outside text)",
+                    pair(
+                        KeyboardShortcut::new(Modifiers::NONE, Key::Home),
+                        KeyboardShortcut::new(Modifiers::NONE, Key::End),
+                    ),
+                ),
+                ("Toggle focused child", "Enter / Space".into()),
+                ("Collapse and return to parent", "Left / Escape".into()),
+            ],
+        ),
+        (
+            "History",
+            vec![
+                ("Open from History toggle", "Down / Right / Enter".into()),
+                ("Previous / next archived task", "Up / Down".into()),
+                ("Restore focused task", "Enter / Space".into()),
+                ("Close and return to History toggle", "Left / Escape".into()),
+            ],
+        ),
+        (
+            "New list",
+            vec![
+                ("Move between name and colors", "Down / Up".into()),
+                ("Move between colors", "Left / Right".into()),
+                ("Choose color and return to name", "Enter / Space".into()),
+                ("Create from name", plain(Key::Enter)),
             ],
         ),
         (
@@ -377,7 +416,7 @@ impl MinimalistApp {
             return;
         }
         if take_key(ctx, Key::Escape, Modifiers::NONE) {
-            self.keyboard_escape();
+            self.keyboard_escape(ctx);
             return;
         }
         if matches!(self.screen, Screen::Settings) {
@@ -469,7 +508,7 @@ impl MinimalistApp {
         self.focus_now(ctx, target[target_column.min(target.len() - 1)]);
     }
 
-    fn keyboard_escape(&mut self) {
+    fn keyboard_escape(&mut self, ctx: &egui::Context) {
         if matches!(self.screen, Screen::Settings) {
             self.close_settings();
         } else if let Some((list, task)) = self.editing.take() {
@@ -478,16 +517,21 @@ impl MinimalistApp {
             self.creating_list = false;
             self.new_list_title.clear();
             self.focus_overview();
+        } else if self.history_open
+            && (self.keyboard.history_toggle.is_some()
+                && self.keyboard.history_toggle == ctx.memory(|memory| memory.focused())
+                || self.keyboard.anchor.is_some_and(|(id, item)| {
+                    Some(id) == ctx.memory(|memory| memory.focused())
+                        && matches!(item, FocusItem::Archived(_, _))
+                }))
+        {
+            self.close_history();
         } else if let Some((list, task)) = self.subtasks_for.take() {
             self.keyboard.pending = Some(FocusItem::Task(list, task).id());
         } else if let Some((list, task)) = self.revealed.take() {
             self.keyboard.pending = Some(FocusItem::Task(list, task).id());
         } else if self.history_open {
-            self.history_open = false;
-            self.keyboard.pending = match self.screen {
-                Screen::List(list) => Some(Id::new(("new-task", list))),
-                _ => None,
-            };
+            self.close_history();
         }
     }
 
@@ -558,90 +602,6 @@ impl MinimalistApp {
         self.keyboard.pending = Some(id);
         self.keyboard.requested = Some(id);
         ctx.memory_mut(|memory| memory.request_focus(id));
-    }
-
-    fn task_keyboard(&mut self, ctx: &egui::Context, list: Uuid) {
-        let Some(index) = self.list_index(list) else {
-            return;
-        };
-        let focused = ctx.memory(|memory| memory.focused());
-        let entry = Id::new(("new-task", list));
-        if focused == Some(entry) {
-            if !self.lists[index].data.tasks.is_empty()
-                && take_key(ctx, Key::ArrowDown, Modifiers::NONE)
-            {
-                self.focus_now(
-                    ctx,
-                    FocusItem::Task(list, self.lists[index].data.tasks[0].id).id(),
-                );
-            }
-            return;
-        }
-        let tasks = &self.lists[index].data.tasks;
-        let Some(position) = tasks
-            .iter()
-            .position(|task| focused == Some(FocusItem::Task(list, task.id).id()))
-        else {
-            return;
-        };
-        let task = tasks[position].clone();
-        let row = FocusItem::Task(list, task.id).id();
-        // A closing modal can delay the row's response regaining focus by a pass.
-        // Record its owner before applying a command that can remove the row.
-        self.keyboard.anchor = Some((row, FocusItem::Task(list, task.id)));
-        // Forward Delete acts once on rows; text fields keep their normal repeats.
-        ctx.input_mut(|input| {
-            input.events.retain(|event| {
-                !matches!(event, Event::Key {
-                key: Key::Delete,
-                pressed: true, repeat: true, modifiers, ..
-            } if modifiers.matches_exact(Modifiers::NONE))
-            });
-        });
-        if take_shortcut(ctx, MOVE_TASK_UP) {
-            self.apply_row_action(RowAction::Reorder(
-                list,
-                task.id,
-                position.saturating_sub(1),
-            ));
-        } else if take_shortcut(ctx, MOVE_TASK_DOWN) {
-            self.apply_row_action(RowAction::Reorder(
-                list,
-                task.id,
-                (position + 1).min(tasks.len() - 1),
-            ));
-        } else if take_key(ctx, Key::ArrowUp, Modifiers::NONE) {
-            let target = if position == 0 {
-                entry
-            } else {
-                FocusItem::Task(list, tasks[position - 1].id).id()
-            };
-            self.focus_now(ctx, target);
-        } else if take_key(ctx, Key::ArrowDown, Modifiers::NONE) {
-            self.focus_now(
-                ctx,
-                FocusItem::Task(list, tasks[(position + 1).min(tasks.len() - 1)].id).id(),
-            );
-        } else if take_key(ctx, Key::Home, Modifiers::NONE) {
-            self.focus_now(ctx, FocusItem::Task(list, tasks[0].id).id());
-        } else if take_key(ctx, Key::End, Modifiers::NONE) {
-            self.focus_now(ctx, FocusItem::Task(list, tasks.last().unwrap().id).id());
-        } else if take_key(ctx, Key::Enter, Modifiers::NONE) {
-            self.apply_row_action(RowAction::BeginEdit(list, task.id, task.text));
-        } else if take_key(ctx, Key::Space, Modifiers::NONE) {
-            self.apply_row_action(RowAction::Toggle(list, task.id));
-        } else if take_shortcut(ctx, DELETE_TASK) {
-            self.apply_row_action(RowAction::Delete(list, task.id));
-        } else if take_key(ctx, Key::ArrowRight, Modifiers::NONE) {
-            self.subtasks_for = Some((list, task.id));
-            self.new_subtask.clear();
-            self.keyboard.pending = Some(Id::new(("new-subtask", list, task.id)));
-        } else if take_key(ctx, Key::ArrowLeft, Modifiers::NONE) {
-            self.subtasks_for = None;
-        }
-        if self.keyboard.pending.is_none() && ctx.memory(|memory| memory.focused()) == Some(row) {
-            self.keyboard.last_focus = Some(row);
-        }
     }
 
     /// Records the logical item owning a focused control for removal/reload recovery.

@@ -493,6 +493,9 @@ impl MinimalistApp {
             task.completed = false;
             task.completed_at_unix = None;
             self.lists[index].data.tasks.push(task);
+            if self.lists[index].data.archive.is_empty() {
+                self.history_open = false;
+            }
             self.save_list_index(index);
             self.keyboard.pending = Some(FocusItem::Task(list_id, task_id).id());
         }

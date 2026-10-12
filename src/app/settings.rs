@@ -246,6 +246,8 @@ impl MinimalistApp {
             let text_size = ui.add_sized(
                 [ui.available_width(), 18.0],
                 egui::Slider::new(&mut self.settings.font_size, 14.0..=30.0)
+                    .step_by(1.0)
+                    .clamping(egui::SliderClamping::Edits)
                     .show_value(false)
                     .trailing_fill(true),
             );
@@ -266,6 +268,8 @@ impl MinimalistApp {
             let row_spacing = ui.add_sized(
                 [ui.available_width(), 18.0],
                 egui::Slider::new(&mut self.settings.row_padding, 4.0..=24.0)
+                    .step_by(1.0)
+                    .clamping(egui::SliderClamping::Edits)
                     .show_value(false)
                     .trailing_fill(true),
             );
@@ -310,6 +314,8 @@ impl MinimalistApp {
             });
             let opacity = ui.add(
                 egui::Slider::new(&mut self.settings.background_opacity, 0.2..=1.0)
+                    .step_by(0.01)
+                    .clamping(egui::SliderClamping::Edits)
                     .show_value(false)
                     .trailing_fill(true),
             );

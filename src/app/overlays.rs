@@ -31,6 +31,7 @@ pub(super) struct FindState {
     query: String,
     selected: usize,
     request_focus: bool,
+    result_ids: Vec<Id>,
 }
 
 #[derive(Clone)]
@@ -130,6 +131,7 @@ impl MinimalistApp {
             query: String::new(),
             selected: 0,
             request_focus: true,
+            result_ids: Vec::new(),
         });
     }
 
@@ -382,9 +384,16 @@ impl MinimalistApp {
                     }
 
                     let hits = search_hits(&self.lists, &state.query);
+                    let focused = ctx.memory(|memory| memory.focused());
+                    let focused_result =
+                        state.result_ids.iter().position(|id| Some(*id) == focused);
+                    let mut move_result_focus = false;
                     if hits.is_empty() {
                         state.selected = 0;
                     } else {
+                        if let Some(index) = focused_result {
+                            state.selected = index;
+                        }
                         state.selected = state.selected.min(hits.len() - 1);
                         let down = take_key(ctx, Key::ArrowDown, egui::Modifiers::NONE);
                         let up = take_key(ctx, Key::ArrowUp, egui::Modifiers::NONE);
@@ -393,10 +402,15 @@ impl MinimalistApp {
                         } else if up {
                             state.selected = (state.selected + hits.len() - 1) % hits.len();
                         }
-                        if text_input_shortcuts(ui, &response).0 {
+                        move_result_focus = focused_result.is_some() && (down || up);
+                        if text_input_shortcuts(ui, &response).0
+                            || (focused_result.is_some()
+                                && take_key(ctx, Key::Enter, egui::Modifiers::NONE))
+                        {
                             activated = hits.get(state.selected).cloned();
                         }
                     }
+                    state.result_ids.clear();
 
                     ui.add_space(8.0);
                     if state.query.trim().is_empty() {
@@ -435,6 +449,10 @@ impl MinimalistApp {
                                             })
                                             .corner_radius(CornerRadius::same(10)),
                                     );
+                                    state.result_ids.push(result.id);
+                                    if selected && move_result_focus {
+                                        result.request_focus();
+                                    }
                                     if selected {
                                         result.scroll_to_me(Some(Align::Center));
                                     }
