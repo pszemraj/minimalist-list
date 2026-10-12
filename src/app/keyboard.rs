@@ -141,6 +141,8 @@ fn shortcut_for_platform(binding: KeyboardShortcut, mac: bool) -> String {
         Key::ArrowDown => "Down",
         Key::ArrowLeft => "Left",
         Key::ArrowRight => "Right",
+        Key::Home if mac => "Fn+Left",
+        Key::End if mac => "Fn+Right",
         Key::Backspace if mac => "Delete",
         Key::Delete if mac => "Fn+Delete",
         key => key.name(),
@@ -203,7 +205,13 @@ pub(super) fn shortcut_groups() -> Vec<ShortcutGroup> {
             "Focused task row",
             vec![
                 ("Previous / next task", "Up / Down".into()),
-                ("First / last task", "Home / End".into()),
+                (
+                    "First / last task",
+                    pair(
+                        KeyboardShortcut::new(Modifiers::NONE, Key::Home),
+                        KeyboardShortcut::new(Modifiers::NONE, Key::End),
+                    ),
+                ),
                 ("Return to entry from the first task", plain(Key::ArrowUp)),
                 ("Edit the title", plain(Key::Enter)),
                 ("Toggle completion", plain(Key::Space)),

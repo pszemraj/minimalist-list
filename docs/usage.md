@@ -1,6 +1,6 @@
 # Using Minimalist List
 
-Shortcuts work while the application has keyboard focus. On macOS, use Command in place of Ctrl, except list switching uses Control on every platform.
+Shortcuts work while the application has keyboard focus. On macOS, use Command in place of Ctrl, except list switching uses Control on every platform. Home and End are Fn+Left and Fn+Right on MacBook keyboards.
 
 Press `Ctrl+/` (`Cmd+/` on macOS) to show the in-app keyboard shortcut reference. Use Up/Down, Page Up/Page Down, or Home/End to scroll it. Escape or **Close** returns focus to the control you left. Quick add drafts and Find queries remain available underneath the reference.
 
