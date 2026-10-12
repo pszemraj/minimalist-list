@@ -2,7 +2,9 @@
 
 Minimalist List is a native desktop task list built with `egui` and `eframe`, inspired by MinimaList. It runs without an account or hosted service.
 
-<img src="assets/ui.png" alt="UI screenshot" width="260">
+<img src="assets/ui.jpg" alt="Minimalist List on Windows, showing tasks, subtasks, and completion" width="320">
+
+*Windows example with sample tasks and an expanded checklist.*
 
 ## Install and run
 

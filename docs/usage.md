@@ -4,6 +4,8 @@ Shortcuts work while the application has keyboard focus. On macOS, use Command i
 
 Press `Ctrl+/` (`Cmd+/` on macOS) to show the in-app keyboard shortcut reference. Use Up/Down, Page Up/Page Down, or Home/End to scroll it. Escape or **Close** returns focus to the control you left. Quick add drafts and Find queries remain available underneath the reference.
 
+<img src="../assets/shortcuts.jpg" alt="The keyboard shortcut reference on Windows" width="360">
+
 ## Manage lists
 
 Press Escape from a list to open the overview. Arrow keys move between list cards in the displayed grid; Enter or Space opens the focused list and puts the cursor in task entry. Escape returns to the card you left. The back control and double-clicking a list title also open the overview.
@@ -11,6 +13,8 @@ Press Escape from a list to open the overview. Arrow keys move between list card
 `Ctrl+Shift+N` opens list creation from Lists, a list, or Settings. You can also select **+ New list**. Enter a name, optionally choose an accent, and press Enter to create it. Escape cancels.
 
 Open a list card's settings to rename, recolor, or delete it. **Delete list** requires activating **Confirm delete list** a second time; at least one list must remain.
+
+<img src="../assets/lists.jpg" alt="Four example lists with accent colors, task previews, and completion counts" width="360">
 
 ## Capture and edit tasks
 
@@ -37,6 +41,8 @@ Select **Show history**, then **Restore** to return a task to the bottom of the 
 ## Find and navigate
 
 `Ctrl+F` or the header's `find` action searches task and subtask text across every list, including completed tasks and History. Use Up and Down to select a result, Enter to open it, and Escape to close the overlay. The selected task scrolls into view and is briefly highlighted.
+
+<img src="../assets/find.jpg" alt="Find showing matching tasks from the Projects and Errands lists" width="360">
 
 `Ctrl+Tab` and `Ctrl+Shift+Tab` move between lists, including on macOS, where Command+Tab switches applications.
 
