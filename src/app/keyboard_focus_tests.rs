@@ -584,3 +584,109 @@ fn scrolled_settings_focus_outline_stays_in_the_visible_region() {
     assert!(outlines > 0);
     cleanup(&app);
 }
+
+#[test]
+fn escape_cancels_one_layer_and_navigation_saves_inline_edits() {
+    let (ctx, mut app) = test_app();
+    let list = app.lists[0].key;
+    let task = Task::new("Original");
+    app.lists[0].data.tasks.push(task.clone());
+    focus(&ctx, &mut app, FocusItem::Task(list, task.id).id());
+    key(&ctx, &mut app, Key::ArrowRight, Modifiers::NONE);
+    assert_eq!(
+        ctx.memory(|m| m.focused()),
+        Some(Id::new(("new-subtask", list, task.id)))
+    );
+    type_text(&ctx, &mut app, "Child");
+    key(&ctx, &mut app, Key::Enter, Modifiers::NONE);
+    app.history_open = true;
+    let escape = |ctx: &egui::Context, app: &mut MinimalistApp, pressed| {
+        frame(
+            ctx,
+            app,
+            vec![Event::Key {
+                key: Key::Escape,
+                physical_key: None,
+                pressed,
+                repeat: false, // egui derives repeats from the uninterrupted key state.
+                modifiers: Modifiers::NONE,
+            }],
+            430.0,
+        );
+    };
+    escape(&ctx, &mut app, true);
+    assert!(matches!(app.screen, Screen::List(_)));
+    assert!(app.subtasks_for.is_none());
+    for _ in 0..5 {
+        escape(&ctx, &mut app, true);
+        assert!(
+            ctx.input(|input| input.raw.events.iter().any(|event| matches!(
+                event,
+                Event::Key {
+                    key: Key::Escape,
+                    pressed: true,
+                    repeat: true,
+                    ..
+                }
+            )))
+        );
+        assert!(app.history_open, "one hold must not dismiss the next layer");
+        assert!(matches!(app.screen, Screen::List(id) if id == list));
+    }
+    // Release, then press again: the next layer may close.
+    escape(&ctx, &mut app, false);
+    assert!(app.history_open);
+    key(&ctx, &mut app, Key::Escape, Modifiers::NONE);
+    assert!(!app.history_open);
+    focus(&ctx, &mut app, FocusItem::Task(list, task.id).id());
+    key(&ctx, &mut app, Key::Enter, Modifiers::NONE);
+    assert_eq!(app.editing, Some((list, task.id)));
+    app.edit_text = "Cancelled".into();
+    app.subtasks_for = Some((list, task.id));
+    for _ in 0..6 {
+        escape(&ctx, &mut app, true);
+        assert!(app.editing.is_none());
+        assert_eq!(app.subtasks_for, Some((list, task.id)));
+        assert!(matches!(app.screen, Screen::List(id) if id == list));
+    }
+    escape(&ctx, &mut app, false);
+    key(&ctx, &mut app, Key::Escape, Modifiers::NONE);
+    assert!(app.subtasks_for.is_none());
+    assert_eq!(app.lists[0].data.tasks[0].text, "Original");
+    key(&ctx, &mut app, Key::Enter, Modifiers::NONE);
+    app.edit_text = "Saved on navigation".into();
+    key(&ctx, &mut app, Key::Comma, Modifiers::COMMAND);
+    key(&ctx, &mut app, Key::Escape, Modifiers::NONE);
+    assert_eq!(app.lists[0].data.tasks[0].text, "Saved on navigation");
+    assert_eq!(
+        ctx.memory(|m| m.focused()),
+        Some(FocusItem::Task(list, task.id).id())
+    );
+    key(&ctx, &mut app, Key::Escape, Modifiers::NONE);
+    assert!(matches!(app.screen, Screen::List(id) if id == list));
+    assert_eq!(
+        ctx.memory(|m| m.focused()),
+        Some(FocusItem::Task(list, task.id).id())
+    );
+    key(&ctx, &mut app, Key::Enter, Modifiers::NONE);
+    app.edit_text = "Saved on Back".into();
+    key(
+        &ctx,
+        &mut app,
+        BACK_TO_LISTS.logical_key,
+        BACK_TO_LISTS.modifiers,
+    );
+    assert!(matches!(app.screen, Screen::Overview));
+    assert_eq!(
+        ctx.memory(|m| m.focused()),
+        Some(FocusItem::Card(list).id())
+    );
+    assert_eq!(
+        storage::load_workspace(&app.workspace).unwrap().lists[0]
+            .data
+            .tasks[0]
+            .text,
+        "Saved on Back"
+    );
+    cleanup(&app);
+}

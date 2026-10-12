@@ -8,7 +8,7 @@ Press `Ctrl+/` (`Cmd+/` on macOS) to show the in-app keyboard shortcut reference
 
 ## Manage lists
 
-Press Escape from a list to open the overview. Arrow keys move between list cards in the displayed grid; Enter or Space opens the focused list and puts the cursor in task entry. Escape returns to the card you left. The back control and double-clicking a list title also open the overview.
+Press `Alt+Left` (`Cmd+[` on macOS) from a list to open the overview, with the card you left focused. Arrow keys move between list cards in the displayed grid; Enter or Space opens the focused list and puts the cursor in task entry. The back control and double-clicking a list title also open the overview. Backspace keeps its normal text-editing behavior.
 
 `Ctrl+Shift+N` opens list creation from Lists, a list, or Settings. You can also select **+ New list**. Enter a name, optionally choose an accent, and press Enter to create it. Escape cancels.
 
@@ -48,7 +48,7 @@ Select **Show history**, then **Restore** to return a task to the bottom of the 
 
 Tab and Shift+Tab reach individual controls, including list-card settings, task completion, subtasks, delete actions, History restoration, and Settings. Focused controls are outlined and scroll into view. Arrow keys inside text fields and Settings sliders retain their usual editing behavior.
 
-Escape dismisses one layer at a time: an open dropdown, the shortcut reference, Quick add or Find, an inline edit, list creation, subtasks, revealed task actions, History, then the current screen. Closing an overlay restores its opening control; opening a search result focuses the matching task, subtask, or History restore action. Screen navigation saves an active inline task edit, like leaving its field.
+Escape dismisses one layer per press: an open dropdown, the shortcut reference, Quick add or Find, Settings, an inline edit, list creation, subtasks, revealed task actions, or History. Holding it does not dismiss further layers. It leaves Lists and the task-list screen open. Closing an overlay restores its opening control; opening a search result focuses the matching task, subtask, or History restore action. Screen navigation saves an active inline task edit, like leaving its field.
 
 ## Window and appearance settings
 

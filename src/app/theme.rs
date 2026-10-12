@@ -1,7 +1,7 @@
 //! Accent-derived colors and shared rendering helpers.
 
 use super::MinimalistApp;
-use super::keyboard::{FIND, OPEN_SETTINGS, QUICK_ADD, shortcut};
+use super::keyboard::{BACK_TO_LISTS, FIND, OPEN_SETTINGS, QUICK_ADD, shortcut};
 use crate::model::{Accent, FontChoice};
 use eframe::egui;
 use egui::{
@@ -418,6 +418,7 @@ impl MinimalistApp {
             if list_id.is_some()
                 && ui
                     .add(Button::new(self.rich("<", 24.0, palette.text)).frame(false))
+                    .on_hover_text(format!("Back to Lists ({})", shortcut(BACK_TO_LISTS)))
                     .clicked()
             {
                 self.go_to_overview();

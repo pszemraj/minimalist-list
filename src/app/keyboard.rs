@@ -34,6 +34,14 @@ pub(super) const PREVIOUS_LIST: KeyboardShortcut = KeyboardShortcut::new(
     },
     Key::Tab,
 );
+/// Returns from a list to Lists using the native Back shortcut.
+#[cfg(not(target_os = "macos"))]
+pub(super) const BACK_TO_LISTS: KeyboardShortcut =
+    KeyboardShortcut::new(Modifiers::ALT, Key::ArrowLeft);
+/// Returns from a list to Lists using the native Back shortcut.
+#[cfg(target_os = "macos")]
+pub(super) const BACK_TO_LISTS: KeyboardShortcut =
+    KeyboardShortcut::new(Modifiers::COMMAND, Key::OpenBracket);
 /// Moves completed tasks to History.
 pub(super) const CLEAR_COMPLETED: KeyboardShortcut = KeyboardShortcut::new(
     Modifiers {
@@ -137,6 +145,7 @@ fn shortcut_for_platform(binding: KeyboardShortcut, mac: bool) -> String {
     let key = match binding.logical_key {
         Key::Comma => ",",
         Key::Slash => "/",
+        Key::OpenBracket => "[",
         Key::ArrowUp => "Up",
         Key::ArrowDown => "Down",
         Key::ArrowLeft => "Left",
@@ -182,7 +191,7 @@ pub(super) fn shortcut_groups() -> Vec<ShortcutGroup> {
                         KeyboardShortcut::new(Modifiers::SHIFT, Key::Tab),
                     ),
                 ),
-                ("Close the active layer / go back", plain(Key::Escape)),
+                ("Dismiss the active layer", plain(Key::Escape)),
             ],
         ),
         (
@@ -195,6 +204,7 @@ pub(super) fn shortcut_groups() -> Vec<ShortcutGroup> {
         (
             "Inside a list",
             vec![
+                ("Back to Lists", shortcut(BACK_TO_LISTS)),
                 ("Add a task from entry", plain(Key::Enter)),
                 ("Focus the first task from entry", plain(Key::ArrowDown)),
                 ("Next / previous list", pair(NEXT_LIST, PREVIOUS_LIST)),
@@ -248,6 +258,36 @@ fn take_shortcut(ctx: &egui::Context, binding: KeyboardShortcut) -> bool {
 impl MinimalistApp {
     /// Routes app commands before rendering widgets so one key has one effect.
     pub(super) fn handle_app_shortcuts(&mut self, ctx: &egui::Context) {
+        // One physical Escape press dismisses one layer, including popups and
+        // modals handled later by widgets. A held key must not reach lower layers.
+        let escape = ctx.input_mut(|input| {
+            let escape = input.events.iter().any(|event| {
+                matches!(event,
+                    Event::Key { key: Key::Escape, pressed: true, modifiers, .. }
+                    if modifiers.matches_exact(Modifiers::NONE)
+                )
+            });
+            input.events.retain(|event| {
+                !matches!(
+                    event,
+                    Event::Key {
+                        key: Key::Escape,
+                        pressed: true,
+                        repeat: true,
+                        ..
+                    }
+                )
+            });
+            escape
+        });
+        // egui surrenders focus for Escape before this handler runs. Preserve it
+        // for ignored repeats and main screens; a dismissed layer sets its return target.
+        if escape
+            && ctx.memory(|memory| memory.focused().is_none())
+            && let Some(id) = self.keyboard.last_focus
+        {
+            ctx.memory_mut(|memory| memory.request_focus(id));
+        }
         if self.request_task_focus
             && let Screen::List(list) = self.screen
         {
@@ -311,7 +351,9 @@ impl MinimalistApp {
             return;
         }
         if let Screen::List(list) = self.screen {
-            if take_shortcut(ctx, PREVIOUS_LIST) {
+            if take_shortcut(ctx, BACK_TO_LISTS) {
+                self.go_to_overview();
+            } else if take_shortcut(ctx, PREVIOUS_LIST) {
                 self.cycle_list(list, true);
             } else if take_shortcut(ctx, NEXT_LIST) {
                 self.cycle_list(list, false);
@@ -342,12 +384,6 @@ impl MinimalistApp {
                 Screen::List(list) => Some(Id::new(("new-task", list))),
                 _ => None,
             };
-        } else {
-            match self.screen {
-                Screen::Settings => unreachable!(),
-                Screen::List(_) => self.go_to_overview(),
-                Screen::Overview => self.focus_overview(),
-            }
         }
     }
 

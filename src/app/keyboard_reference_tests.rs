@@ -30,7 +30,12 @@ fn shortcuts_reference_round_trips_from_main_screens_for_ctrl_and_cmd() {
         for screen in 0..3 {
             match screen {
                 0 => type_text(&ctx, &mut app, "Draft / text"),
-                1 => key(&ctx, &mut app, Key::Escape, Modifiers::NONE),
+                1 => key(
+                    &ctx,
+                    &mut app,
+                    BACK_TO_LISTS.logical_key,
+                    BACK_TO_LISTS.modifiers,
+                ),
                 _ => key(&ctx, &mut app, Key::Comma, command),
             }
             let original = ctx.memory(|memory| memory.focused());
@@ -40,6 +45,12 @@ fn shortcuts_reference_round_trips_from_main_screens_for_ctrl_and_cmd() {
             key(&ctx, &mut app, Key::Slash, slash_modifiers);
             key(&ctx, &mut app, Key::Delete, Modifiers::NONE);
             key(&ctx, &mut app, Key::N, command);
+            key(
+                &ctx,
+                &mut app,
+                BACK_TO_LISTS.logical_key,
+                BACK_TO_LISTS.modifiers,
+            );
             assert!(app.shortcuts.is_some());
             assert!(app.quick_capture.is_none());
             assert_eq!(app.lists[0].data.tasks.len(), 1);
@@ -66,7 +77,35 @@ fn shortcuts_reference_preserves_capture_and_find_drafts_and_return_focus() {
     type_text(&ctx, &mut app, "Captured after reading shortcuts");
     let query = ctx.memory(|memory| memory.focused());
     key(&ctx, &mut app, Key::Slash, Modifiers::COMMAND);
-    key(&ctx, &mut app, Key::Escape, Modifiers::NONE);
+    for _ in 0..6 {
+        frame(
+            &ctx,
+            &mut app,
+            vec![Event::Key {
+                key: Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Modifiers::NONE,
+            }],
+            430.0,
+        );
+        assert!(app.shortcuts.is_none());
+        assert!(app.quick_capture.is_some());
+    }
+    frame(
+        &ctx,
+        &mut app,
+        vec![Event::Key {
+            key: Key::Escape,
+            physical_key: None,
+            pressed: false,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        }],
+        430.0,
+    );
+    idle(&ctx, &mut app);
     assert!(app.quick_capture.is_some());
     assert_eq!(ctx.memory(|memory| memory.focused()), query);
     key(&ctx, &mut app, Key::Enter, Modifiers::NONE);
@@ -87,6 +126,38 @@ fn shortcuts_reference_preserves_capture_and_find_drafts_and_return_focus() {
         ctx.memory(|memory| memory.focused()),
         Some(FocusItem::Task(list, task).id())
     );
+    key(&ctx, &mut app, Key::Comma, Modifiers::COMMAND);
+    key(&ctx, &mut app, Key::Slash, Modifiers::COMMAND);
+    for _ in 0..6 {
+        frame(
+            &ctx,
+            &mut app,
+            vec![Event::Key {
+                key: Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Modifiers::NONE,
+            }],
+            430.0,
+        );
+        assert!(app.shortcuts.is_none());
+        assert!(matches!(app.screen, Screen::Settings));
+    }
+    frame(
+        &ctx,
+        &mut app,
+        vec![Event::Key {
+            key: Key::Escape,
+            physical_key: None,
+            pressed: false,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        }],
+        430.0,
+    );
+    key(&ctx, &mut app, Key::Escape, Modifiers::NONE);
+    assert!(matches!(app.screen, Screen::List(id) if id == list));
     cleanup(&app);
 }
 
@@ -127,13 +198,16 @@ fn shortcuts_reference_dismissal_accepts_the_very_next_input() {
     type_text(&ctx, &mut app, "Start");
     key(&ctx, &mut app, Key::Slash, Modifiers::COMMAND);
     let press = |key| {
-        vec![Event::Key {
-            key,
-            physical_key: None,
-            pressed: true,
-            repeat: false,
-            modifiers: Modifiers::NONE,
-        }]
+        [true, false]
+            .into_iter()
+            .map(|pressed| Event::Key {
+                key,
+                physical_key: None,
+                pressed,
+                repeat: false,
+                modifiers: Modifiers::NONE,
+            })
+            .collect()
     };
     frame(&ctx, &mut app, press(Key::Escape), 430.0);
     type_text(&ctx, &mut app, " finish");
@@ -171,6 +245,16 @@ fn reference_uses_shared_bindings_and_native_key_names() {
         (DELETE_TASK, "Delete", "Fn+Delete"),
         (MOVE_TASK_UP, "Alt+Up", "Option+Up"),
         (
+            KeyboardShortcut::new(Modifiers::ALT, Key::ArrowLeft),
+            "Alt+Left",
+            "Option+Left",
+        ),
+        (
+            KeyboardShortcut::new(Modifiers::COMMAND, Key::OpenBracket),
+            "Ctrl+[",
+            "Cmd+[",
+        ),
+        (
             KeyboardShortcut::new(Modifiers::NONE, Key::Home),
             "Home",
             "Fn+Left",
@@ -191,6 +275,7 @@ fn reference_uses_shared_bindings_and_native_key_names() {
         ("Quick add", QUICK_ADD),
         ("Find tasks and History", FIND),
         ("New list (Lists, list, Settings)", NEW_LIST),
+        ("Back to Lists", BACK_TO_LISTS),
         ("Move completed tasks to History", CLEAR_COMPLETED),
         ("Delete the task", DELETE_TASK),
     ] {

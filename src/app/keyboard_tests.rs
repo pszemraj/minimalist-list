@@ -90,6 +90,17 @@ fn projects_add_back_tasks_add_uses_only_keys() {
     let projects = add_list(&mut app, "projects");
     idle(&ctx, &mut app);
     key(&ctx, &mut app, Key::Escape, Modifiers::NONE);
+    assert!(matches!(app.screen, Screen::List(id) if id == tasks));
+    type_text(&ctx, &mut app, "x");
+    key(&ctx, &mut app, Key::Backspace, Modifiers::NONE);
+    assert!(app.new_task.is_empty());
+    assert!(matches!(app.screen, Screen::List(id) if id == tasks));
+    key(
+        &ctx,
+        &mut app,
+        BACK_TO_LISTS.logical_key,
+        BACK_TO_LISTS.modifiers,
+    );
     assert!(matches!(app.screen, Screen::Overview));
     assert_eq!(
         ctx.memory(|m| m.focused()),
@@ -108,7 +119,12 @@ fn projects_add_back_tasks_add_uses_only_keys() {
     );
     type_text(&ctx, &mut app, "Plan project");
     key(&ctx, &mut app, Key::Enter, Modifiers::NONE);
-    key(&ctx, &mut app, Key::Escape, Modifiers::NONE);
+    key(
+        &ctx,
+        &mut app,
+        BACK_TO_LISTS.logical_key,
+        BACK_TO_LISTS.modifiers,
+    );
     assert_eq!(
         ctx.memory(|m| m.focused()),
         Some(FocusItem::Card(projects).id())
@@ -179,7 +195,7 @@ fn immediate_arrows_override_entry_and_return_focus_requests() {
     let list = app.lists[0].key;
     idle(&ctx, &mut app);
     type_text(&ctx, &mut app, "First");
-    let press = |ctx: &egui::Context, app: &mut MinimalistApp, key| {
+    let press = |ctx: &egui::Context, app: &mut MinimalistApp, key, modifiers| {
         frame(
             ctx,
             app,
@@ -188,13 +204,13 @@ fn immediate_arrows_override_entry_and_return_focus_requests() {
                 physical_key: None,
                 pressed: true,
                 repeat: false,
-                modifiers: Modifiers::NONE,
+                modifiers,
             }],
             430.0,
         )
     };
-    press(&ctx, &mut app, Key::Enter);
-    press(&ctx, &mut app, Key::ArrowDown);
+    press(&ctx, &mut app, Key::Enter, Modifiers::NONE);
+    press(&ctx, &mut app, Key::ArrowDown, Modifiers::NONE);
     let task = app.lists[0].data.tasks[0].id;
     idle(&ctx, &mut app);
     assert_eq!(
@@ -202,8 +218,13 @@ fn immediate_arrows_override_entry_and_return_focus_requests() {
         Some(FocusItem::Task(list, task).id())
     );
     add_list(&mut app, "Second");
-    press(&ctx, &mut app, Key::Escape);
-    press(&ctx, &mut app, Key::ArrowDown);
+    press(
+        &ctx,
+        &mut app,
+        BACK_TO_LISTS.logical_key,
+        BACK_TO_LISTS.modifiers,
+    );
+    press(&ctx, &mut app, Key::ArrowDown, Modifiers::NONE);
     idle(&ctx, &mut app);
     assert_eq!(
         ctx.memory(|m| m.focused()),
@@ -240,7 +261,12 @@ fn settings_round_trip_preserves_destination_and_rename_for_ctrl_and_cmd() {
             Some(Id::new(("new-task", list)))
         );
         assert_eq!(app.lists[0].data.title, "Renamed");
-        key(&ctx, &mut app, Key::Escape, Modifiers::NONE);
+        key(
+            &ctx,
+            &mut app,
+            BACK_TO_LISTS.logical_key,
+            BACK_TO_LISTS.modifiers,
+        );
         key(&ctx, &mut app, Key::Comma, command);
         key(&ctx, &mut app, Key::Escape, Modifiers::NONE);
         assert!(matches!(app.screen, Screen::Overview));
@@ -448,39 +474,6 @@ fn task_commands_edit_complete_reorder_delete_and_keep_identity() {
 }
 
 #[test]
-fn escape_cancels_one_layer_and_navigation_saves_inline_edits() {
-    let (ctx, mut app) = test_app();
-    let list = app.lists[0].key;
-    let task = Task::new("Original");
-    app.lists[0].data.tasks.push(task.clone());
-    focus(&ctx, &mut app, FocusItem::Task(list, task.id).id());
-    key(&ctx, &mut app, Key::ArrowRight, Modifiers::NONE);
-    assert_eq!(
-        ctx.memory(|m| m.focused()),
-        Some(Id::new(("new-subtask", list, task.id)))
-    );
-    type_text(&ctx, &mut app, "Child");
-    key(&ctx, &mut app, Key::Enter, Modifiers::NONE);
-    key(&ctx, &mut app, Key::Escape, Modifiers::NONE);
-    assert!(matches!(app.screen, Screen::List(_)));
-    assert!(app.subtasks_for.is_none());
-    key(&ctx, &mut app, Key::Enter, Modifiers::NONE);
-    app.edit_text = "Cancelled".into();
-    key(&ctx, &mut app, Key::Escape, Modifiers::NONE);
-    assert_eq!(app.lists[0].data.tasks[0].text, "Original");
-    key(&ctx, &mut app, Key::Enter, Modifiers::NONE);
-    app.edit_text = "Saved on navigation".into();
-    key(&ctx, &mut app, Key::Comma, Modifiers::COMMAND);
-    key(&ctx, &mut app, Key::Escape, Modifiers::NONE);
-    assert_eq!(app.lists[0].data.tasks[0].text, "Saved on navigation");
-    assert_eq!(
-        ctx.memory(|m| m.focused()),
-        Some(FocusItem::Task(list, task.id).id())
-    );
-    cleanup(&app);
-}
-
-#[test]
 fn specific_shortcuts_do_not_open_quick_add_or_move_text_focus() {
     let (ctx, mut app) = test_app();
     let first = app.lists[0].key;
@@ -641,7 +634,34 @@ fn quick_add_dropdown_escape_is_local_and_submit_restores_entry() {
     key(&ctx, &mut app, Key::Tab, Modifiers::NONE);
     key(&ctx, &mut app, Key::Enter, Modifiers::NONE);
     assert!(egui::Popup::is_any_open(&ctx));
-    key(&ctx, &mut app, Key::Escape, Modifiers::NONE);
+    for _ in 0..6 {
+        frame(
+            &ctx,
+            &mut app,
+            vec![Event::Key {
+                key: Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Modifiers::NONE,
+            }],
+            430.0,
+        );
+        assert!(!egui::Popup::is_any_open(&ctx));
+        assert!(app.quick_capture.is_some());
+    }
+    frame(
+        &ctx,
+        &mut app,
+        vec![Event::Key {
+            key: Key::Escape,
+            physical_key: None,
+            pressed: false,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        }],
+        430.0,
+    );
     assert!(!egui::Popup::is_any_open(&ctx));
     assert!(app.quick_capture.is_some());
     key(&ctx, &mut app, Key::Tab, Modifiers::NONE);
