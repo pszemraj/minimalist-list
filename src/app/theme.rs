@@ -438,26 +438,27 @@ impl MinimalistApp {
                 {
                     self.close_window(ui.ctx());
                 }
-                if ui
+                let settings = ui
                     .add(Button::new(self.rich("...", 18.0, palette.muted)).frame(false))
-                    .on_hover_text(format!("Settings ({})", shortcut(OPEN_SETTINGS)))
-                    .clicked()
-                {
+                    .on_hover_text(format!("Settings ({})", shortcut(OPEN_SETTINGS)));
+                if settings.clicked() {
                     self.open_settings(list_id);
+                    // Pointer openers belong to this frame, before last_focus is refreshed.
+                    self.keyboard.settings_return = Some(settings.id);
                 }
-                if ui
+                let find = ui
                     .add(Button::new(self.rich("find", 14.0, palette.muted)).frame(false))
-                    .on_hover_text(format!("Find anything ({})", shortcut(FIND)))
-                    .clicked()
-                {
+                    .on_hover_text(format!("Find anything ({})", shortcut(FIND)));
+                if find.clicked() {
                     self.open_find();
+                    self.keyboard.overlay_return = Some(find.id);
                 }
-                if ui
+                let add = ui
                     .add(Button::new(self.rich("add", 14.0, palette.accent)).frame(false))
-                    .on_hover_text(format!("Quick add ({})", shortcut(QUICK_ADD)))
-                    .clicked()
-                {
+                    .on_hover_text(format!("Quick add ({})", shortcut(QUICK_ADD)));
+                if add.clicked() {
                     self.open_quick_capture(list_id);
+                    self.keyboard.overlay_return = Some(add.id);
                 }
                 if ui
                     .add(Button::new(self.rich(pin, 14.0, palette.accent)).frame(false))

@@ -67,11 +67,12 @@ impl MinimalistApp {
                 for row in cards.chunks(columns) {
                     ui.horizontal(|ui| {
                         for (id, title, accent, active, completed, preview) in row {
-                            let (response, settings_clicked) = self.list_card(
+                            let (response, settings) = self.list_card(
                                 ui, *id, title, *accent, *active, *completed, preview, card_width,
                             );
-                            if settings_clicked {
+                            if settings.clicked() {
                                 self.open_settings(Some(*id));
+                                self.keyboard.settings_return = Some(settings.id);
                             } else if response.clicked() {
                                 take_key(ui.ctx(), egui::Key::Enter, egui::Modifiers::NONE);
                                 take_key(ui.ctx(), egui::Key::Space, egui::Modifiers::NONE);
@@ -173,7 +174,7 @@ impl MinimalistApp {
         completed: usize,
         preview: &[String],
         width: f32,
-    ) -> (egui::Response, bool) {
+    ) -> (egui::Response, egui::Response) {
         let card_palette = Palette::from_accent(accent);
         let (slot_rect, _) = ui.allocate_exact_size(Vec2::new(width, 166.0), Sense::hover());
         let response = ui.interact(slot_rect, FocusItem::Card(id).id(), Sense::click());
@@ -279,7 +280,7 @@ impl MinimalistApp {
             .on_hover_text("List settings");
         self.track_focus(&settings, FocusItem::Card(id));
 
-        (response, settings.clicked())
+        (response, settings)
     }
 
     fn create_list(&mut self) {

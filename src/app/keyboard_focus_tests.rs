@@ -3,6 +3,93 @@
 use super::*;
 
 #[test]
+fn pointer_openers_restore_the_clicked_control() {
+    for (label, card) in [
+        ("add", false),
+        ("find", false),
+        ("...", false),
+        ("...", true),
+    ] {
+        let (ctx, mut app) = test_app();
+        let list = app.lists[0].key;
+        let task = Task::new("Pointer focus return");
+        let row = FocusItem::Task(list, task.id).id();
+        app.lists[0].data.tasks.push(task);
+        let owner = if card {
+            app.go_to_overview();
+            FocusItem::Card(list).id()
+        } else {
+            row
+        };
+        focus(&ctx, &mut app, owner);
+        let output = frame(&ctx, &mut app, Vec::new(), 430.0);
+        let pos = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::epaint::Shape::Text(text)
+                    if text.galley.text() == label
+                        && (!card || ctx.read_response(owner).unwrap().rect.contains(text.pos)) =>
+                {
+                    Some(text.pos + text.galley.size() / 2.0)
+                }
+                _ => None,
+            })
+            .unwrap();
+        let pointer = |pressed| Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        // Discover the real button ID through keyboard focus, without opening it.
+        let mut opener = None;
+        for _ in 0..16 {
+            key(&ctx, &mut app, Key::Tab, Modifiers::NONE);
+            let id = ctx.memory(|memory| memory.focused()).unwrap();
+            if ctx.read_response(id).unwrap().rect.contains(pos) {
+                opener = Some(id);
+                break;
+            }
+        }
+        let opener = opener.expect("header control is keyboard reachable");
+
+        for editing in [false, true] {
+            if card && editing {
+                continue;
+            }
+            focus(&ctx, &mut app, owner);
+            if editing {
+                key(&ctx, &mut app, Key::Enter, Modifiers::NONE);
+            }
+            // A fast click can press and release between two rendered frames.
+            frame(
+                &ctx,
+                &mut app,
+                vec![Event::PointerMoved(pos), pointer(true), pointer(false)],
+                430.0,
+            );
+            assert!(
+                app.quick_capture.is_some()
+                    || app.find.is_some()
+                    || matches!(app.screen, Screen::Settings),
+                "{label} must open its layer"
+            );
+            key(&ctx, &mut app, Key::Escape, Modifiers::NONE);
+            assert_eq!(
+                ctx.memory(|memory| memory.focused()),
+                Some(opener),
+                "return from {label}, editing={editing}"
+            );
+            key(&ctx, &mut app, Key::Slash, Modifiers::COMMAND);
+            key(&ctx, &mut app, Key::Escape, Modifiers::NONE);
+            assert_eq!(ctx.memory(|memory| memory.focused()), Some(opener));
+        }
+        cleanup(&app);
+    }
+}
+
+#[test]
 fn disappeared_return_targets_release_focus_after_external_reload() {
     for overlay in [Key::Comma, Key::N, Key::F, Key::Slash] {
         let (ctx, mut app) = test_app();
