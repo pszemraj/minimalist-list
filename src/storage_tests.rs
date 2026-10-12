@@ -414,3 +414,48 @@ fn legacy_focus_settings_are_ignored() {
 
     assert!(settings.last_capture_list_id.is_none());
 }
+
+#[cfg(target_os = "windows")]
+#[test]
+fn replacing_a_list_keeps_it_readable_to_other_instances() {
+    use std::sync::{
+        Barrier,
+        atomic::{AtomicBool, Ordering},
+    };
+
+    let root = test_root();
+    let mut list = create_list(&root, "Tasks", Accent::Mint).unwrap();
+    let path = list.path.clone();
+    let done = AtomicBool::new(false);
+    let ready = Barrier::new(2);
+    let (saved, reads, missing) = std::thread::scope(|scope| {
+        let reader = scope.spawn(|| {
+            ready.wait();
+            let mut reads = 0;
+            let mut missing = 0;
+            while !done.load(Ordering::Relaxed) {
+                match fs::read(&path) {
+                    Ok(bytes) => {
+                        serde_json::from_slice::<TodoList>(&bytes).unwrap();
+                        reads += 1;
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => missing += 1,
+                    Err(error) => panic!("could not read list during replacement: {error}"),
+                }
+            }
+            (reads, missing)
+        });
+        ready.wait();
+        let saved = (0..100).try_for_each(|index| {
+            list.data.title = format!("Tasks {index}");
+            save_list(&list)
+        });
+        done.store(true, Ordering::Relaxed);
+        let (reads, missing) = reader.join().unwrap();
+        (saved, reads, missing)
+    });
+    saved.unwrap();
+    assert!(reads > 0);
+    assert_eq!(missing, 0, "list disappeared during replacement");
+    fs::remove_dir_all(root).unwrap();
+}

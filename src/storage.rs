@@ -507,12 +507,6 @@ fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> Result<(), String>
         file.sync_all()
             .map_err(|error| format!("could not flush {}: {error}", temp.display()))?;
 
-        #[cfg(target_os = "windows")]
-        if path.exists() {
-            fs::remove_file(path)
-                .map_err(|error| format!("could not replace {}: {error}", path.display()))?;
-        }
-
         fs::rename(&temp, path)
             .map_err(|error| format!("could not replace {}: {error}", path.display()))
     })();
