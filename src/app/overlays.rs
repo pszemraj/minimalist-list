@@ -79,6 +79,7 @@ impl MinimalistApp {
             return;
         }
         let return_focus = self.navigation_return_focus();
+        self.drag = None;
         self.finish_inline_edit();
         self.keyboard.pending = None;
         self.shortcuts = Some(ShortcutsState {
@@ -89,6 +90,7 @@ impl MinimalistApp {
 
     /// Opens quick capture, preferring the hinted list when no saved destination applies.
     pub(super) fn open_quick_capture(&mut self, hinted_list_id: Option<Uuid>) {
+        self.drag = None;
         if self.quick_capture.is_none() && self.find.is_none() {
             self.keyboard.overlay_return = self.navigation_return_focus();
         }
@@ -113,6 +115,7 @@ impl MinimalistApp {
 
     /// Opens global search and requests focus for its query field.
     pub(super) fn open_find(&mut self) {
+        self.drag = None;
         if self.quick_capture.is_none() && self.find.is_none() {
             self.keyboard.overlay_return = self.navigation_return_focus();
         }

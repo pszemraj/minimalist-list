@@ -3,8 +3,133 @@
 use super::*;
 
 #[test]
+fn held_control_activation_waits_across_completion_and_subtask_removal() {
+    for action in [Key::Enter, Key::Space] {
+        for control in 0..3 {
+            let (ctx, mut app) = test_app();
+            let list = app.lists[0].key;
+            let mut task = Task::new("Parent");
+            task.subtasks = ["First", "Second"].map(crate::model::Subtask::new).to_vec();
+            let task_id = task.id;
+            let first = task.subtasks[0].id;
+            let second = task.subtasks[1].id;
+            app.lists[0].data.tasks.push(task);
+            app.save_list_index(0);
+            if control == 0 {
+                focus(&ctx, &mut app, FocusItem::Task(list, task_id).id());
+                key(&ctx, &mut app, Key::Tab, Modifiers::NONE);
+            } else {
+                app.subtasks_for = Some((list, task_id));
+                focus(
+                    &ctx,
+                    &mut app,
+                    FocusItem::Subtask(list, task_id, first).id(),
+                );
+                if control == 2 {
+                    key(&ctx, &mut app, Key::Tab, Modifiers::NONE);
+                }
+            }
+            key_edge(&ctx, &mut app, action, true);
+            idle(&ctx, &mut app);
+            let task = &app.lists[0].data.tasks[0];
+            assert_eq!(task.completed, control == 0);
+            if control == 2 {
+                assert_eq!(task.subtasks.len(), 1);
+                assert_eq!(task.subtasks[0].id, second);
+                assert_eq!(
+                    ctx.memory(|m| m.focused()),
+                    Some(FocusItem::Subtask(list, task_id, second).id())
+                );
+            }
+            assert_eq!(task.subtasks[0].completed, control == 1);
+            let path = app.lists[0].path.clone();
+            let saved = std::fs::read(&path).unwrap();
+            let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+            for _ in 0..5 {
+                key_edge(&ctx, &mut app, action, true);
+                idle(&ctx, &mut app);
+                assert_eq!(std::fs::read(&path).unwrap(), saved);
+                assert_eq!(
+                    std::fs::metadata(&path).unwrap().modified().unwrap(),
+                    modified
+                );
+            }
+            key_edge(&ctx, &mut app, action, false);
+            key(&ctx, &mut app, action, Modifiers::NONE);
+            let loaded = storage::load_workspace(&app.workspace).unwrap();
+            let task = &loaded.lists[0].data.tasks[0];
+            assert!(!task.completed);
+            assert_eq!(task.subtasks[0].completed, control == 2);
+            cleanup(&app);
+        }
+    }
+}
+
+#[test]
+fn delete_list_confirmation_requires_a_second_physical_press() {
+    for action in [Key::Enter, Key::Space] {
+        let (ctx, mut app) = test_app();
+        let list = app.lists[0].key;
+        let path = app.lists[0].path.clone();
+        let survivor = add_list(&mut app, "Survivor");
+        idle(&ctx, &mut app);
+        key(&ctx, &mut app, Key::Comma, Modifiers::COMMAND);
+        let button = tab_to_label(&ctx, &mut app, "Delete list");
+        key_edge(&ctx, &mut app, action, true);
+        assert!(app.delete_armed);
+        let saved = std::fs::read(&path).unwrap();
+        for _ in 0..5 {
+            key_edge(&ctx, &mut app, action, true);
+            assert!(app.delete_armed);
+            assert!(app.list_index(list).is_some());
+            assert_eq!(std::fs::read(&path).unwrap(), saved);
+            assert_eq!(ctx.memory(|m| m.focused()), Some(button));
+        }
+        key_edge(&ctx, &mut app, action, false);
+        key(&ctx, &mut app, action, Modifiers::NONE);
+        assert!(!path.exists());
+        assert!(app.list_index(list).is_none());
+        let loaded = storage::load_workspace(&app.workspace).unwrap();
+        assert_eq!(loaded.lists.len(), 1);
+        assert_eq!(loaded.lists[0].key, survivor);
+        cleanup(&app);
+    }
+}
+
+#[test]
+fn held_text_input_preserves_spaces_and_editing_repeats() {
+    let (ctx, mut app) = test_app();
+    idle(&ctx, &mut app);
+    type_text(&ctx, &mut app, "A");
+    for _ in 0..3 {
+        key_edge(&ctx, &mut app, Key::Space, true);
+        type_text(&ctx, &mut app, " ");
+    }
+    assert_eq!(app.new_task, "A   ");
+    key_edge(&ctx, &mut app, Key::Space, false);
+    for _ in 0..3 {
+        key_edge(&ctx, &mut app, Key::Backspace, true);
+    }
+    assert_eq!(app.new_task, "A");
+    key_edge(&ctx, &mut app, Key::Backspace, false);
+    type_text(&ctx, &mut app, "BCD");
+    key(&ctx, &mut app, Key::Home, Modifiers::NONE);
+    for _ in 0..3 {
+        key_edge(&ctx, &mut app, Key::Delete, true);
+    }
+    assert_eq!(app.new_task, "D");
+    assert!(app.lists[0].data.tasks.is_empty());
+    cleanup(&app);
+}
+
+#[test]
 fn held_row_actions_wait_for_release_before_acting_again() {
-    for action in [Key::Delete, Key::Space, Key::Enter] {
+    for (action, cancel_edit) in [
+        (Key::Delete, false),
+        (Key::Space, false),
+        (Key::Enter, false),
+        (Key::Enter, true),
+    ] {
         let (ctx, mut app) = test_app();
         let list = app.lists[0].key;
         app.lists[0].data.tasks = ["A", "B", "C", "D"].map(Task::new).to_vec();
@@ -29,7 +154,12 @@ fn held_row_actions_wait_for_release_before_acting_again() {
         press(&ctx, &mut app);
         if action == Key::Enter {
             assert_eq!(app.editing, Some((list, first)));
-            key(&ctx, &mut app, Key::Escape, Modifiers::NONE);
+            if cancel_edit {
+                key(&ctx, &mut app, Key::Escape, Modifiers::NONE);
+            } else {
+                key(&ctx, &mut app, Key::A, Modifiers::COMMAND);
+                type_text(&ctx, &mut app, "Unsubmitted edit");
+            }
         }
         if let Some((_, _, started)) = &mut app.delete_animation {
             *started = std::time::Instant::now() - std::time::Duration::from_secs(1);
@@ -63,15 +193,17 @@ fn held_row_actions_wait_for_release_before_acting_again() {
                 *started = std::time::Instant::now() - std::time::Duration::from_secs(1);
             }
             idle(&ctx, &mut app);
-            assert!(
-                app.editing.is_none(),
-                "held {action:?} must not reopen editing"
-            );
+            let editing = action == Key::Enter && !cancel_edit;
+            assert_eq!(app.editing, editing.then_some((list, first)));
             assert_eq!(app.lists[0].data.tasks.len(), count, "held {action:?}");
             assert_eq!(app.lists[0].data.tasks[0].completed, action == Key::Space);
             assert_eq!(
                 ctx.memory(|m| m.focused()),
-                Some(FocusItem::Task(list, expected).id())
+                Some(if editing {
+                    Id::new(("edit-task", list, first))
+                } else {
+                    FocusItem::Task(list, expected).id()
+                })
             );
             assert_eq!(std::fs::read(&path).unwrap(), saved);
             assert_eq!(
@@ -95,7 +227,19 @@ fn held_row_actions_wait_for_release_before_acting_again() {
         );
         key(&ctx, &mut app, action, Modifiers::NONE);
         if action == Key::Enter {
-            assert_eq!(app.editing, Some((list, first)));
+            if cancel_edit {
+                assert_eq!(app.editing, Some((list, first)));
+            } else {
+                assert!(app.editing.is_none());
+                assert_eq!(app.lists[0].data.tasks[0].text, "Unsubmitted edit");
+                assert_eq!(
+                    storage::load_workspace(&app.workspace).unwrap().lists[0]
+                        .data
+                        .tasks[0]
+                        .text,
+                    "Unsubmitted edit"
+                );
+            }
         } else if action == Key::Space {
             assert!(!app.lists[0].data.tasks[0].completed);
         } else {
@@ -546,22 +690,34 @@ fn scrolled_settings_focus_outline_stays_in_the_visible_region() {
                 && rect.stroke.width == 1.5
                 && clipped.clip_rect.contains_rect(rect.rect))
     }));
+    // The displayed fixture path can wrap. Scroll until the field is clipped,
+    // in small steps so its outline remains beneath the header for this check.
     let pos = response.rect.center();
-    frame(
-        &ctx,
-        &mut app,
-        vec![
-            Event::PointerMoved(pos),
-            Event::MouseWheel {
-                unit: egui::MouseWheelUnit::Point,
-                delta: egui::vec2(0.0, -160.0),
-                phase: egui::TouchPhase::Move,
-                modifiers: Modifiers::NONE,
-            },
-        ],
-        430.0,
-    );
-    idle(&ctx, &mut app);
+    for _ in 0..20 {
+        frame(
+            &ctx,
+            &mut app,
+            vec![
+                Event::PointerMoved(pos),
+                Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    delta: egui::vec2(0.0, -24.0),
+                    phase: egui::TouchPhase::Move,
+                    modifiers: Modifiers::NONE,
+                },
+            ],
+            430.0,
+        );
+        idle(&ctx, &mut app);
+        if !ctx
+            .read_response(workspace)
+            .unwrap()
+            .interact_rect
+            .is_positive()
+        {
+            break;
+        }
+    }
     let output = frame(&ctx, &mut app, Vec::new(), 430.0);
     let response = ctx.read_response(workspace).unwrap();
     assert_eq!(ctx.memory(|m| m.focused()), Some(workspace));

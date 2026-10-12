@@ -12,7 +12,7 @@ Press `Alt+Left` (`Cmd+[` on macOS) from a list to open the overview, with the c
 
 `Ctrl+Shift+N` opens list creation from Lists, a list, or Settings. You can also select **+ New list**. Enter a name, optionally choose an accent, and press Enter to create it. Escape cancels.
 
-Open a list card's settings to rename, recolor, or delete it. **Delete list** requires activating **Confirm delete list** a second time; at least one list must remain.
+Open a list card's settings to rename, recolor, or delete it. **Delete list** requires activating **Confirm delete list** a second time; holding Enter or Space cannot confirm it. At least one list must remain.
 
 <img src="../assets/lists.jpg" alt="Four example lists with accent colors, task previews, and completion counts" width="360">
 
@@ -32,7 +32,7 @@ Use the circle on the left to complete or reactivate a task. It is keyboard-focu
 
 Space on a focused task row toggles completion. `Alt+Up` and `Alt+Down` move that task one position (Option on macOS), keeping it focused. Moving past the first or last position leaves the list file untouched. Forward Delete on a focused task row removes it (`Fn+Delete` on Mac keyboards). Delete, Space, and Enter on task rows act once per press; arrow navigation and reordering repeat while held. These row commands do not apply while editing text.
 
-Drag a task vertically to reorder it. Drag right past the threshold to complete or reactivate it. Drag left to reveal Edit and Delete, then drag right to close those actions.
+Drag a task vertically to reorder it. Drag right past the threshold to complete or reactivate it. Drag left to reveal Edit and Delete, then drag right to close those actions. Opening Quick add, Find, or the shortcut reference cancels an unfinished drag.
 
 `Ctrl+Shift+Backspace` (`Shift+Cmd+Delete` on macOS) or **Clear completed** moves completed tasks into the list's restorable History section. With no completed tasks, it leaves the list file untouched. Deleting a task removes it instead of archiving it.
 
@@ -48,11 +48,13 @@ Select **Show history**, then **Restore** to return a task to the bottom of the 
 
 Tab and Shift+Tab reach individual controls, including list-card settings, task completion, subtasks, delete actions, History restoration, and Settings. Focused controls are outlined and scroll into view. Arrow keys inside text fields and Settings sliders retain their usual editing behavior.
 
+Enter and Space activate controls once per press, including across focus changes and overlay dismissal. Typing spaces and holding editing or navigation keys retain their normal repeat behavior.
+
 Escape dismisses one layer per press: an open dropdown, the shortcut reference, Quick add or Find, Settings, an inline edit, list creation, subtasks, revealed task actions, or History. Holding it does not dismiss further layers. It leaves Lists and the task-list screen open. Closing an overlay restores its opening control; opening a search result focuses the matching task, subtask, or History restore action. Screen navigation saves an active inline task edit, like leaving its field.
 
 ## Window and appearance settings
 
-`Ctrl+,` opens Settings from Lists or a list. Escape returns to the previous screen and restores focus. Applied preferences remain saved; leaving a list-name field applies its rename, including when `Ctrl+Shift+N` opens list creation. Closing Settings without editing the name preserves renames reloaded from disk. Typing a workspace path requires Enter or **Use typed path** to switch folders. Enter on an unchanged path preserves the current list and saved workspace selection.
+`Ctrl+,` opens Settings from Lists or a list, including layouts that require Shift to type a comma. Escape returns to the previous screen and restores focus. Applied preferences remain saved; leaving a list-name field applies its rename, including when `Ctrl+Shift+N` opens list creation. Closing Settings without editing the name preserves renames reloaded from disk. Typing a workspace path requires Enter or **Use typed path** to switch folders. Enter on an unchanged path preserves the current list and saved workspace selection.
 
 The header's `pin` control toggles always-on-top mode. When native window decorations are disabled, drag the title to move the window and use the visible `x` control to close it.
 

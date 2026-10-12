@@ -258,8 +258,8 @@ fn take_shortcut(ctx: &egui::Context, binding: KeyboardShortcut) -> bool {
 impl MinimalistApp {
     /// Routes app commands before rendering widgets so one key has one effect.
     pub(super) fn handle_app_shortcuts(&mut self, ctx: &egui::Context) {
-        // One physical Escape press dismisses one layer, including popups and
-        // modals handled later by widgets. A held key must not reach lower layers.
+        // Activation and dismissal act once per press, even when a widget changes
+        // focus or closes an overlay. Keep text events and navigation repeats intact.
         let escape = ctx.input_mut(|input| {
             let escape = input.events.iter().any(|event| {
                 matches!(event,
@@ -271,7 +271,7 @@ impl MinimalistApp {
                 !matches!(
                     event,
                     Event::Key {
-                        key: Key::Escape,
+                        key: Key::Enter | Key::Space | Key::Escape,
                         pressed: true,
                         repeat: true,
                         ..
@@ -336,7 +336,8 @@ impl MinimalistApp {
         if self.quick_capture.is_some() || self.find.is_some() {
             return;
         }
-        if take_shortcut(ctx, OPEN_SETTINGS) {
+        // Like '/', a logical comma may require Shift on the user's layout.
+        if ctx.input_mut(|input| input.consume_shortcut(&OPEN_SETTINGS)) {
             if !matches!(self.screen, Screen::Settings) {
                 let list = match self.screen {
                     Screen::List(id) => Some(id),
@@ -485,12 +486,11 @@ impl MinimalistApp {
         // A closing modal can delay the row's response regaining focus by a pass.
         // Record its owner before applying a command that can remove the row.
         self.keyboard.anchor = Some((row, FocusItem::Task(list, task.id)));
-        // Row actions run once per press; consume repeats so widgets cannot
-        // activate them again after focus moves. Navigation keeps repeating.
+        // Forward Delete acts once on rows; text fields keep their normal repeats.
         ctx.input_mut(|input| {
             input.events.retain(|event| {
                 !matches!(event, Event::Key {
-                key: Key::Delete | Key::Space | Key::Enter,
+                key: Key::Delete,
                 pressed: true, repeat: true, modifiers, ..
             } if modifiers.matches_exact(Modifiers::NONE))
             });

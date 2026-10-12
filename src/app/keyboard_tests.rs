@@ -51,6 +51,38 @@ fn key(ctx: &egui::Context, app: &mut MinimalistApp, key: Key, modifiers: Modifi
     idle(ctx, app);
 }
 
+fn key_edge(ctx: &egui::Context, app: &mut MinimalistApp, key: Key, pressed: bool) {
+    frame(
+        ctx,
+        app,
+        vec![Event::Key {
+            key,
+            physical_key: None,
+            pressed,
+            repeat: false, // egui derives genuine repeats from the held-key state.
+            modifiers: Modifiers::NONE,
+        }],
+        430.0,
+    );
+}
+
+fn tab_to_label(ctx: &egui::Context, app: &mut MinimalistApp, label: &str) -> Id {
+    for _ in 0..80 {
+        key(ctx, app, Key::Tab, Modifiers::NONE);
+        let output = frame(ctx, app, Vec::new(), 430.0);
+        if let Some(id) = ctx.memory(|m| m.focused())
+            && let Some(response) = ctx.read_response(id)
+            && output.shapes.iter().any(|shape| {
+                matches!(&shape.shape, egui::epaint::Shape::Text(text)
+                    if text.galley.text() == label && response.rect.contains(text.pos))
+            })
+        {
+            return id;
+        }
+    }
+    panic!("could not focus {label}");
+}
+
 fn focus(ctx: &egui::Context, app: &mut MinimalistApp, id: Id) {
     app.request_task_focus = false;
     app.keyboard.pending = Some(id);
@@ -235,7 +267,7 @@ fn immediate_arrows_override_entry_and_return_focus_requests() {
 
 #[test]
 fn settings_round_trip_preserves_destination_and_rename_for_ctrl_and_cmd() {
-    for command in [
+    for comma_modifiers in [
         Modifiers {
             ctrl: true,
             command: true,
@@ -246,12 +278,18 @@ fn settings_round_trip_preserves_destination_and_rename_for_ctrl_and_cmd() {
             command: true,
             ..Modifiers::NONE
         },
-    ] {
+    ]
+    .into_iter()
+    .flat_map(|command| [command, command | Modifiers::SHIFT])
+    {
         let (ctx, mut app) = test_app();
         let list = app.lists[0].key;
         idle(&ctx, &mut app);
-        key(&ctx, &mut app, Key::Comma, command);
-        key(&ctx, &mut app, Key::Comma, command);
+        key(&ctx, &mut app, Key::Comma, Modifiers::NONE);
+        key(&ctx, &mut app, Key::Comma, Modifiers::SHIFT);
+        assert!(matches!(app.screen, Screen::List(id) if id == list));
+        key(&ctx, &mut app, Key::Comma, comma_modifiers);
+        key(&ctx, &mut app, Key::Comma, comma_modifiers);
         assert!(matches!(app.screen, Screen::Settings));
         app.rename_input = "Renamed".into();
         key(&ctx, &mut app, Key::Escape, Modifiers::NONE);
@@ -267,7 +305,7 @@ fn settings_round_trip_preserves_destination_and_rename_for_ctrl_and_cmd() {
             BACK_TO_LISTS.logical_key,
             BACK_TO_LISTS.modifiers,
         );
-        key(&ctx, &mut app, Key::Comma, command);
+        key(&ctx, &mut app, Key::Comma, comma_modifiers);
         key(&ctx, &mut app, Key::Escape, Modifiers::NONE);
         assert!(matches!(app.screen, Screen::Overview));
         assert_eq!(
