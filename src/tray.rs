@@ -48,7 +48,9 @@ impl Tray {
         let quit = MenuItem::new("Quit", true, None);
         menu.append_items(&[&show, &quit])
             .map_err(|error| error.to_string())?;
-        let icon = Icon::from_rgba(icon_rgba(), 32, 32).map_err(|error| error.to_string())?;
+        let icon = icon_data();
+        let icon = Icon::from_rgba(icon.rgba, icon.width, icon.height)
+            .map_err(|error| error.to_string())?;
         let builder = TrayIconBuilder::new()
             .with_id("minimalist-list")
             .with_tooltip("Minimalist List")
@@ -159,6 +161,19 @@ fn linux_host() -> Result<zbus::blocking::Proxy<'static>, String> {
         );
     }
     Ok(host)
+}
+
+/// Creates the checklist icon shared by the native window and tray.
+///
+/// # Returns
+///
+/// The transparent 32-by-32 RGBA icon.
+pub(crate) fn icon_data() -> egui::IconData {
+    egui::IconData {
+        rgba: icon_rgba(),
+        width: 32,
+        height: 32,
+    }
 }
 
 fn icon_rgba() -> Vec<u8> {

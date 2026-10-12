@@ -43,15 +43,25 @@ On Windows, run `.\target\release\minimalist-list.exe` instead.
 
 `Cargo.lock` is committed, so these commands use the dependency versions shipped with the application.
 
-To install the binary and optional Linux desktop entry for the current user:
+To install the binary for the current user:
 
 ```bash
 cargo install --locked --path .
-mkdir -p ~/.local/share/applications
-cp minimalist-list.desktop ~/.local/share/applications/
+```
+
+On Linux, install the desktop entry and checklist icon as well:
+
+```bash
+mkdir -p "${XDG_DATA_HOME:-$HOME/.local/share}/applications" \
+  "${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/scalable/apps"
+cp minimalist-list.desktop "${XDG_DATA_HOME:-$HOME/.local/share}/applications/"
+cp assets/minimalist-list.svg "${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/scalable/apps/"
 ```
 
 The desktop entry expects `minimalist-list` to be available on the desktop session's `PATH`.
+The app and tray use the same checklist shape on Windows, macOS, and Linux;
+macOS renders the tray icon using the menu bar's appearance. Linux Wayland
+desktops use the installed desktop entry and icon for the app launcher and switcher.
 
 ## Start using it
 
