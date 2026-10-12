@@ -3,20 +3,24 @@
 ## Source layout
 
 ```text
-src/main.rs                Native eframe window setup
-src/app.rs                 Application state, navigation, syncing, and eframe wiring
-src/app/list.rs            List screen and task interactions
-src/app/overlays.rs        Quick add and cross-list search
-src/app/overview.rs        List-card overview
-src/app/settings.rs        Workspace, appearance, and list settings
-src/app/task_details.rs    Subtasks, deletion, clearing, and history
-src/app/task_text.rs       Title wrapping and hover scrolling
-src/app/theme.rs           Accent palettes and shared rendering helpers
-src/app/window.rs          Tray hiding, restoration, and shutdown
-src/model.rs               Serializable list and task model
-src/storage.rs             Platform paths, list files, polling, and atomic writes
-src/storage_tests.rs       Storage and platform-path regression tests
-src/tray.rs                Native tray icon and menu actions
+src/main.rs                          Native eframe window setup
+src/app.rs                           Application state, navigation, syncing, and eframe wiring
+src/app/keyboard.rs                  Keyboard commands and transient focus restoration
+src/app/keyboard_tests.rs            Headless keyboard interaction journeys
+src/app/keyboard_focus_tests.rs      Focus restoration and Settings regressions
+src/app/keyboard_reference_tests.rs  Shortcut reference interactions and native labels
+src/app/list.rs                      List screen and task interactions
+src/app/overlays.rs                  Quick add, cross-list search, and keyboard reference
+src/app/overview.rs                  List-card overview
+src/app/settings.rs                  Workspace, appearance, and list settings
+src/app/task_details.rs              Subtasks, deletion, clearing, and history
+src/app/task_text.rs                 Title wrapping and hover scrolling
+src/app/theme.rs                     Accent palettes and shared rendering helpers
+src/app/window.rs                    Tray hiding, restoration, and shutdown
+src/model.rs                         Serializable list and task model
+src/storage.rs                       Platform paths, list files, polling, and atomic writes
+src/storage_tests.rs                 Storage and platform-path regression tests
+src/tray.rs                          Native tray icon and menu actions
 ```
 
 Keep source files below 1,000 lines and split by actual responsibilities rather than generic layers or arbitrary line counts.

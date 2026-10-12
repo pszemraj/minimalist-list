@@ -2,7 +2,9 @@
 
 Minimalist List is a native desktop task list built with `egui` and `eframe`, inspired by MinimaList. It runs without an account or hosted service.
 
-<img src="assets/ui.png" alt="UI screenshot" width="260">
+<img src="assets/ui.jpg" alt="Minimalist List on Windows, showing tasks, subtasks, and completion" width="320">
+
+*Windows example with sample tasks and an expanded checklist.*
 
 ## Install and run
 
@@ -43,19 +45,31 @@ On Windows, run `.\target\release\minimalist-list.exe` instead.
 
 `Cargo.lock` is committed, so these commands use the dependency versions shipped with the application.
 
-To install the binary and optional Linux desktop entry for the current user:
+To install the binary for the current user:
 
 ```bash
 cargo install --locked --path .
-mkdir -p ~/.local/share/applications
-cp minimalist-list.desktop ~/.local/share/applications/
+```
+
+On Linux, install the desktop entry and checklist icon as well:
+
+```bash
+mkdir -p "${XDG_DATA_HOME:-$HOME/.local/share}/applications" \
+  "${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/scalable/apps"
+cp minimalist-list.desktop "${XDG_DATA_HOME:-$HOME/.local/share}/applications/"
+cp assets/minimalist-list.svg "${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/scalable/apps/"
 ```
 
 The desktop entry expects `minimalist-list` to be available on the desktop session's `PATH`.
+The app and tray use the same checklist shape on Windows, macOS, and Linux;
+macOS renders the tray icon using the menu bar's appearance. Linux Wayland
+desktops use the installed desktop entry and icon for the app launcher and switcher.
 
 ## Start using it
 
 Open a list and type `Buy groceries` into the field at the top. Enter adds the task at the top of the list and returns focus to the field. See [list management](docs/usage.md#manage-lists) to create more lists.
+
+Press `Ctrl+/` (`Cmd+/` on macOS) to see the keyboard shortcuts in the app.
 
 ## Documentation
 

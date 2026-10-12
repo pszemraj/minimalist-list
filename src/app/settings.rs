@@ -47,7 +47,10 @@ impl MinimalistApp {
 
         ScrollArea::vertical()
             .auto_shrink([false, false])
-            .show(ui, |ui| self.settings_contents(ui, palette));
+            .show(ui, |ui| {
+                self.settings_contents(ui, palette);
+                self.keyboard_focus_ui(ui, palette);
+            });
     }
 
     fn settings_contents(&mut self, ui: &mut egui::Ui, palette: Palette) {
@@ -83,10 +86,10 @@ impl MinimalistApp {
                 let use_folder = ui
                     .add(Button::new(self.rich("Use typed path", 15.0, palette.muted)).frame(false))
                     .clicked();
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.label(self.rich("Enter applies", 12.0, palette.muted));
-                });
+                ui.label(self.rich("Enter applies", 12.0, palette.muted));
                 let (submit, _) = text_input_shortcuts(ui, &workspace_response);
+                // Enter submits path edits. Explicitly using the current folder
+                // can still persist a launch-only workspace selection.
                 if choose_folder {
                     if let Some(path) = FileDialog::new()
                         .set_title("Choose Minimalist List workspace")
@@ -96,8 +99,12 @@ impl MinimalistApp {
                         self.workspace_input = path.to_string_lossy().into_owned();
                         self.switch_workspace();
                     }
-                } else if use_folder || submit {
+                } else if use_folder
+                    || (submit && self.workspace_input != self.settings.workspace_path)
+                {
                     self.switch_workspace();
+                } else if submit {
+                    workspace_response.request_focus();
                 }
             });
         });
@@ -348,11 +355,19 @@ impl MinimalistApp {
         }
     }
 
-    fn rename_list(&mut self, list_id: Uuid) {
+    /// Saves a nonempty changed list name when its field is submitted or left.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an internally resolved list index becomes invalid.
+    pub(super) fn rename_list(&mut self, list_id: Uuid) {
         let title = self.rename_input.trim();
-        if title.is_empty() {
+        // Only apply a local draft; external reloads may have changed the title
+        // since Settings opened or this field was last submitted.
+        if title.is_empty() || title == self.rename_baseline.trim() {
             return;
         }
+        self.rename_baseline.clone_from(&self.rename_input);
         if let Some(index) = self.list_index(list_id)
             && self.lists[index].data.title != title
         {
@@ -376,6 +391,7 @@ impl MinimalistApp {
             return;
         }
         if let Some(index) = self.list_index(list_id) {
+            let neighbors = self.focus_neighbors();
             let list = self.lists.remove(index);
             match storage::delete_list(&list) {
                 Ok(()) => {
@@ -385,6 +401,7 @@ impl MinimalistApp {
                     self.go_to_overview();
                     self.return_screen = None;
                     self.settings_list_id = None;
+                    self.repair_focus(&neighbors);
                 }
                 Err(error) => {
                     self.status = Some(error);

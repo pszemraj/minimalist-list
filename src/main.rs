@@ -107,6 +107,7 @@ fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_app_id("minimalist-list")
+            .with_icon(tray::icon_data())
             .with_inner_size([520.0, 760.0])
             .with_min_inner_size([320.0, 280.0])
             .with_transparent(true)

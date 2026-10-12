@@ -143,7 +143,8 @@ impl MinimalistApp {
         ctx.send_viewport_cmd(ViewportCommand::Close);
     }
 
-    fn finish_inline_edit(&mut self) {
+    /// Saves an active inline edit before navigating, hiding, or quitting.
+    pub(super) fn finish_inline_edit(&mut self) {
         if let Some((list_id, task_id)) = self.editing {
             self.commit_task_edit(list_id, task_id, &self.edit_text.clone());
         }

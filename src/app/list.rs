@@ -2,12 +2,14 @@
 
 use super::{
     DragState, INSERT_ANIMATION_SECONDS, MinimalistApp, SWIPE_ACTIONS, SWIPE_COMPLETE,
-    text_input_shortcuts, theme::Palette,
+    keyboard::{FocusItem, take_key},
+    text_input_shortcuts,
+    theme::Palette,
 };
 use crate::model::Task;
 use eframe::egui;
 use egui::{
-    Align, Align2, Button, Color32, CornerRadius, CursorIcon, Frame, Id, Key, Margin, Pos2, Rect,
+    Align, Align2, Button, Color32, CornerRadius, CursorIcon, Frame, Id, Margin, Pos2, Rect,
     ScrollArea, Sense, Stroke, TextEdit, Vec2,
 };
 use std::time::Instant;
@@ -161,17 +163,20 @@ impl MinimalistApp {
                 }
                 if archive_count > 0
                     && ui
-                        .add(
-                            Button::new(self.rich(
-                                format!(
-                                    "{} history ({archive_count})",
-                                    if self.history_open { "Hide" } else { "Show" }
-                                ),
-                                15.0,
-                                palette.accent,
-                            ))
-                            .frame(false),
-                        )
+                        .push_id(("history-toggle", list_id), |ui| {
+                            ui.add(
+                                Button::new(self.rich(
+                                    format!(
+                                        "{} history ({archive_count})",
+                                        if self.history_open { "Hide" } else { "Show" }
+                                    ),
+                                    15.0,
+                                    palette.accent,
+                                ))
+                                .frame(false),
+                            )
+                        })
+                        .inner
                         .clicked()
                 {
                     self.history_open = !self.history_open;
@@ -183,8 +188,11 @@ impl MinimalistApp {
                     egui::emath::easing::cubic_out,
                 );
                 if history_progress > 0.001 {
-                    self.history_ui(ui, list_id, palette, history_progress);
+                    ui.add_enabled_ui(self.history_open, |ui| {
+                        self.history_ui(ui, list_id, palette, history_progress);
+                    });
                 }
+                self.keyboard_focus_ui(ui, palette);
             });
 
         if let Some(drag) = &mut self.drag {
@@ -193,22 +201,6 @@ impl MinimalistApp {
         }
         if let Some(action) = action {
             self.apply_row_action(action);
-        }
-
-        let (cycle, clear_completed) = ui.input(|input| {
-            (
-                (input.modifiers.command && input.key_pressed(Key::Tab))
-                    .then_some(input.modifiers.shift),
-                input.modifiers.command
-                    && input.modifiers.shift
-                    && input.key_pressed(Key::Backspace),
-            )
-        });
-        if let Some(backwards) = cycle {
-            self.cycle_list(list_id, backwards);
-        }
-        if clear_completed && completed_count > 0 {
-            self.begin_clear_completed(list_id);
         }
     }
 
@@ -224,6 +216,7 @@ impl MinimalistApp {
             self.new_task.clear();
             self.save_list_index(index);
             self.request_task_focus = true;
+            self.keyboard.pending = Some(Id::new(("new-task", list_id)));
         }
     }
 
@@ -258,7 +251,16 @@ impl MinimalistApp {
         } else {
             Sense::click_and_drag()
         };
-        let (rect, response) = parent_ui.allocate_exact_size(desired, sense);
+        let (rect, _) = parent_ui.allocate_exact_size(desired, Sense::hover());
+        let response = parent_ui.interact(rect, FocusItem::Task(list_id, task.id).id(), sense);
+        response.widget_info(|| {
+            egui::WidgetInfo::labeled(
+                egui::WidgetType::Button,
+                true,
+                format!("Task: {}", task.text),
+            )
+        });
+        self.track_focus(&response, FocusItem::Task(list_id, task.id));
         let mut row_ui = parent_ui.new_child(
             egui::UiBuilder::new()
                 .id_salt(("row", task.id))
@@ -465,6 +467,7 @@ impl MinimalistApp {
                 paint_palette,
                 &task.text,
             );
+            self.track_focus(&completion, FocusItem::Task(list_id, task.id));
             if completion.clicked() {
                 return Some(RowAction::Toggle(list_id, task.id));
             }
@@ -501,6 +504,9 @@ impl MinimalistApp {
                 strike_progress,
             )
         });
+        if let Some(response) = &text_response {
+            self.track_focus(response, FocusItem::Task(list_id, task.id));
+        }
 
         if !is_editing {
             let checklist_rect = Rect::from_center_size(
@@ -522,6 +528,7 @@ impl MinimalistApp {
                     .frame(false),
                 )
                 .on_hover_text("Subtasks");
+            self.track_focus(&checklist, FocusItem::Task(list_id, task.id));
             checklist.widget_info(|| {
                 egui::WidgetInfo::labeled(
                     egui::WidgetType::Button,
@@ -560,6 +567,7 @@ impl MinimalistApp {
                     .frame(false),
                 )
                 .on_hover_text("Delete task");
+            self.track_focus(&delete, FocusItem::Task(list_id, task.id));
             delete.widget_info(|| {
                 egui::WidgetInfo::labeled(
                     egui::WidgetType::Button,
@@ -604,6 +612,10 @@ impl MinimalistApp {
             if cancel {
                 self.editing = None;
             } else if submit || edit_response.lost_focus() {
+                if submit {
+                    take_key(ui.ctx(), egui::Key::Enter, egui::Modifiers::NONE);
+                    self.keyboard.pending = Some(FocusItem::Task(list_id, task.id).id());
+                }
                 return Some(RowAction::CommitEdit(
                     list_id,
                     task.id,
@@ -663,13 +675,20 @@ impl MinimalistApp {
             egui::emath::easing::cubic_out,
         );
         if subtasks_progress > 0.001 {
-            self.subtasks_panel(parent_ui, list_id, task, palette, subtasks_progress);
+            parent_ui.add_enabled_ui(subtasks_open, |ui| {
+                self.subtasks_panel(ui, list_id, task, palette, subtasks_progress);
+            });
         }
 
         None
     }
 
-    fn apply_row_action(&mut self, action: RowAction) {
+    /// Applies a pointer or keyboard task action using the shared persistence path.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a resolved task position becomes invalid during reordering.
+    pub(super) fn apply_row_action(&mut self, action: RowAction) {
         match action {
             RowAction::Toggle(list_id, task_id) => {
                 if let Some(index) = self.list_index(list_id)
@@ -688,6 +707,7 @@ impl MinimalistApp {
                 self.editing = Some((list_id, task_id));
                 self.edit_text = text;
                 self.request_edit_focus = true;
+                self.keyboard.pending = Some(Id::new(("edit-task", list_id, task_id)));
                 self.revealed = None;
             }
             RowAction::CommitEdit(list_id, task_id, text) => {
@@ -697,10 +717,12 @@ impl MinimalistApp {
                 if let Some(index) = self.list_index(list_id) {
                     let tasks = &mut self.lists[index].data.tasks;
                     if let Some(source) = tasks.iter().position(|task| task.id == task_id) {
-                        let task = tasks.remove(source);
-                        let target = target.min(tasks.len());
-                        tasks.insert(target, task);
-                        self.save_list_index(index);
+                        let target = target.min(tasks.len() - 1);
+                        if source != target {
+                            let task = tasks.remove(source);
+                            tasks.insert(target, task);
+                            self.save_list_index(index);
+                        }
                     }
                 }
             }
@@ -766,7 +788,8 @@ impl MinimalistApp {
 }
 
 #[derive(Clone)]
-enum RowAction {
+/// Task mutations and edit/panel interactions shared by pointer and keyboard input.
+pub(super) enum RowAction {
     FinishDrag,
     Toggle(Uuid, Uuid),
     Delete(Uuid, Uuid),

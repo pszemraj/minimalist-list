@@ -1,5 +1,6 @@
 //! Application state, navigation, persistence coordination, and root rendering.
 
+mod keyboard;
 mod list;
 mod overlays;
 mod overview;
@@ -9,7 +10,8 @@ mod task_text;
 mod theme;
 mod window;
 
-use self::overlays::{FindState, QuickCaptureState, Spotlight};
+use self::keyboard::KeyboardState;
+use self::overlays::{FindState, QuickCaptureState, ShortcutsState, Spotlight};
 use self::theme::Palette;
 use crate::model::Accent;
 use crate::storage::{self, Settings, StoredList, WorkspaceFingerprint};
@@ -38,10 +40,11 @@ fn text_input_shortcuts(ui: &egui::Ui, response: &egui::Response) -> (bool, bool
             input.key_pressed(egui::Key::Escape),
         )
     });
-    (
-        enter && (response.has_focus() || response.lost_focus()),
-        cancel,
-    )
+    // Enter surrenders a single-line editor's focus. A recent Tab also reports
+    // lost_focus, but Enter then belongs to the newly focused control.
+    let focused = response.has_focus()
+        || (response.lost_focus() && ui.memory(|memory| memory.focused().is_none()));
+    (enter && focused, cancel && focused)
 }
 
 #[derive(Clone)]
@@ -93,6 +96,7 @@ pub struct MinimalistApp {
 
     workspace_input: String,
     rename_input: String,
+    rename_baseline: String,
     delete_armed: bool,
     next_scan: Instant,
     last_pin_state: Option<bool>,
@@ -105,12 +109,14 @@ pub struct MinimalistApp {
     delete_animation: Option<(Uuid, Uuid, Instant)>,
     quick_capture: Option<QuickCaptureState>,
     find: Option<FindState>,
+    shortcuts: Option<ShortcutsState>,
     spotlight: Option<Spotlight>,
     last_motion_tick: Instant,
     hovered_title: Option<(Uuid, Instant)>,
     tray: Option<crate::tray::Tray>,
     window_hidden: bool,
     quitting: bool,
+    keyboard: KeyboardState,
 }
 
 impl MinimalistApp {
@@ -211,6 +217,7 @@ impl MinimalistApp {
             history_open: false,
             workspace_input,
             rename_input: String::new(),
+            rename_baseline: String::new(),
             delete_armed: false,
             next_scan: Instant::now() + SCAN_INTERVAL,
             last_pin_state: None,
@@ -223,12 +230,14 @@ impl MinimalistApp {
             delete_animation: None,
             quick_capture: None,
             find: None,
+            shortcuts: None,
             spotlight: None,
             last_motion_tick: Instant::now(),
             hovered_title: None,
             tray: None,
             window_hidden: false,
             quitting: false,
+            keyboard: KeyboardState::default(),
         }
     }
 
@@ -369,6 +378,10 @@ impl MinimalistApp {
     }
 
     fn go_to_overview(&mut self) {
+        self.finish_inline_edit();
+        if let Screen::List(id) = self.screen {
+            self.keyboard.overview_list = Some(id);
+        }
         if !matches!(self.screen, Screen::Overview) {
             self.begin_transition(-1.0);
         }
@@ -377,9 +390,13 @@ impl MinimalistApp {
         self.revealed = None;
         self.subtasks_for = None;
         self.editing = None;
+        self.focus_overview();
     }
 
     fn open_list(&mut self, id: Uuid) {
+        self.finish_inline_edit();
+        self.keyboard.pending = Some(egui::Id::new(("new-task", id)));
+        self.keyboard.overview_list = Some(id);
         self.begin_transition(1.0);
         self.settings.last_list_id = Some(id);
         self.save_settings();
@@ -408,12 +425,19 @@ impl MinimalistApp {
     }
 
     fn open_settings(&mut self, list_id: Option<Uuid>) {
+        if matches!(self.screen, Screen::Settings) {
+            return;
+        }
+        self.keyboard.settings_return = self.navigation_return_focus();
+        self.finish_inline_edit();
+        self.keyboard.pending = Some(egui::Id::new("settings-workspace"));
         self.return_screen = Some(self.screen.clone());
         self.settings_list_id = list_id;
         self.rename_input = list_id
             .and_then(|id| self.list_index(id))
             .map(|index| self.lists[index].data.title.clone())
             .unwrap_or_default();
+        self.rename_baseline.clone_from(&self.rename_input);
         self.workspace_input = self.settings.workspace_path.clone();
         self.delete_armed = false;
         self.begin_transition(1.0);
@@ -421,9 +445,13 @@ impl MinimalistApp {
     }
 
     fn close_settings(&mut self) {
+        if let Some(id) = self.settings_list_id {
+            self.rename_list(id);
+        }
         self.begin_transition(-1.0);
         self.screen = self.return_screen.take().unwrap_or(Screen::Overview);
         self.settings_list_id = None;
+        self.keyboard.pending = self.keyboard.settings_return.take();
     }
 
     fn scan_external_changes(&mut self) {
@@ -440,6 +468,7 @@ impl MinimalistApp {
 
         match storage::load_workspace(&self.workspace) {
             Ok(snapshot) => {
+                let focus_neighbors = self.focus_neighbors();
                 let mut lists = snapshot.lists;
                 for failed_path in &snapshot.failed_paths {
                     if let Some(previous) = self
@@ -462,15 +491,20 @@ impl MinimalistApp {
                 match self.screen.clone() {
                     Screen::List(id) if self.list_index(id).is_none() => self.go_to_overview(),
                     Screen::Settings => {
-                        if self
-                            .settings_list_id
-                            .is_some_and(|id| self.list_index(id).is_none())
+                        if let Some(index) =
+                            self.settings_list_id.and_then(|id| self.list_index(id))
                         {
+                            if self.rename_input.trim() == self.rename_baseline.trim() {
+                                self.rename_input.clone_from(&self.lists[index].data.title);
+                                self.rename_baseline.clone_from(&self.rename_input);
+                            }
+                        } else {
                             self.settings_list_id = None;
                         }
                     }
                     Screen::Overview | Screen::List(_) => {}
                 }
+                self.repair_focus(&focus_neighbors);
             }
             Err(error) => self.status = Some(error),
         }
@@ -505,6 +539,8 @@ impl MinimalistApp {
                     .unwrap_or(Screen::Overview);
                 self.return_screen = None;
                 self.settings_list_id = None;
+                self.keyboard = KeyboardState::default();
+                self.request_task_focus = matches!(self.screen, Screen::List(_));
             }
             Err(error) => self.status = Some(error),
         }
@@ -640,6 +676,9 @@ impl eframe::App for MinimalistApp {
                 .layout(Layout::top_down(Align::LEFT)),
         );
         content_ui.set_opacity(0.14 + eased * 0.86);
+        if self.quick_capture.is_some() || self.find.is_some() || self.shortcuts.is_some() {
+            content_ui.disable();
+        }
         let screen = self.screen.clone();
         match screen {
             Screen::Overview => self.overview_ui(&mut content_ui, palette),
@@ -647,7 +686,9 @@ impl eframe::App for MinimalistApp {
             Screen::Settings => self.settings_ui(&mut content_ui, palette),
         }
         self.status_ui(&mut content_ui, palette);
+        self.keyboard_focus_ui(&mut content_ui, palette);
         self.overlay_ui(ui.ctx(), palette);
+        self.finish_keyboard_frame(ui.ctx());
     }
 }
 
