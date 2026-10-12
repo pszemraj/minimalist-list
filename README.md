@@ -28,6 +28,24 @@ cd minimalist-list
 cargo run
 ```
 
+If Rust is already installed through rustup, update it and build from the repository directory:
+
+```bash
+rustup update stable
+rustc +stable --version
+cargo +stable build --locked --release
+```
+
+Confirm that the reported version is at least 1.95. Cargo's [`rust-version`](https://doc.rust-lang.org/cargo/reference/rust-version.html) rejects older compilers; it does not upgrade them. The explicit [`+stable`](https://rust-lang.github.io/rustup/overrides.html#toolchain-override-shorthand) selects the updated toolchain even if an older directory override exists.
+
+On macOS or Linux, if `rustup` is missing or `+stable` fails, check which installation supplies the commands:
+
+```bash
+command -v rustc cargo rustup
+```
+
+A separate installation, such as Homebrew's Rust, must be upgraded through its package manager, or replaced on `PATH` by the rustup installation.
+
 Check the version without opening a window:
 
 ```bash
