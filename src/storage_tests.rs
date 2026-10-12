@@ -23,6 +23,55 @@ fn test_root() -> PathBuf {
 }
 
 #[test]
+fn workspace_input_accepts_quotes_and_preserves_literal_paths() {
+    for windows in [false, true] {
+        for path in [
+            "/Users/test/backup and setup/minimalist-task-lists",
+            "~/backup and setup/lists",
+            r"C:\Users\test\backup and setup\lists",
+            r"\\server\share\backup and setup",
+            r"/Users/test/literal\name",
+        ] {
+            assert_eq!(parse_workspace_input_from(path, windows), path);
+            for quote in ['\'', '"'] {
+                assert_eq!(
+                    parse_workspace_input_from(&format!("  {quote}{path}{quote}  "), windows),
+                    path,
+                );
+            }
+        }
+        assert_eq!(
+            parse_workspace_input_from(r#""/Users/test/literal\ name""#, windows),
+            r"/Users/test/literal\ name",
+        );
+    }
+}
+
+#[test]
+fn escaped_macos_workspace_input_opens_existing_lists() {
+    let root = test_root();
+    let destination = root.join("backup and setup/minimalist-task-lists");
+    let existing = create_list(&destination, "Existing tasks", Accent::Mint).unwrap();
+    let raw = destination
+        .to_string_lossy()
+        .replace('\\', "/")
+        .replace(' ', r"\ ");
+    let parsed = parse_workspace_input_from(&raw, false);
+    let normalized = normalize_workspace_path(&parsed).unwrap();
+    assert_eq!(normalized, destination.canonicalize().unwrap());
+    assert_eq!(
+        load_workspace(&normalized).unwrap().lists[0].key,
+        existing.key
+    );
+    assert_eq!(parse_workspace_input_from(&raw, true), raw);
+    assert_eq!(
+        parse_workspace_input_from(r"~/backup\ and\ setup", false),
+        "~/backup and setup"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn native_paths_reuse_legacy_locations_independently() {
     let root = test_root();
     for (platform, name) in [

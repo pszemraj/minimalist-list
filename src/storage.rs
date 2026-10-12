@@ -108,7 +108,33 @@ pub fn save_settings(settings: &Settings) -> Result<(), String> {
     write_json_atomic(&settings_path(), settings)
 }
 
-/// Expands, creates, and canonicalizes a workspace directory.
+/// Removes surrounding quotes or Unix space escapes from a typed workspace path.
+///
+/// # Returns
+///
+/// The literal path text to pass to workspace normalization.
+pub fn parse_workspace_input(raw: &str) -> String {
+    parse_workspace_input_from(raw, cfg!(target_os = "windows"))
+}
+
+fn parse_workspace_input_from(raw: &str, windows: bool) -> String {
+    let raw = raw.trim();
+    for quote in ['\'', '"'] {
+        if let Some(path) = raw
+            .strip_prefix(quote)
+            .and_then(|path| path.strip_suffix(quote))
+        {
+            return path.to_owned();
+        }
+    }
+    if windows {
+        raw.to_owned()
+    } else {
+        raw.replace("\\ ", " ")
+    }
+}
+
+/// Expands, creates, and canonicalizes a literal workspace directory.
 ///
 /// # Returns
 ///

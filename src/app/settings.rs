@@ -96,13 +96,12 @@ impl MinimalistApp {
                         .set_directory(&self.workspace)
                         .pick_folder()
                     {
-                        self.workspace_input = path.to_string_lossy().into_owned();
-                        self.switch_workspace();
+                        self.switch_workspace(&path.to_string_lossy());
                     }
                 } else if use_folder
                     || (submit && self.workspace_input != self.settings.workspace_path)
                 {
-                    self.switch_workspace();
+                    self.switch_workspace(&storage::parse_workspace_input(&self.workspace_input));
                 } else if submit {
                     workspace_response.request_focus();
                 }

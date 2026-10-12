@@ -571,6 +571,43 @@ fn new_list_from_settings_saves_rename_and_clears_return_session() {
 }
 
 #[test]
+fn quoted_workspace_input_opens_existing_lists_and_survives_restart() {
+    for quote in ['\'', '"'] {
+        for use_button in [false, true] {
+            let (ctx, mut app) = test_app();
+            let old_workspace = app.workspace.clone();
+            let destination = old_workspace.join("backup and setup/minimalist-task-lists");
+            let existing =
+                storage::create_list(&destination, "Existing workspace", Accent::Mint).unwrap();
+            idle(&ctx, &mut app);
+            key(&ctx, &mut app, Key::Comma, Modifiers::COMMAND);
+            key(&ctx, &mut app, Key::A, Modifiers::COMMAND);
+            type_text(
+                &ctx,
+                &mut app,
+                &format!("{quote}{}{quote}", destination.display()),
+            );
+            if use_button {
+                tab_to_label(&ctx, &mut app, "Use typed path");
+                key(&ctx, &mut app, Key::Space, Modifiers::NONE);
+            } else {
+                key(&ctx, &mut app, Key::Enter, Modifiers::NONE);
+            }
+            assert_eq!(app.workspace, destination.canonicalize().unwrap());
+            assert_eq!(app.lists[0].key, existing.key);
+            assert_eq!(app.workspace_input, app.settings.workspace_path);
+            assert!(old_workspace.join("lists").is_dir());
+            let saved = storage::load_settings().unwrap();
+            assert_eq!(saved.workspace_path, app.settings.workspace_path);
+            let restarted = MinimalistApp::new(&egui::Context::default(), saved, None, None);
+            assert_eq!(restarted.workspace, app.workspace);
+            assert_eq!(restarted.lists[0].key, existing.key);
+            std::fs::remove_dir_all(&old_workspace).unwrap();
+        }
+    }
+}
+
+#[test]
 fn unchanged_workspace_enter_preserves_list_and_launch_override() {
     let (ctx, mut app) = test_app();
     let second = add_list(&mut app, "Second");

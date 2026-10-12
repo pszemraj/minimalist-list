@@ -510,8 +510,8 @@ impl MinimalistApp {
         }
     }
 
-    fn switch_workspace(&mut self) {
-        let path = match storage::normalize_workspace_path(&self.workspace_input) {
+    fn switch_workspace(&mut self, raw: &str) {
+        let path = match storage::normalize_workspace_path(raw) {
             Ok(path) => path,
             Err(error) => {
                 self.status = Some(error);

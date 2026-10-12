@@ -6,6 +6,8 @@ Select a folder through **Settings -> Workspace -> Choose folder**, or enter a p
 
 Paths beginning with `~/` are expanded. Relative paths are resolved from the process working directory and stored as absolute runtime paths. Without a saved selection, the app uses its [platform default](#default-directories).
 
+The Settings field accepts paths with spaces, including paths surrounded by matching single or double quotes. On macOS and Linux it also accepts backslash-escaped spaces, such as `~/backup\ and\ setup/minimalist-task-lists`. Folder-picker results and saved paths are used literally.
+
 For multiple computers, select the same shared subfolder once on each computer. Each installation remembers its own local path, even when the sync root is different. Dropbox and other file-sync services work with these ordinary files; no provider integration is needed.
 
 Use `--data-dir` to select a workspace for one launch:
