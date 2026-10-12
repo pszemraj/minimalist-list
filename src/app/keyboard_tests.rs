@@ -731,7 +731,20 @@ fn deleting_last_rows_and_clearing_completed_restore_surviving_focus() {
         app.lists[0].data.tasks = ["First", "Second", "Third", "Last"].map(Task::new).to_vec();
         let first = app.lists[0].data.tasks[0].id;
         let third = app.lists[0].data.tasks[2].id;
-        app.lists[0].data.tasks[0].completed = true;
+        focus(&ctx, &mut app, FocusItem::Task(list, first).id());
+        key(&ctx, &mut app, Key::Backspace, command | Modifiers::SHIFT);
+        key(&ctx, &mut app, Key::Space, Modifiers::NONE);
+        if let Some((_, started)) = &mut app.clear_animation {
+            *started = std::time::Instant::now() - std::time::Duration::from_secs(1);
+        }
+        idle(&ctx, &mut app);
+        assert_eq!(
+            app.lists[0].data.tasks.len(),
+            4,
+            "an empty clear must not archive a task completed afterward"
+        );
+        assert!(app.lists[0].data.tasks[0].completed);
+        assert!(app.lists[0].data.archive.is_empty());
         app.lists[0].data.tasks[1].completed = true;
         focus(&ctx, &mut app, FocusItem::Task(list, first).id());
         key(&ctx, &mut app, Key::Backspace, command | Modifiers::SHIFT);

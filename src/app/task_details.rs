@@ -232,7 +232,12 @@ impl MinimalistApp {
 
     /// Starts the animation that moves completed tasks into history.
     pub(super) fn begin_clear_completed(&mut self, list_id: Uuid) {
-        if self.clear_animation.is_none() {
+        if self.clear_animation.is_none()
+            && self
+                .lists
+                .iter()
+                .any(|list| list.key == list_id && list.data.completed_count() > 0)
+        {
             self.revealed = None;
             self.clear_animation = Some((list_id, Instant::now()));
         }
