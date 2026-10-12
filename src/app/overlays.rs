@@ -356,6 +356,7 @@ impl MinimalistApp {
         let modal = Modal::new(Id::new("find-modal")).show(ctx, |ui| {
             let available = ctx.content_rect().size() - egui::vec2(32.0, 32.0);
             ui.set_width(500.0_f32.min(available.x));
+            ui.set_max_height(available.y - 16.0);
             ScrollArea::vertical()
                 .max_height(available.y - 16.0)
                 .show(ui, |ui| {
@@ -650,6 +651,65 @@ mod tests {
             key: data.id,
             path: PathBuf::from(format!("{title}.json")),
             data,
+        }
+    }
+
+    #[test]
+    fn find_grows_after_typing_and_keeps_results_and_help_visible() {
+        for size in [egui::vec2(520.0, 760.0), egui::vec2(320.0, 280.0)] {
+            let (ctx, mut app) = super::super::tests::test_app();
+            app.settings.font_size = 21.0;
+            app.lists[0].data.tasks = ["Project first", "Project second", "Project third"]
+                .into_iter()
+                .map(Task::new)
+                .collect();
+            app.open_find();
+            let viewport = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
+            let mut draw = |events| {
+                let mut output = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(viewport),
+                        time: Some(ctx.input(|input| input.time) + 0.3),
+                        events,
+                        ..Default::default()
+                    },
+                    |_| app.overlay_ui(&ctx, app.palette()),
+                );
+                output.textures_delta.clear();
+                output
+                    .shapes
+                    .into_iter()
+                    .filter_map(|clipped| {
+                        let egui::epaint::Shape::Text(text) = clipped.shape else {
+                            return None;
+                        };
+                        let rect = egui::Rect::from_min_size(text.pos, text.galley.size());
+                        (clipped.clip_rect.contains_rect(rect) && viewport.contains_rect(rect))
+                            .then(|| text.galley.text().to_owned())
+                    })
+                    .collect::<Vec<_>>()
+            };
+            for _ in 0..3 {
+                draw(Vec::new());
+            }
+            draw(vec![egui::Event::Text("project".into())]);
+            for _ in 0..3 {
+                draw(Vec::new());
+            }
+            let visible = draw(Vec::new());
+            assert!(visible.iter().any(|text| text == "Find anything"));
+            assert!(
+                visible
+                    .iter()
+                    .any(|text| text == "Up/Down selects · Enter opens · Esc closes"),
+                "Find help must remain visible after results appear at {size:?}: {visible:?}"
+            );
+            if size.y > 500.0 {
+                for title in ["Project first", "Project second", "Project third"] {
+                    assert!(visible.iter().any(|text| text.starts_with(title)));
+                }
+            }
+            std::fs::remove_dir_all(&app.workspace).unwrap();
         }
     }
 
