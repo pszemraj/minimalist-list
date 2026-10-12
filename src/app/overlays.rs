@@ -2,7 +2,7 @@
 
 use super::{
     MinimalistApp,
-    keyboard::{FocusItem, take_key},
+    keyboard::{FocusItem, shortcut_groups, take_key},
     text_input_shortcuts,
     theme::Palette,
 };
@@ -12,65 +12,6 @@ use eframe::egui;
 use egui::{Align, Button, ComboBox, CornerRadius, Id, Key, Layout, Modal, ScrollArea, TextEdit};
 use std::time::Instant;
 use uuid::Uuid;
-
-const SHORTCUT_GROUPS: &[(&str, &[(&str, &str)])] = &[
-    (
-        "General",
-        &[
-            ("Keyboard shortcuts", "Mod+/"),
-            ("Settings (main screens)", "Mod+,"),
-            ("Quick add", "Mod+N"),
-            ("Find tasks and History", "Mod+F"),
-            ("New list (main screens)", "Mod+Shift+N"),
-            ("Next / previous control", "Tab / Shift+Tab"),
-            ("Close the active layer / go back", "Escape"),
-        ],
-    ),
-    (
-        "Lists overview",
-        &[
-            ("Move between cards", "Arrow keys"),
-            ("Open the focused list", "Enter / Space"),
-        ],
-    ),
-    (
-        "Inside a list",
-        &[
-            ("Add a task from entry", "Enter"),
-            ("Focus the first task from entry", "Down"),
-            ("Next / previous list", "Mod+Tab / Mod+Shift+Tab"),
-            ("Move completed tasks to History", "Mod+Shift+Backspace"),
-        ],
-    ),
-    (
-        "Focused task row",
-        &[
-            ("Previous / next task", "Up / Down"),
-            ("First / last task", "Home / End"),
-            ("Return to entry from the first task", "Up"),
-            ("Edit the title", "Enter"),
-            ("Toggle completion", "Space"),
-            ("Open / collapse subtasks", "Right / Left"),
-            ("Move the task up / down", "Alt+Up / Alt+Down"),
-            ("Delete the task", "Delete"),
-        ],
-    ),
-    (
-        "Text and forms",
-        &[
-            ("Save an edit / submit a form", "Enter"),
-            ("Save an inline edit and continue", "Tab"),
-            ("Cancel an inline edit or list creation", "Escape"),
-        ],
-    ),
-    (
-        "Find",
-        &[
-            ("Select a result", "Up / Down"),
-            ("Open the selected result", "Enter"),
-        ],
-    ),
-];
 
 /// Remembers the control underneath the keyboard-reference modal.
 pub(super) struct ShortcutsState {
@@ -253,33 +194,16 @@ impl MinimalistApp {
                     if home {
                         ui.scroll_to_cursor(Some(Align::Min));
                     }
-                    for (heading, shortcuts) in SHORTCUT_GROUPS {
+                    for (heading, shortcuts) in shortcut_groups() {
                         ui.add_space(10.0);
-                        ui.label(self.rich(*heading, 17.0, palette.accent));
-                        for (action, keys) in *shortcuts {
-                            let keys = keys
-                                .replace(
-                                    "Mod",
-                                    if cfg!(target_os = "macos") {
-                                        "Cmd"
-                                    } else {
-                                        "Ctrl"
-                                    },
-                                )
-                                .replace(
-                                    "Alt",
-                                    if cfg!(target_os = "macos") {
-                                        "Option"
-                                    } else {
-                                        "Alt"
-                                    },
-                                );
+                        ui.label(self.rich(heading, 17.0, palette.accent));
+                        for (action, keys) in shortcuts {
                             if ui.available_width() < 380.0 {
-                                ui.label(self.rich(*action, 14.0, palette.text));
+                                ui.label(self.rich(action, 14.0, palette.text));
                                 ui.label(self.rich(keys, 13.0, palette.muted));
                             } else {
                                 ui.horizontal(|ui| {
-                                    ui.label(self.rich(*action, 14.0, palette.text));
+                                    ui.label(self.rich(action, 14.0, palette.text));
                                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                         ui.label(self.rich(keys, 13.0, palette.muted));
                                     });

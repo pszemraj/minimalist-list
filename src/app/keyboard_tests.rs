@@ -17,19 +17,7 @@ fn frame(ctx: &egui::Context, app: &mut MinimalistApp, events: Vec<Event>, width
     };
     app.update_motion(ctx);
     run_frame(ctx, input, |ui| {
-        app.handle_app_shortcuts(ctx);
-        let palette = app.palette();
-        if app.quick_capture.is_some() || app.find.is_some() || app.shortcuts.is_some() {
-            ui.disable();
-        }
-        match app.screen {
-            Screen::Overview => app.overview_ui(ui, palette),
-            Screen::List(id) => app.list_ui(ui, id, palette),
-            Screen::Settings => app.settings_ui(ui, palette),
-        }
-        app.keyboard_focus_ui(ui, palette);
-        app.overlay_ui(ctx, palette);
-        app.finish_keyboard_frame(ctx);
+        <MinimalistApp as eframe::App>::ui(app, ui, &mut eframe::Frame::_new_kittest());
     });
 }
 
@@ -423,10 +411,26 @@ fn specific_shortcuts_do_not_open_quick_add_or_move_text_focus() {
     type_text(&ctx, &mut app, "New keyboard list");
     key(&ctx, &mut app, Key::Enter, Modifiers::NONE);
     assert_eq!(app.lists.len(), 3);
-    key(&ctx, &mut app, Key::Tab, Modifiers::COMMAND);
+    key(&ctx, &mut app, Key::Tab, Modifiers::CTRL);
     assert!(matches!(app.screen, Screen::List(id) if id == first));
-    key(&ctx, &mut app, Key::Tab, Modifiers::COMMAND);
+    key(&ctx, &mut app, Key::Tab, Modifiers::CTRL);
     assert!(matches!(app.screen, Screen::List(id) if id == second));
+    key(&ctx, &mut app, Key::Tab, Modifiers::CTRL | Modifiers::SHIFT);
+    assert!(matches!(app.screen, Screen::List(id) if id == first));
+    for ctrl in [Modifiers::CTRL, Modifiers::CTRL | Modifiers::COMMAND] {
+        key(&ctx, &mut app, Key::Tab, ctrl);
+        assert!(matches!(app.screen, Screen::List(id) if id == second));
+        key(&ctx, &mut app, Key::Tab, ctrl | Modifiers::SHIFT);
+        assert!(matches!(app.screen, Screen::List(id) if id == first));
+    }
+    key(
+        &ctx,
+        &mut app,
+        Key::Tab,
+        Modifiers::MAC_CMD | Modifiers::COMMAND,
+    );
+    assert!(matches!(app.screen, Screen::List(id) if id == first));
+    key(&ctx, &mut app, Key::Tab, Modifiers::CTRL);
     type_text(&ctx, &mut app, "a b");
     key(&ctx, &mut app, Key::ArrowLeft, Modifiers::NONE);
     key(&ctx, &mut app, Key::Delete, Modifiers::NONE);
@@ -927,4 +931,39 @@ fn shortcuts_reference_dismissal_accepts_the_very_next_input() {
         Some(FocusItem::Task(list, task).id())
     );
     cleanup(&app);
+}
+
+#[path = "keyboard_focus_tests.rs"]
+mod focus_regressions;
+
+#[test]
+fn reference_uses_shared_bindings_and_native_delete_names() {
+    for (binding, regular, mac) in [
+        (SHOW_SHORTCUTS, "Ctrl+/", "Cmd+/"),
+        (NEXT_LIST, "Ctrl+Tab", "Ctrl+Tab"),
+        (PREVIOUS_LIST, "Ctrl+Shift+Tab", "Ctrl+Shift+Tab"),
+        (CLEAR_COMPLETED, "Ctrl+Shift+Backspace", "Shift+Cmd+Delete"),
+        (DELETE_TASK, "Delete", "Fn+Delete"),
+        (MOVE_TASK_UP, "Alt+Up", "Option+Up"),
+    ] {
+        assert_eq!(shortcut_for_platform(binding, false), regular);
+        assert_eq!(shortcut_for_platform(binding, true), mac);
+    }
+    let groups = shortcut_groups();
+    for (action, binding) in [
+        ("Keyboard shortcuts", SHOW_SHORTCUTS),
+        ("Settings (main screens)", OPEN_SETTINGS),
+        ("Quick add", QUICK_ADD),
+        ("Find tasks and History", FIND),
+        ("New list (main screens)", NEW_LIST),
+        ("Move completed tasks to History", CLEAR_COMPLETED),
+        ("Delete the task", DELETE_TASK),
+    ] {
+        let (_, label) = groups
+            .iter()
+            .flat_map(|(_, rows)| rows)
+            .find(|(name, _)| *name == action)
+            .unwrap();
+        assert_eq!(*label, shortcut(binding));
+    }
 }

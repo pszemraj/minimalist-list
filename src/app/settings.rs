@@ -90,6 +90,8 @@ impl MinimalistApp {
                     ui.label(self.rich("Enter applies", 12.0, palette.muted));
                 });
                 let (submit, _) = text_input_shortcuts(ui, &workspace_response);
+                // Enter submits path edits. Explicitly using the current folder
+                // can still persist a launch-only workspace selection.
                 if choose_folder {
                     if let Some(path) = FileDialog::new()
                         .set_title("Choose Minimalist List workspace")
@@ -99,7 +101,9 @@ impl MinimalistApp {
                         self.workspace_input = path.to_string_lossy().into_owned();
                         self.switch_workspace();
                     }
-                } else if use_folder || submit {
+                } else if use_folder
+                    || (submit && self.workspace_input != self.settings.workspace_path)
+                {
                     self.switch_workspace();
                 }
             });

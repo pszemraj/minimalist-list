@@ -2,7 +2,7 @@
 
 use super::{
     MinimalistApp,
-    keyboard::{FocusItem, shortcut, take_key},
+    keyboard::{FocusItem, NEW_LIST, shortcut, take_key},
     text_input_shortcuts,
     theme::Palette,
 };
@@ -152,7 +152,7 @@ impl MinimalistApp {
                         )
                     })
                     .inner
-                    .on_hover_text(format!("New list ({})", shortcut("Shift+N")))
+                    .on_hover_text(format!("New list ({})", shortcut(NEW_LIST)))
                     .clicked()
                 {
                     self.creating_list = true;

@@ -346,6 +346,9 @@ impl MinimalistApp {
     pub(super) fn archive_completed(&mut self, list_id: Uuid) {
         let neighbors = self.focus_neighbors();
         if let Some(index) = self.list_index(list_id) {
+            if self.lists[index].data.completed_count() == 0 {
+                return;
+            }
             if self
                 .drag
                 .as_ref()
@@ -488,5 +491,60 @@ impl MinimalistApp {
             self.save_list_index(index);
             self.keyboard.pending = Some(FocusItem::Task(list_id, task_id).id());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{app::tests::test_app, model::TodoList};
+    use std::{
+        fs::{self, File, FileTimes},
+        time::{Duration, UNIX_EPOCH},
+    };
+
+    #[test]
+    fn clearing_completed_only_writes_when_tasks_are_archived() {
+        let (_ctx, mut app) = test_app();
+        let list_id = app.lists[0].key;
+        let active = Task::new("Keep active");
+        let active_id = active.id;
+        app.lists[0].data.tasks.push(active);
+        app.save_list_index(0);
+        let path = app.lists[0].path.clone();
+        let original = fs::read(&path).unwrap();
+        // A fixed old timestamp detects atomic rewrites without relying on clock resolution.
+        File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_times(FileTimes::new().set_modified(UNIX_EPOCH + Duration::from_secs(1_000_000)))
+            .unwrap();
+        let modified = fs::metadata(&path).unwrap().modified().unwrap();
+
+        for _ in 0..2 {
+            app.archive_completed(list_id);
+            assert_eq!(fs::read(&path).unwrap(), original);
+            assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), modified);
+            assert!(app.lists[0].data.archive.is_empty());
+            assert_eq!(app.lists[0].data.tasks[0].id, active_id);
+        }
+
+        let mut completed = Task::new("Move to History");
+        completed.toggle();
+        completed.subtasks.push(Subtask::new("Keep checklist"));
+        let completed_id = completed.id;
+        app.lists[0].data.tasks.push(completed);
+        app.archive_completed(list_id);
+
+        let saved: TodoList = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(saved.tasks.len(), 1);
+        assert_eq!(saved.tasks[0].id, active_id);
+        assert_eq!(saved.archive.len(), 1);
+        assert_eq!(saved.archive[0].task.id, completed_id);
+        assert!(saved.archive[0].task.completed);
+        assert_eq!(saved.archive[0].task.subtasks[0].text, "Keep checklist");
+        assert_ne!(fs::metadata(&path).unwrap().modified().unwrap(), modified);
+        fs::remove_dir_all(&app.workspace).unwrap();
     }
 }

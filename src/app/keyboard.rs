@@ -1,8 +1,56 @@
 //! Keyboard commands and transient focus for list and task navigation.
 
 use super::{MinimalistApp, Screen, list::RowAction, theme::Palette};
-use eframe::egui::{self, Event, FocusDirection, Id, Key, Modifiers, Response, Stroke};
+use eframe::egui::{
+    self, Event, FocusDirection, Id, Key, KeyboardShortcut, Modifiers, Response, Stroke,
+};
 use uuid::Uuid;
+
+/// Opens the in-app shortcut reference.
+pub(super) const SHOW_SHORTCUTS: KeyboardShortcut =
+    KeyboardShortcut::new(Modifiers::COMMAND, Key::Slash);
+/// Opens Settings from a main screen.
+pub(super) const OPEN_SETTINGS: KeyboardShortcut =
+    KeyboardShortcut::new(Modifiers::COMMAND, Key::Comma);
+/// Opens Quick add.
+pub(super) const QUICK_ADD: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::N);
+/// Opens Find.
+pub(super) const FIND: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::F);
+/// Opens list creation, applying Settings edits first.
+pub(super) const NEW_LIST: KeyboardShortcut = KeyboardShortcut::new(
+    Modifiers {
+        shift: true,
+        ..Modifiers::COMMAND
+    },
+    Key::N,
+);
+/// Cycles lists with physical Control; macOS reserves Command+Tab for apps.
+pub(super) const NEXT_LIST: KeyboardShortcut = KeyboardShortcut::new(Modifiers::CTRL, Key::Tab);
+/// Cycles lists backward with physical Control.
+pub(super) const PREVIOUS_LIST: KeyboardShortcut = KeyboardShortcut::new(
+    Modifiers {
+        shift: true,
+        ..Modifiers::CTRL
+    },
+    Key::Tab,
+);
+/// Moves completed tasks to History.
+pub(super) const CLEAR_COMPLETED: KeyboardShortcut = KeyboardShortcut::new(
+    Modifiers {
+        shift: true,
+        ..Modifiers::COMMAND
+    },
+    Key::Backspace,
+);
+/// Deletes a focused task using forward Delete.
+pub(super) const DELETE_TASK: KeyboardShortcut =
+    KeyboardShortcut::new(Modifiers::NONE, Key::Delete);
+/// Moves a focused task up one position.
+pub(super) const MOVE_TASK_UP: KeyboardShortcut =
+    KeyboardShortcut::new(Modifiers::ALT, Key::ArrowUp);
+/// Moves a focused task down one position.
+pub(super) const MOVE_TASK_DOWN: KeyboardShortcut =
+    KeyboardShortcut::new(Modifiers::ALT, Key::ArrowDown);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 /// A logical item whose keyboard focus survives movement and file reloads.
@@ -34,6 +82,7 @@ impl FocusItem {
 pub(super) struct KeyboardState {
     pub(super) pending: Option<Id>,
     requested: Option<Id>,
+    missing_request: Option<(Id, u8)>,
     pub(super) last_focus: Option<Id>,
     pub(super) settings_return: Option<Id>,
     pub(super) overlay_return: Option<Id>,
@@ -73,18 +122,119 @@ pub(super) fn take_key(ctx: &egui::Context, key: Key, modifiers: Modifiers) -> b
 
 /// Formats a shortcut for the native platform.
 ///
+/// # Arguments
+///
+/// - `binding` - The key and modifiers used by command routing.
+///
 /// # Returns
 ///
-/// A shortcut label prefixed with Ctrl or Cmd.
-pub(super) fn shortcut(keys: &str) -> String {
-    format!(
-        "{}+{keys}",
-        if cfg!(target_os = "macos") {
-            "Cmd"
-        } else {
-            "Ctrl"
-        }
-    )
+/// A label using the binding's real modifiers and native key names.
+pub(super) fn shortcut(binding: KeyboardShortcut) -> String {
+    shortcut_for_platform(binding, cfg!(target_os = "macos"))
+}
+
+fn shortcut_for_platform(binding: KeyboardShortcut, mac: bool) -> String {
+    let key = match binding.logical_key {
+        Key::Comma => ",",
+        Key::Slash => "/",
+        Key::ArrowUp => "Up",
+        Key::ArrowDown => "Down",
+        Key::ArrowLeft => "Left",
+        Key::ArrowRight => "Right",
+        Key::Backspace if mac => "Delete",
+        Key::Delete if mac => "Fn+Delete",
+        key => key.name(),
+    };
+    let modifiers = egui::ModifierNames::NAMES.format(&binding.modifiers, mac);
+    if modifiers.is_empty() {
+        key.to_owned()
+    } else {
+        format!("{modifiers}+{key}")
+    }
+}
+
+/// A reference group with action descriptions and formatted key bindings.
+pub(super) type ShortcutGroup = (&'static str, Vec<(&'static str, String)>);
+
+/// Builds the reference from the same bindings used by routing and tooltips.
+///
+/// # Returns
+///
+/// Context groups containing native shortcut labels.
+pub(super) fn shortcut_groups() -> Vec<ShortcutGroup> {
+    let plain = |key| shortcut(KeyboardShortcut::new(Modifiers::NONE, key));
+    let pair = |first, second| format!("{} / {}", shortcut(first), shortcut(second));
+    vec![
+        (
+            "General",
+            vec![
+                ("Keyboard shortcuts", shortcut(SHOW_SHORTCUTS)),
+                ("Settings (main screens)", shortcut(OPEN_SETTINGS)),
+                ("Quick add", shortcut(QUICK_ADD)),
+                ("Find tasks and History", shortcut(FIND)),
+                ("New list (main screens)", shortcut(NEW_LIST)),
+                (
+                    "Next / previous control",
+                    pair(
+                        KeyboardShortcut::new(Modifiers::NONE, Key::Tab),
+                        KeyboardShortcut::new(Modifiers::SHIFT, Key::Tab),
+                    ),
+                ),
+                ("Close the active layer / go back", plain(Key::Escape)),
+            ],
+        ),
+        (
+            "Lists overview",
+            vec![
+                ("Move between cards", "Arrow keys".into()),
+                ("Open the focused list", "Enter / Space".into()),
+            ],
+        ),
+        (
+            "Inside a list",
+            vec![
+                ("Add a task from entry", plain(Key::Enter)),
+                ("Focus the first task from entry", plain(Key::ArrowDown)),
+                ("Next / previous list", pair(NEXT_LIST, PREVIOUS_LIST)),
+                ("Move completed tasks to History", shortcut(CLEAR_COMPLETED)),
+            ],
+        ),
+        (
+            "Focused task row",
+            vec![
+                ("Previous / next task", "Up / Down".into()),
+                ("First / last task", "Home / End".into()),
+                ("Return to entry from the first task", plain(Key::ArrowUp)),
+                ("Edit the title", plain(Key::Enter)),
+                ("Toggle completion", plain(Key::Space)),
+                ("Open / collapse subtasks", "Right / Left".into()),
+                (
+                    "Move the task up / down",
+                    pair(MOVE_TASK_UP, MOVE_TASK_DOWN),
+                ),
+                ("Delete the task", shortcut(DELETE_TASK)),
+            ],
+        ),
+        (
+            "Text and forms",
+            vec![
+                ("Save an edit / submit a form", plain(Key::Enter)),
+                ("Save an inline edit and continue", plain(Key::Tab)),
+                ("Cancel an inline edit or list creation", plain(Key::Escape)),
+            ],
+        ),
+        (
+            "Find",
+            vec![
+                ("Select a result", "Up / Down".into()),
+                ("Open the selected result", plain(Key::Enter)),
+            ],
+        ),
+    ]
+}
+
+fn take_shortcut(ctx: &egui::Context, binding: KeyboardShortcut) -> bool {
+    take_key(ctx, binding.logical_key, binding.modifiers)
 }
 
 impl MinimalistApp {
@@ -103,15 +253,18 @@ impl MinimalistApp {
         if egui::Popup::is_any_open(ctx) {
             return;
         }
-        if take_key(ctx, Key::Slash, Modifiers::COMMAND) {
+        if take_shortcut(ctx, SHOW_SHORTCUTS) {
             self.open_shortcuts();
             return;
         }
         if self.shortcuts.is_some() {
             return;
         }
-        if take_key(ctx, Key::N, Modifiers::COMMAND | Modifiers::SHIFT) {
+        if take_shortcut(ctx, NEW_LIST) {
             if self.quick_capture.is_none() && self.find.is_none() {
+                if matches!(self.screen, Screen::Settings) {
+                    self.close_settings();
+                }
                 self.go_to_overview();
                 self.creating_list = true;
                 self.request_list_focus = true;
@@ -119,7 +272,7 @@ impl MinimalistApp {
             }
             return;
         }
-        if take_key(ctx, Key::N, Modifiers::COMMAND) {
+        if take_shortcut(ctx, QUICK_ADD) {
             let current = match self.screen {
                 Screen::List(id) => Some(id),
                 _ => None,
@@ -127,14 +280,14 @@ impl MinimalistApp {
             self.open_quick_capture(current);
             return;
         }
-        if take_key(ctx, Key::F, Modifiers::COMMAND) {
+        if take_shortcut(ctx, FIND) {
             self.open_find();
             return;
         }
         if self.quick_capture.is_some() || self.find.is_some() {
             return;
         }
-        if take_key(ctx, Key::Comma, Modifiers::COMMAND) {
+        if take_shortcut(ctx, OPEN_SETTINGS) {
             if !matches!(self.screen, Screen::Settings) {
                 let list = match self.screen {
                     Screen::List(id) => Some(id),
@@ -149,11 +302,11 @@ impl MinimalistApp {
             return;
         }
         if let Screen::List(list) = self.screen {
-            if take_key(ctx, Key::Tab, Modifiers::COMMAND | Modifiers::SHIFT) {
+            if take_shortcut(ctx, PREVIOUS_LIST) {
                 self.cycle_list(list, true);
-            } else if take_key(ctx, Key::Tab, Modifiers::COMMAND) {
+            } else if take_shortcut(ctx, NEXT_LIST) {
                 self.cycle_list(list, false);
-            } else if take_key(ctx, Key::Backspace, Modifiers::COMMAND | Modifiers::SHIFT) {
+            } else if take_shortcut(ctx, CLEAR_COMPLETED) {
                 self.begin_clear_completed(list);
             } else {
                 self.task_keyboard(ctx, list);
@@ -283,13 +436,13 @@ impl MinimalistApp {
         // A closing modal can delay the row's response regaining focus by a pass.
         // Record its owner before applying a command that can remove the row.
         self.keyboard.anchor = Some((row, FocusItem::Task(list, task.id)));
-        if take_key(ctx, Key::ArrowUp, Modifiers::ALT) {
+        if take_shortcut(ctx, MOVE_TASK_UP) {
             self.apply_row_action(RowAction::Reorder(
                 list,
                 task.id,
                 position.saturating_sub(1),
             ));
-        } else if take_key(ctx, Key::ArrowDown, Modifiers::ALT) {
+        } else if take_shortcut(ctx, MOVE_TASK_DOWN) {
             self.apply_row_action(RowAction::Reorder(
                 list,
                 task.id,
@@ -315,7 +468,7 @@ impl MinimalistApp {
             self.apply_row_action(RowAction::BeginEdit(list, task.id, task.text));
         } else if take_key(ctx, Key::Space, Modifiers::NONE) {
             self.apply_row_action(RowAction::Toggle(list, task.id));
-        } else if take_key(ctx, Key::Delete, Modifiers::NONE) {
+        } else if take_shortcut(ctx, DELETE_TASK) {
             self.apply_row_action(RowAction::Delete(list, task.id));
         } else if take_key(ctx, Key::ArrowRight, Modifiers::NONE) {
             self.subtasks_for = Some((list, task.id));
@@ -417,14 +570,18 @@ impl MinimalistApp {
             .skip(position + 1)
             .chain(previous[..position].iter().rev())
             .find(|candidate| current.contains(candidate));
-        self.keyboard.pending = next.map(|item| item.id()).or_else(|| match self.screen {
+        self.keyboard.pending = next.map(|item| item.id()).or_else(|| self.default_focus());
+    }
+
+    fn default_focus(&self) -> Option<Id> {
+        match self.screen {
             Screen::List(list) => Some(Id::new(("new-task", list))),
             Screen::Overview => self
                 .lists
                 .first()
                 .map(|list| FocusItem::Card(list.key).id()),
             Screen::Settings => Some(Id::new("settings-workspace")),
-        });
+        }
     }
 
     /// Restores the control that opened a capture/search modal.
@@ -442,6 +599,7 @@ impl MinimalistApp {
             .map(|(list, task)| FocusItem::Task(list, task).id())
             .or(self.keyboard.pending)
             .or(self.keyboard.last_focus)
+            .or_else(|| self.default_focus())
     }
 
     /// Draws focus even for frameless controls and scrolls newly focused widgets into view.
@@ -478,17 +636,48 @@ impl MinimalistApp {
     pub(super) fn finish_keyboard_frame(&mut self, ctx: &egui::Context) {
         // A delivered request is complete even if Tab moved on in the same pass.
         // Keep requests queued this pass, and retries blocked by a closing modal.
-        if self.keyboard.pending == self.keyboard.requested
-            && let Some(response) = self.keyboard.pending.and_then(|id| ctx.read_response(id))
-            && response.enabled()
+        if let Some(id) = self
+            .keyboard
+            .pending
+            .filter(|id| Some(*id) == self.keyboard.requested)
         {
-            if ctx.memory(|memory| memory.is_above_modal_layer(response.layer_id)) {
+            let response = ctx.read_response(id).filter(|response| response.enabled());
+            if response.as_ref().is_some_and(|response| {
+                ctx.memory(|memory| memory.is_above_modal_layer(response.layer_id))
+            }) {
                 self.keyboard.pending = None;
+                self.keyboard.missing_request = None;
             } else {
-                // The closing modal blocked this widget while it was rendered.
-                // Retain focus so its next input sees the restored field already focused.
-                ctx.memory_mut(|memory| memory.request_focus(response.id));
+                let attempts = self
+                    .keyboard
+                    .missing_request
+                    .filter(|(previous, _)| *previous == id)
+                    .map_or(1, |(_, attempts)| attempts + 1);
+                self.keyboard.missing_request = Some((id, attempts));
+                if attempts >= 3 {
+                    // Sync or an animation can remove a saved return control. Never
+                    // keep stealing focus for an ID that no longer gets rendered.
+                    self.keyboard.pending = None;
+                    self.keyboard.missing_request = None;
+                    ctx.memory_mut(|memory| memory.surrender_focus(id));
+                    if let Some(fallback) = self
+                        .default_focus()
+                        .and_then(|id| ctx.read_response(id))
+                        .filter(|response| response.enabled())
+                    {
+                        fallback.request_focus();
+                    }
+                } else {
+                    // Retain focus across a closing modal's previous-pass barrier,
+                    // so the restored field accepts the very next input.
+                    if response.is_some() {
+                        ctx.memory_mut(|memory| memory.request_focus(id));
+                    }
+                    ctx.request_repaint();
+                }
             }
+        } else {
+            self.keyboard.missing_request = None;
         }
         self.keyboard.last_focus = ctx.memory(|memory| memory.focused());
         if self.keyboard.last_focus.is_some()
