@@ -443,7 +443,7 @@ impl MinimalistApp {
 
                     ui.add_space(6.0);
                     ui.label(self.rich(
-                        "↑↓ selects · Enter opens · Esc closes",
+                        "Up/Down selects · Enter opens · Esc closes",
                         12.0,
                         palette.muted,
                     ));
