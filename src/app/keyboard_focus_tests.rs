@@ -97,31 +97,31 @@ fn overlays_opened_during_removal_do_not_restore_the_removed_row() {
 
 #[test]
 fn new_list_from_settings_saves_rename_and_clears_return_session() {
-    let (ctx, mut app) = test_app();
-    let list = app.lists[0].key;
-    idle(&ctx, &mut app);
-    key(&ctx, &mut app, Key::Comma, Modifiers::COMMAND);
-    focus(&ctx, &mut app, Id::new(("settings-list-name", list)));
-    key(&ctx, &mut app, Key::A, Modifiers::COMMAND);
-    type_text(&ctx, &mut app, "Renamed before new list");
-    key(
-        &ctx,
-        &mut app,
-        Key::N,
-        Modifiers::COMMAND | Modifiers::SHIFT,
-    );
-    assert!(matches!(app.screen, Screen::Overview));
-    assert!(app.creating_list);
-    assert!(app.return_screen.is_none());
-    assert!(app.settings_list_id.is_none());
-    assert_eq!(
-        storage::load_workspace(&app.workspace).unwrap().lists[0]
-            .data
-            .title,
-        "Renamed before new list"
-    );
-    key(&ctx, &mut app, Key::Escape, Modifiers::NONE);
-    cleanup(&app);
+    for command in [
+        Modifiers::CTRL | Modifiers::COMMAND,
+        Modifiers::MAC_CMD | Modifiers::COMMAND,
+    ] {
+        let (ctx, mut app) = test_app();
+        let list = app.lists[0].key;
+        idle(&ctx, &mut app);
+        key(&ctx, &mut app, Key::Comma, command);
+        focus(&ctx, &mut app, Id::new(("settings-list-name", list)));
+        key(&ctx, &mut app, Key::A, command);
+        type_text(&ctx, &mut app, "Renamed before new list");
+        key(&ctx, &mut app, Key::N, command | Modifiers::SHIFT);
+        assert!(matches!(app.screen, Screen::Overview));
+        assert!(app.creating_list);
+        assert!(app.return_screen.is_none());
+        assert!(app.settings_list_id.is_none());
+        assert_eq!(
+            storage::load_workspace(&app.workspace).unwrap().lists[0]
+                .data
+                .title,
+            "Renamed before new list"
+        );
+        key(&ctx, &mut app, Key::Escape, Modifiers::NONE);
+        cleanup(&app);
+    }
 }
 
 #[test]
@@ -134,6 +134,16 @@ fn unchanged_workspace_enter_preserves_list_and_launch_override() {
     key(&ctx, &mut app, Key::Comma, Modifiers::COMMAND);
     key(&ctx, &mut app, Key::Enter, Modifiers::NONE);
     assert!(matches!(app.screen, Screen::Settings));
+    assert_eq!(
+        ctx.memory(|m| m.focused()),
+        Some(Id::new("settings-workspace"))
+    );
+    let original_path = app.workspace_input.clone();
+    type_text(&ctx, &mut app, " still editing");
+    assert_eq!(
+        app.workspace_input,
+        format!("{original_path} still editing")
+    );
     assert_eq!(app.settings.last_list_id, Some(second));
     assert_eq!(
         app.persisted_workspace_path,
@@ -141,5 +151,134 @@ fn unchanged_workspace_enter_preserves_list_and_launch_override() {
     );
     key(&ctx, &mut app, Key::Escape, Modifiers::NONE);
     assert!(matches!(app.screen, Screen::List(id) if id == second));
+    cleanup(&app);
+}
+
+#[test]
+fn unavailable_return_focus_keeps_a_deliberate_click() {
+    let (ctx, mut app) = test_app();
+    key(&ctx, &mut app, Key::Comma, Modifiers::COMMAND);
+    idle(&ctx, &mut app);
+    let chosen = Id::new(("settings-list-name", app.lists[0].key));
+    frame(
+        &ctx,
+        &mut app,
+        vec![
+            Event::PointerMoved(egui::pos2(200.0, 350.0)),
+            Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: egui::vec2(0.0, -800.0),
+                phase: egui::TouchPhase::Move,
+                modifiers: Modifiers::NONE,
+            },
+        ],
+        430.0,
+    );
+    idle(&ctx, &mut app);
+    let response = ctx.read_response(chosen).unwrap();
+    let pos = response.rect.center();
+    assert!(response.interact_rect.contains(pos), "{response:?}");
+    let missing = Id::new("missing-return-control");
+    app.keyboard.pending = Some(missing);
+    app.keyboard.missing_request = Some((missing, 2));
+    frame(
+        &ctx,
+        &mut app,
+        vec![
+            Event::PointerMoved(pos),
+            Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: Modifiers::NONE,
+            },
+            Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: Modifiers::NONE,
+            },
+        ],
+        430.0,
+    );
+    assert!(app.keyboard.pending.is_none());
+    assert_eq!(ctx.memory(|m| m.focused()), Some(chosen));
+    idle(&ctx, &mut app);
+    assert_eq!(ctx.memory(|m| m.focused()), Some(chosen));
+    cleanup(&app);
+}
+
+#[test]
+fn overview_fallback_remembers_a_surviving_card() {
+    let (ctx, mut app) = test_app();
+    let second = add_list(&mut app, "Second");
+    app.go_to_overview();
+    focus(&ctx, &mut app, FocusItem::Card(second).id());
+    app.keyboard.pending = Some(Id::new("missing-return-control"));
+    idle(&ctx, &mut app);
+    assert_eq!(
+        ctx.memory(|m| m.focused()),
+        Some(FocusItem::Card(second).id())
+    );
+    app.lists.retain(|list| list.key != second);
+    app.keyboard.pending = Some(Id::new("another-missing-return-control"));
+    idle(&ctx, &mut app);
+    assert_eq!(
+        ctx.memory(|m| m.focused()),
+        Some(FocusItem::Card(app.lists[0].key).id())
+    );
+    cleanup(&app);
+}
+
+#[test]
+fn scrolled_settings_focus_outline_stays_in_the_visible_region() {
+    let (ctx, mut app) = test_app();
+    key(&ctx, &mut app, Key::Comma, Modifiers::COMMAND);
+    idle(&ctx, &mut app);
+    let workspace = Id::new("settings-workspace");
+    let output = frame(&ctx, &mut app, Vec::new(), 430.0);
+    let response = ctx.read_response(workspace).unwrap();
+    assert!(output.shapes.iter().any(|clipped| {
+        matches!(&clipped.shape, egui::epaint::Shape::Rect(rect)
+            if rect.rect == response.rect.expand(1.0)
+                && rect.stroke.width == 1.5
+                && clipped.clip_rect.contains_rect(rect.rect))
+    }));
+    let pos = response.rect.center();
+    frame(
+        &ctx,
+        &mut app,
+        vec![
+            Event::PointerMoved(pos),
+            Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: egui::vec2(0.0, -160.0),
+                phase: egui::TouchPhase::Move,
+                modifiers: Modifiers::NONE,
+            },
+        ],
+        430.0,
+    );
+    idle(&ctx, &mut app);
+    let output = frame(&ctx, &mut app, Vec::new(), 430.0);
+    let response = ctx.read_response(workspace).unwrap();
+    assert_eq!(ctx.memory(|m| m.focused()), Some(workspace));
+    assert!(response.rect.intersects(ctx.content_rect()));
+    assert!(!response.interact_rect.is_positive(), "{response:?}");
+    let mut outlines = 0;
+    for clipped in output.shapes {
+        if let egui::epaint::Shape::Rect(rect) = clipped.shape
+            && rect.rect == response.rect.expand(1.0)
+            && rect.stroke.width == 1.5
+        {
+            outlines += 1;
+            assert!(
+                !rect.rect.intersect(clipped.clip_rect).is_positive(),
+                "scrolled-away focus is visible through {:?}",
+                clipped.clip_rect
+            );
+        }
+    }
+    assert!(outlines > 0);
     cleanup(&app);
 }

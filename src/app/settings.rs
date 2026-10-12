@@ -105,6 +105,8 @@ impl MinimalistApp {
                     || (submit && self.workspace_input != self.settings.workspace_path)
                 {
                     self.switch_workspace();
+                } else if submit {
+                    workspace_response.request_focus();
                 }
             });
         });

@@ -172,7 +172,7 @@ pub(super) fn shortcut_groups() -> Vec<ShortcutGroup> {
                 ("Settings (main screens)", shortcut(OPEN_SETTINGS)),
                 ("Quick add", shortcut(QUICK_ADD)),
                 ("Find tasks and History", shortcut(FIND)),
-                ("New list (main screens)", shortcut(NEW_LIST)),
+                ("New list (Lists, list, Settings)", shortcut(NEW_LIST)),
                 (
                     "Next / previous control",
                     pair(
@@ -344,12 +344,16 @@ impl MinimalistApp {
 
     /// Requests the remembered overview card, or the first available card.
     pub(super) fn focus_overview(&mut self) {
+        self.keyboard.pending = self.overview_focus();
+    }
+
+    fn overview_focus(&self) -> Option<Id> {
         let id = self
             .keyboard
             .overview_list
             .filter(|id| self.list_index(*id).is_some())
             .or_else(|| self.lists.first().map(|list| list.key));
-        self.keyboard.pending = id.map(|id| FocusItem::Card(id).id());
+        id.map(|id| FocusItem::Card(id).id())
     }
 
     /// Moves through cards using the overview's current column count.
@@ -576,10 +580,7 @@ impl MinimalistApp {
     fn default_focus(&self) -> Option<Id> {
         match self.screen {
             Screen::List(list) => Some(Id::new(("new-task", list))),
-            Screen::Overview => self
-                .lists
-                .first()
-                .map(|list| FocusItem::Card(list.key).id()),
+            Screen::Overview => self.overview_focus(),
             Screen::Settings => Some(Id::new("settings-workspace")),
         }
     }
@@ -623,12 +624,14 @@ impl MinimalistApp {
             }) {
                 return;
             }
-            ui.painter().rect_stroke(
-                response.rect.expand(1.0),
-                4.0,
-                Stroke::new(1.5, palette.accent),
-                egui::StrokeKind::Inside,
-            );
+            ui.painter()
+                .with_clip_rect(response.interact_rect.expand(2.0))
+                .rect_stroke(
+                    response.rect.expand(1.0),
+                    4.0,
+                    Stroke::new(1.5, palette.accent),
+                    egui::StrokeKind::Inside,
+                );
         }
     }
 
@@ -660,10 +663,12 @@ impl MinimalistApp {
                     self.keyboard.pending = None;
                     self.keyboard.missing_request = None;
                     ctx.memory_mut(|memory| memory.surrender_focus(id));
-                    if let Some(fallback) = self
-                        .default_focus()
-                        .and_then(|id| ctx.read_response(id))
-                        .filter(|response| response.enabled())
+                    // Keep a deliberate click or Tab made during the return attempt.
+                    if ctx.memory(|memory| memory.focused().is_none())
+                        && let Some(fallback) = self
+                            .default_focus()
+                            .and_then(|id| ctx.read_response(id))
+                            .filter(|response| response.enabled())
                     {
                         fallback.request_focus();
                     }

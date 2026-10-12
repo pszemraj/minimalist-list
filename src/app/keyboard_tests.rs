@@ -1,11 +1,16 @@
 //! Headless keyboard journeys using real egui widgets and persisted task files.
 
 use super::*;
-use crate::app::tests::{run_frame, test_app};
+use crate::app::tests::test_app;
 use crate::model::{Accent, ArchivedTask, Task};
 use crate::storage;
 
-fn frame(ctx: &egui::Context, app: &mut MinimalistApp, events: Vec<Event>, width: f32) {
+fn frame(
+    ctx: &egui::Context,
+    app: &mut MinimalistApp,
+    events: Vec<Event>,
+    width: f32,
+) -> egui::FullOutput {
     let input = egui::RawInput {
         time: Some(ctx.input(|input| input.time) + 0.3),
         screen_rect: Some(egui::Rect::from_min_size(
@@ -16,9 +21,13 @@ fn frame(ctx: &egui::Context, app: &mut MinimalistApp, events: Vec<Event>, width
         ..Default::default()
     };
     app.update_motion(ctx);
-    run_frame(ctx, input, |ui| {
+    let mut output = ctx.run_ui(input, |ui| {
+        // eframe provides this hidden constructor for headless App tests.
+        // Review its compatibility when upgrading the locked eframe version.
         <MinimalistApp as eframe::App>::ui(app, ui, &mut eframe::Frame::_new_kittest());
     });
+    output.textures_delta.clear();
+    output
 }
 
 fn idle(ctx: &egui::Context, app: &mut MinimalistApp) {
@@ -713,39 +722,39 @@ fn deletion_immediately_after_modal_navigation_restores_next_row() {
 
 #[test]
 fn deleting_last_rows_and_clearing_completed_restore_surviving_focus() {
-    let (ctx, mut app) = test_app();
-    let list = app.lists[0].key;
-    app.lists[0].data.tasks = ["First", "Second", "Third", "Last"].map(Task::new).to_vec();
-    let first = app.lists[0].data.tasks[0].id;
-    let third = app.lists[0].data.tasks[2].id;
-    app.lists[0].data.tasks[0].completed = true;
-    app.lists[0].data.tasks[1].completed = true;
-    focus(&ctx, &mut app, FocusItem::Task(list, first).id());
-    key(
-        &ctx,
-        &mut app,
-        Key::Backspace,
-        Modifiers::COMMAND | Modifiers::SHIFT,
-    );
-    app.clear_animation.as_mut().unwrap().1 =
-        std::time::Instant::now() - std::time::Duration::from_secs(1);
-    idle(&ctx, &mut app);
-    assert_eq!(
-        ctx.memory(|m| m.focused()),
-        Some(FocusItem::Task(list, third).id())
-    );
-    key(&ctx, &mut app, Key::End, Modifiers::NONE);
-    for expected in [
-        Some(FocusItem::Task(list, third).id()),
-        Some(Id::new(("new-task", list))),
+    for command in [
+        Modifiers::CTRL | Modifiers::COMMAND,
+        Modifiers::MAC_CMD | Modifiers::COMMAND,
     ] {
-        key(&ctx, &mut app, Key::Delete, Modifiers::NONE);
-        app.delete_animation.as_mut().unwrap().2 =
+        let (ctx, mut app) = test_app();
+        let list = app.lists[0].key;
+        app.lists[0].data.tasks = ["First", "Second", "Third", "Last"].map(Task::new).to_vec();
+        let first = app.lists[0].data.tasks[0].id;
+        let third = app.lists[0].data.tasks[2].id;
+        app.lists[0].data.tasks[0].completed = true;
+        app.lists[0].data.tasks[1].completed = true;
+        focus(&ctx, &mut app, FocusItem::Task(list, first).id());
+        key(&ctx, &mut app, Key::Backspace, command | Modifiers::SHIFT);
+        app.clear_animation.as_mut().unwrap().1 =
             std::time::Instant::now() - std::time::Duration::from_secs(1);
         idle(&ctx, &mut app);
-        assert_eq!(ctx.memory(|m| m.focused()), expected);
+        assert_eq!(
+            ctx.memory(|m| m.focused()),
+            Some(FocusItem::Task(list, third).id())
+        );
+        key(&ctx, &mut app, Key::End, Modifiers::NONE);
+        for expected in [
+            Some(FocusItem::Task(list, third).id()),
+            Some(Id::new(("new-task", list))),
+        ] {
+            key(&ctx, &mut app, Key::Delete, Modifiers::NONE);
+            app.delete_animation.as_mut().unwrap().2 =
+                std::time::Instant::now() - std::time::Duration::from_secs(1);
+            idle(&ctx, &mut app);
+            assert_eq!(ctx.memory(|m| m.focused()), expected);
+        }
+        cleanup(&app);
     }
-    cleanup(&app);
 }
 
 #[test]
@@ -955,7 +964,7 @@ fn reference_uses_shared_bindings_and_native_delete_names() {
         ("Settings (main screens)", OPEN_SETTINGS),
         ("Quick add", QUICK_ADD),
         ("Find tasks and History", FIND),
-        ("New list (main screens)", NEW_LIST),
+        ("New list (Lists, list, Settings)", NEW_LIST),
         ("Move completed tasks to History", CLEAR_COMPLETED),
         ("Delete the task", DELETE_TASK),
     ] {

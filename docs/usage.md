@@ -8,7 +8,7 @@ Press `Ctrl+/` (`Cmd+/` on macOS) to show the in-app keyboard shortcut reference
 
 Press Escape from a list to open the overview. Arrow keys move between list cards in the displayed grid; Enter or Space opens the focused list and puts the cursor in task entry. Escape returns to the card you left. The back control and double-clicking a list title also open the overview.
 
-`Ctrl+Shift+N` opens list creation from any main screen. You can also select **+ New list**. Enter a name, optionally choose an accent, and press Enter to create it. Escape cancels.
+`Ctrl+Shift+N` opens list creation from Lists, a list, or Settings. You can also select **+ New list**. Enter a name, optionally choose an accent, and press Enter to create it. Escape cancels.
 
 Open a list card's settings to rename, recolor, or delete it. **Delete list** requires activating **Confirm delete list** a second time; at least one list must remain.
 
@@ -30,7 +30,7 @@ Space on a focused task row toggles completion. `Alt+Up` and `Alt+Down` move tha
 
 Drag a task vertically to reorder it. Drag right past the threshold to complete or reactivate it. Drag left to reveal Edit and Delete, then drag right to close those actions.
 
-`Ctrl+Shift+Backspace` (`Cmd+Shift+Delete` on macOS) or **Clear completed** moves completed tasks into the list's restorable History section. With no completed tasks, it leaves the list file untouched. Deleting a task removes it instead of archiving it.
+`Ctrl+Shift+Backspace` (`Shift+Cmd+Delete` on macOS) or **Clear completed** moves completed tasks into the list's restorable History section. With no completed tasks, it leaves the list file untouched. Deleting a task removes it instead of archiving it.
 
 Select **Show history**, then **Restore** to return a task to the bottom of the list as incomplete, with its subtasks intact.
 
