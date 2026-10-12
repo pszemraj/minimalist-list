@@ -86,9 +86,7 @@ impl MinimalistApp {
                 let use_folder = ui
                     .add(Button::new(self.rich("Use typed path", 15.0, palette.muted)).frame(false))
                     .clicked();
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.label(self.rich("Enter applies", 12.0, palette.muted));
-                });
+                ui.label(self.rich("Enter applies", 12.0, palette.muted));
                 let (submit, _) = text_input_shortcuts(ui, &workspace_response);
                 // Enter submits path edits. Explicitly using the current folder
                 // can still persist a launch-only workspace selection.
