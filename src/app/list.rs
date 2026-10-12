@@ -717,10 +717,12 @@ impl MinimalistApp {
                 if let Some(index) = self.list_index(list_id) {
                     let tasks = &mut self.lists[index].data.tasks;
                     if let Some(source) = tasks.iter().position(|task| task.id == task_id) {
-                        let task = tasks.remove(source);
-                        let target = target.min(tasks.len());
-                        tasks.insert(target, task);
-                        self.save_list_index(index);
+                        let target = target.min(tasks.len() - 1);
+                        if source != target {
+                            let task = tasks.remove(source);
+                            tasks.insert(target, task);
+                            self.save_list_index(index);
+                        }
                     }
                 }
             }

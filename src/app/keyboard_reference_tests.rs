@@ -4,7 +4,7 @@ use super::*;
 
 #[test]
 fn shortcuts_reference_round_trips_from_main_screens_for_ctrl_and_cmd() {
-    for command in [
+    for (command, slash_modifiers) in [
         Modifiers {
             ctrl: true,
             command: true,
@@ -15,12 +15,17 @@ fn shortcuts_reference_round_trips_from_main_screens_for_ctrl_and_cmd() {
             command: true,
             ..Modifiers::NONE
         },
-    ] {
+    ]
+    .into_iter()
+    .flat_map(|command| [(command, command), (command, command | Modifiers::SHIFT)])
+    {
         let (ctx, mut app) = test_app();
         let list = app.lists[0].key;
         app.lists[0].data.tasks.push(Task::new("Keep this task"));
         idle(&ctx, &mut app);
         key(&ctx, &mut app, Key::Slash, Modifiers::NONE);
+        assert!(app.shortcuts.is_none());
+        key(&ctx, &mut app, Key::Slash, Modifiers::SHIFT);
         assert!(app.shortcuts.is_none());
         for screen in 0..3 {
             match screen {
@@ -29,10 +34,10 @@ fn shortcuts_reference_round_trips_from_main_screens_for_ctrl_and_cmd() {
                 _ => key(&ctx, &mut app, Key::Comma, command),
             }
             let original = ctx.memory(|memory| memory.focused());
-            key(&ctx, &mut app, Key::Slash, command);
+            key(&ctx, &mut app, Key::Slash, slash_modifiers);
             assert!(app.shortcuts.is_some());
             assert_ne!(ctx.memory(|memory| memory.focused()), original);
-            key(&ctx, &mut app, Key::Slash, command);
+            key(&ctx, &mut app, Key::Slash, slash_modifiers);
             key(&ctx, &mut app, Key::Delete, Modifiers::NONE);
             key(&ctx, &mut app, Key::N, command);
             assert!(app.shortcuts.is_some());

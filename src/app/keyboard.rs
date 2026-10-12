@@ -261,7 +261,8 @@ impl MinimalistApp {
         if egui::Popup::is_any_open(ctx) {
             return;
         }
-        if take_shortcut(ctx, SHOW_SHORTCUTS) {
+        // Some layouts need Shift or Alt to type the logical '/' key.
+        if ctx.input_mut(|input| input.consume_shortcut(&SHOW_SHORTCUTS)) {
             self.open_shortcuts();
             return;
         }

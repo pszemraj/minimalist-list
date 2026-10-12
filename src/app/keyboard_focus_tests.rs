@@ -183,6 +183,60 @@ fn overlays_opened_during_removal_do_not_restore_the_removed_row() {
 }
 
 #[test]
+fn settings_rename_keeps_external_changes_unless_a_local_draft_is_pending() {
+    for close in [Key::Escape, Key::N] {
+        for draft in ["untouched", "pending", "submitted", "left", "reverted"] {
+            let (ctx, mut app) = test_app();
+            let list = app.lists[0].key;
+            let original = app.lists[0].data.title.clone();
+            key(&ctx, &mut app, Key::Comma, Modifiers::COMMAND);
+            if draft != "untouched" {
+                focus(&ctx, &mut app, Id::new(("settings-list-name", list)));
+                key(&ctx, &mut app, Key::A, Modifiers::COMMAND);
+                type_text(&ctx, &mut app, "Local rename");
+                match draft {
+                    "submitted" => key(&ctx, &mut app, Key::Enter, Modifiers::NONE),
+                    "left" => key(&ctx, &mut app, Key::Tab, Modifiers::NONE),
+                    "reverted" => {
+                        key(&ctx, &mut app, Key::A, Modifiers::COMMAND);
+                        type_text(&ctx, &mut app, &original);
+                    }
+                    _ => {}
+                }
+            }
+
+            let mut external = app.lists[0].clone();
+            external.data.title = "Renamed elsewhere while Settings is open".into();
+            storage::save_list(&external).unwrap();
+            app.next_scan = std::time::Instant::now();
+            app.scan_external_changes();
+            assert_eq!(app.lists[0].data.title, external.data.title);
+            let expected = if draft == "pending" {
+                "Local rename"
+            } else {
+                &external.data.title
+            };
+            assert_eq!(app.rename_input, expected, "visible draft: {draft}");
+            let modifiers = if close == Key::N {
+                Modifiers::COMMAND | Modifiers::SHIFT
+            } else {
+                Modifiers::NONE
+            };
+            key(&ctx, &mut app, close, modifiers);
+            assert_eq!(app.lists[0].data.title, expected, "{draft}, {close:?}");
+            assert_eq!(
+                storage::load_workspace(&app.workspace).unwrap().lists[0]
+                    .data
+                    .title,
+                expected,
+                "saved title: {draft}, {close:?}"
+            );
+            cleanup(&app);
+        }
+    }
+}
+
+#[test]
 fn new_list_from_settings_saves_rename_and_clears_return_session() {
     for command in [
         Modifiers::CTRL | Modifiers::COMMAND,

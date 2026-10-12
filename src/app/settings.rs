@@ -362,9 +362,12 @@ impl MinimalistApp {
     /// Panics if an internally resolved list index becomes invalid.
     pub(super) fn rename_list(&mut self, list_id: Uuid) {
         let title = self.rename_input.trim();
-        if title.is_empty() {
+        // Only apply a local draft; external reloads may have changed the title
+        // since Settings opened or this field was last submitted.
+        if title.is_empty() || title == self.rename_baseline.trim() {
             return;
         }
+        self.rename_baseline.clone_from(&self.rename_input);
         if let Some(index) = self.list_index(list_id)
             && self.lists[index].data.title != title
         {

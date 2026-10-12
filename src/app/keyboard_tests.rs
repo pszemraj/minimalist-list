@@ -317,7 +317,64 @@ fn task_commands_edit_complete_reorder_delete_and_keep_identity() {
     let (ctx, mut app) = test_app();
     let list = app.lists[0].key;
     app.lists[0].data.tasks = ["First", "Second", "Third"].map(Task::new).to_vec();
+    app.save_list_index(0);
     idle(&ctx, &mut app);
+    let path = app.lists[0].path.clone();
+    let first = app.lists[0].data.tasks[0].id;
+    for (edge, movement) in [(Key::Home, Key::ArrowUp), (Key::End, Key::ArrowDown)] {
+        focus(&ctx, &mut app, FocusItem::Task(list, first).id());
+        key(&ctx, &mut app, edge, Modifiers::NONE);
+        let focused = ctx.memory(|memory| memory.focused());
+        let order: Vec<_> = app.lists[0].data.tasks.iter().map(|task| task.id).collect();
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_times(
+                std::fs::FileTimes::new().set_modified(
+                    std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000),
+                ),
+            )
+            .unwrap();
+        let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+        key(&ctx, &mut app, movement, Modifiers::ALT);
+        frame(
+            &ctx,
+            &mut app,
+            vec![Event::Key {
+                key: movement,
+                physical_key: None,
+                pressed: true,
+                repeat: true,
+                modifiers: Modifiers::ALT,
+            }],
+            430.0,
+        );
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().modified().unwrap(),
+            modified
+        );
+        assert_eq!(ctx.memory(|memory| memory.focused()), focused);
+        assert_eq!(
+            app.lists[0]
+                .data
+                .tasks
+                .iter()
+                .map(|task| task.id)
+                .collect::<Vec<_>>(),
+            order
+        );
+        assert_eq!(
+            storage::load_workspace(&app.workspace).unwrap().lists[0]
+                .data
+                .tasks
+                .iter()
+                .map(|task| task.id)
+                .collect::<Vec<_>>(),
+            order
+        );
+    }
+    focus(&ctx, &mut app, Id::new(("new-task", list)));
     key(&ctx, &mut app, Key::ArrowDown, Modifiers::NONE);
     let first = app.lists[0].data.tasks[0].id;
     assert_eq!(

@@ -96,6 +96,7 @@ pub struct MinimalistApp {
 
     workspace_input: String,
     rename_input: String,
+    rename_baseline: String,
     delete_armed: bool,
     next_scan: Instant,
     last_pin_state: Option<bool>,
@@ -216,6 +217,7 @@ impl MinimalistApp {
             history_open: false,
             workspace_input,
             rename_input: String::new(),
+            rename_baseline: String::new(),
             delete_armed: false,
             next_scan: Instant::now() + SCAN_INTERVAL,
             last_pin_state: None,
@@ -435,6 +437,7 @@ impl MinimalistApp {
             .and_then(|id| self.list_index(id))
             .map(|index| self.lists[index].data.title.clone())
             .unwrap_or_default();
+        self.rename_baseline.clone_from(&self.rename_input);
         self.workspace_input = self.settings.workspace_path.clone();
         self.delete_armed = false;
         self.begin_transition(1.0);
@@ -488,10 +491,14 @@ impl MinimalistApp {
                 match self.screen.clone() {
                     Screen::List(id) if self.list_index(id).is_none() => self.go_to_overview(),
                     Screen::Settings => {
-                        if self
-                            .settings_list_id
-                            .is_some_and(|id| self.list_index(id).is_none())
+                        if let Some(index) =
+                            self.settings_list_id.and_then(|id| self.list_index(id))
                         {
+                            if self.rename_input.trim() == self.rename_baseline.trim() {
+                                self.rename_input.clone_from(&self.lists[index].data.title);
+                                self.rename_baseline.clone_from(&self.rename_input);
+                            }
+                        } else {
                             self.settings_list_id = None;
                         }
                     }

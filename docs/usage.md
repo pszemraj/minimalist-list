@@ -2,7 +2,7 @@
 
 Shortcuts work while the application has keyboard focus. On macOS, use Command in place of Ctrl, except list switching uses Control on every platform. Home and End are Fn+Left and Fn+Right on MacBook keyboards.
 
-Press `Ctrl+/` (`Cmd+/` on macOS) to show the in-app keyboard shortcut reference. Use Up/Down, Page Up/Page Down, or Home/End to scroll it. Escape or **Close** returns focus to the control you left. Quick add drafts and Find queries remain available underneath the reference.
+Press `Ctrl+/` (`Cmd+/` on macOS) to show the in-app keyboard shortcut reference. Keyboard layouts that require Shift to type `/` are supported. Use Up/Down, Page Up/Page Down, or Home/End to scroll it. Escape or **Close** returns focus to the control you left. Quick add drafts and Find queries remain available underneath the reference.
 
 <img src="../assets/shortcuts.jpg" alt="The keyboard shortcut reference on Windows" width="360">
 
@@ -30,7 +30,7 @@ Click task text to edit it inline. Enter or leaving the field saves; Escape canc
 
 Use the circle on the left to complete or reactivate a task. It is keyboard-focusable, so Space or Enter also toggles it.
 
-Space on a focused task row toggles completion. `Alt+Up` and `Alt+Down` move that task one position (Option on macOS), keeping it focused. Forward Delete on a focused task row removes it (`Fn+Delete` on Mac keyboards). These row commands do not apply while editing text.
+Space on a focused task row toggles completion. `Alt+Up` and `Alt+Down` move that task one position (Option on macOS), keeping it focused. Moving past the first or last position leaves the list file untouched. Forward Delete on a focused task row removes it (`Fn+Delete` on Mac keyboards). These row commands do not apply while editing text.
 
 Drag a task vertically to reorder it. Drag right past the threshold to complete or reactivate it. Drag left to reveal Edit and Delete, then drag right to close those actions.
 
@@ -52,7 +52,7 @@ Escape dismisses one layer at a time: an open dropdown, the shortcut reference, 
 
 ## Window and appearance settings
 
-`Ctrl+,` opens Settings from Lists or a list. Escape returns to the previous screen and restores focus. Applied preferences remain saved; leaving a list-name field applies its rename, including when `Ctrl+Shift+N` opens list creation. Typing a workspace path requires Enter or **Use typed path** to switch folders. Enter on an unchanged path preserves the current list and saved workspace selection.
+`Ctrl+,` opens Settings from Lists or a list. Escape returns to the previous screen and restores focus. Applied preferences remain saved; leaving a list-name field applies its rename, including when `Ctrl+Shift+N` opens list creation. Closing Settings without editing the name preserves renames reloaded from disk. Typing a workspace path requires Enter or **Use typed path** to switch folders. Enter on an unchanged path preserves the current list and saved workspace selection.
 
 The header's `pin` control toggles always-on-top mode. When native window decorations are disabled, drag the title to move the window and use the visible `x` control to close it.
 
