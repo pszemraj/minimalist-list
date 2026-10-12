@@ -42,6 +42,9 @@ pub(super) const BACK_TO_LISTS: KeyboardShortcut =
 #[cfg(target_os = "macos")]
 pub(super) const BACK_TO_LISTS: KeyboardShortcut =
     KeyboardShortcut::new(Modifiers::COMMAND, Key::OpenBracket);
+/// Returns to Lists outside editors, including an empty task entry.
+pub(super) const BACKSPACE_TO_LISTS: KeyboardShortcut =
+    KeyboardShortcut::new(Modifiers::NONE, Key::Backspace);
 /// Moves completed tasks to History.
 pub(super) const CLEAR_COMPLETED: KeyboardShortcut = KeyboardShortcut::new(
     Modifiers {
@@ -95,6 +98,8 @@ pub(super) struct KeyboardState {
     pub(super) settings_return: Option<Id>,
     pub(super) overlay_return: Option<Id>,
     pub(super) overview_list: Option<Uuid>,
+    pub(super) settings_rows: Vec<Vec<Id>>,
+    pub(super) settings_sections: Vec<usize>,
     anchor: Option<(Id, FocusItem)>,
 }
 
@@ -152,6 +157,8 @@ fn shortcut_for_platform(binding: KeyboardShortcut, mac: bool) -> String {
         Key::ArrowRight => "Right",
         Key::Home if mac => "Fn+Left",
         Key::End if mac => "Fn+Right",
+        Key::PageUp if mac => "Fn+Up",
+        Key::PageDown if mac => "Fn+Down",
         Key::Backspace if mac => "Delete",
         Key::Delete if mac => "Fn+Delete",
         key => key.name(),
@@ -205,6 +212,10 @@ pub(super) fn shortcut_groups() -> Vec<ShortcutGroup> {
             "Inside a list",
             vec![
                 ("Back to Lists", shortcut(BACK_TO_LISTS)),
+                (
+                    "Back to Lists (empty entry or outside text)",
+                    shortcut(BACKSPACE_TO_LISTS),
+                ),
                 ("Add a task from entry", plain(Key::Enter)),
                 ("Focus the first task from entry", plain(Key::ArrowDown)),
                 ("Next / previous list", pair(NEXT_LIST, PREVIOUS_LIST)),
@@ -239,6 +250,24 @@ pub(super) fn shortcut_groups() -> Vec<ShortcutGroup> {
                 ("Save an edit / submit a form", plain(Key::Enter)),
                 ("Save an inline edit and continue", plain(Key::Tab)),
                 ("Cancel an inline edit or list creation", plain(Key::Escape)),
+            ],
+        ),
+        (
+            "Settings",
+            vec![
+                ("Previous / next row", "Up / Down".into()),
+                (
+                    "Move within choices / adjust sliders",
+                    "Left / Right".into(),
+                ),
+                (
+                    "Previous / next section",
+                    pair(
+                        KeyboardShortcut::new(Modifiers::NONE, Key::PageUp),
+                        KeyboardShortcut::new(Modifiers::NONE, Key::PageDown),
+                    ),
+                ),
+                ("Activate the focused control", "Enter / Space".into()),
             ],
         ),
         (
@@ -351,8 +380,12 @@ impl MinimalistApp {
             self.keyboard_escape();
             return;
         }
+        if matches!(self.screen, Screen::Settings) {
+            self.settings_keyboard(ctx);
+            return;
+        }
         if let Screen::List(list) = self.screen {
-            if take_shortcut(ctx, BACK_TO_LISTS) {
+            if take_shortcut(ctx, BACK_TO_LISTS) || self.take_backspace_to_lists(ctx, list) {
                 self.go_to_overview();
             } else if take_shortcut(ctx, PREVIOUS_LIST) {
                 self.cycle_list(list, true);
@@ -364,6 +397,76 @@ impl MinimalistApp {
                 self.task_keyboard(ctx, list);
             }
         }
+    }
+
+    fn take_backspace_to_lists(&self, ctx: &egui::Context, list: Uuid) -> bool {
+        let empty_entry = self.new_task.is_empty()
+            && ctx.memory(|memory| memory.focused()) == Some(Id::new(("new-task", list)));
+        if self.editing.is_some()
+            || self.subtasks_for.is_some()
+            || self.revealed.is_some()
+            || self.history_open
+            || (ctx.text_edit_focused() && !empty_entry)
+        {
+            return false;
+        }
+        // A held deletion may empty the field, but must not then navigate away.
+        let fresh_press = ctx.input(|input| {
+            input.events.iter().any(|event| {
+                matches!(
+                    event,
+                    Event::Key { key: Key::Backspace, pressed: true, repeat: false, modifiers, .. }
+                    if modifiers.matches_exact(Modifiers::NONE)
+                )
+            })
+        });
+        fresh_press && take_shortcut(ctx, BACKSPACE_TO_LISTS)
+    }
+
+    fn settings_keyboard(&mut self, ctx: &egui::Context) {
+        let focused = ctx.memory(|memory| memory.focused());
+        let Some((row, column)) =
+            self.keyboard
+                .settings_rows
+                .iter()
+                .enumerate()
+                .find_map(|(row, ids)| {
+                    ids.iter()
+                        .position(|id| Some(*id) == focused)
+                        .map(|column| (row, column))
+                })
+        else {
+            return;
+        };
+        let rows = &self.keyboard.settings_rows;
+        let section = self
+            .keyboard
+            .settings_sections
+            .partition_point(|start| *start <= row)
+            - 1;
+        let (target_row, target_column) = if take_key(ctx, Key::ArrowUp, Modifiers::NONE) {
+            (row.saturating_sub(1), column)
+        } else if take_key(ctx, Key::ArrowDown, Modifiers::NONE) {
+            ((row + 1).min(rows.len() - 1), column)
+        } else if take_key(ctx, Key::PageUp, Modifiers::NONE) {
+            let Some(previous) = section.checked_sub(1) else {
+                return;
+            };
+            (self.keyboard.settings_sections[previous], 0)
+        } else if take_key(ctx, Key::PageDown, Modifiers::NONE) {
+            let Some(next) = self.keyboard.settings_sections.get(section + 1) else {
+                return;
+            };
+            (*next, 0)
+        } else if rows[row].len() > 1 && take_key(ctx, Key::ArrowLeft, Modifiers::NONE) {
+            (row, column.saturating_sub(1))
+        } else if rows[row].len() > 1 && take_key(ctx, Key::ArrowRight, Modifiers::NONE) {
+            (row, (column + 1).min(rows[row].len() - 1))
+        } else {
+            return;
+        };
+        let target = &rows[target_row];
+        self.focus_now(ctx, target[target_column.min(target.len() - 1)]);
     }
 
     fn keyboard_escape(&mut self) {

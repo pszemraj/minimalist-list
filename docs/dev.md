@@ -9,6 +9,7 @@ src/app/keyboard.rs                  Keyboard commands and transient focus resto
 src/app/keyboard_tests.rs            Headless keyboard interaction journeys
 src/app/keyboard_focus_tests.rs      Focus restoration and Settings regressions
 src/app/keyboard_reference_tests.rs  Shortcut reference interactions and native labels
+src/app/keyboard_navigation_tests.rs Backspace and Settings arrow navigation journeys
 src/app/list.rs                      List screen and task interactions
 src/app/overlays.rs                  Quick add, cross-list search, and keyboard reference
 src/app/overview.rs                  List-card overview

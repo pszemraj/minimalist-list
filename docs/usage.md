@@ -1,6 +1,6 @@
 # Using Minimalist List
 
-Shortcuts work while the application has keyboard focus. On macOS, use Command in place of Ctrl, except list switching uses Control on every platform. Home and End are Fn+Left and Fn+Right on MacBook keyboards.
+Shortcuts work while the application has keyboard focus. On macOS, use Command in place of Ctrl, except list switching uses Control on every platform. Home and End are Fn+Left and Fn+Right on MacBook keyboards; Page Up and Page Down are Fn+Up and Fn+Down.
 
 Press `Ctrl+/` (`Cmd+/` on macOS) to show the in-app keyboard shortcut reference. Keyboard layouts that require Shift to type `/` are supported. Use Up/Down, Page Up/Page Down, or Home/End to scroll it. Escape or **Close** returns focus to the control you left. Quick add drafts and Find queries remain available underneath the reference.
 
@@ -8,7 +8,7 @@ Press `Ctrl+/` (`Cmd+/` on macOS) to show the in-app keyboard shortcut reference
 
 ## Manage lists
 
-Press `Alt+Left` (`Cmd+[` on macOS) from a list to open the overview, with the card you left focused. Arrow keys move between list cards in the displayed grid; Enter or Space opens the focused list and puts the cursor in task entry. The back control and double-clicking a list title also open the overview. Backspace keeps its normal text-editing behavior.
+Press Backspace (`Delete` on macOS) from an empty task entry or a focused task row to open the overview, with the card you left focused. Backspace keeps deleting text while an entry or editor contains text, and holding it until the entry is empty does not navigate away. Close subtasks, History, or revealed row actions with Escape first. `Alt+Left` (`Cmd+[` on macOS), the back control, and double-clicking a list title also open the overview. Arrow keys move between list cards in the displayed grid; Enter or Space opens the focused list and puts the cursor in task entry.
 
 `Ctrl+Shift+N` opens list creation from Lists, a list, or Settings. You can also select **+ New list**. Enter a name, optionally choose an accent, and press Enter to create it. Escape cancels.
 
@@ -46,7 +46,7 @@ Select **Show history**, then **Restore** to return a task to the bottom of the 
 
 `Ctrl+Tab` and `Ctrl+Shift+Tab` move between lists, including on macOS, where Command+Tab switches applications.
 
-Tab and Shift+Tab reach individual controls, including list-card settings, task completion, subtasks, delete actions, History restoration, and Settings. Focused controls are outlined and scroll into view. Arrow keys inside text fields and Settings sliders retain their usual editing behavior.
+Tab and Shift+Tab reach individual controls, including list-card settings, task completion, subtasks, delete actions, History restoration, and Settings. Focused controls are outlined and scroll into view. Left and Right retain their usual text-editing and slider-adjustment behavior.
 
 Enter and Space activate controls once per press, including across focus changes and overlay dismissal. Typing spaces and holding editing or navigation keys retain their normal repeat behavior.
 
@@ -55,6 +55,8 @@ Escape dismisses one layer per press: an open dropdown, the shortcut reference, 
 ## Window and appearance settings
 
 `Ctrl+,` opens Settings from Lists or a list, including layouts that require Shift to type a comma. Escape returns to the previous screen and restores focus. Applied preferences remain saved; leaving a list-name field applies its rename, including when `Ctrl+Shift+N` opens list creation. Closing Settings without editing the name preserves renames reloaded from disk. Typing a workspace path requires Enter or **Use typed path** to switch folders. Enter on an unchanged path preserves the current list and saved workspace selection.
+
+In Settings, use Up/Down to move between rows and Left/Right to move within a row of choices. Enter or Space activates the focused control. Left/Right adjust a focused slider or move the cursor in a text field. Page Up/Page Down jump between Workspace, Window, Appearance, and Current list, scrolling the focused control into view.
 
 The header's `pin` control toggles always-on-top mode. When native window decorations are disabled, drag the title to move the window and use the visible `x` control to close it.
 

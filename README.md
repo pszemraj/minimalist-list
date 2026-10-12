@@ -87,6 +87,8 @@ desktops use the installed desktop entry and icon for the app launcher and switc
 
 Open a list and type `Buy groceries` into the field at the top. Enter adds the task at the top of the list and returns focus to the field. See [list management](docs/usage.md#manage-lists) to create more lists.
 
+Press Backspace (`Delete` on macOS) when task entry is empty to return to Lists. Use arrows to choose a list and Enter to open it.
+
 Press `Ctrl+/` (`Cmd+/` on macOS) to see the keyboard shortcuts in the app.
 
 ## Documentation
