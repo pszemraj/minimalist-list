@@ -3,6 +3,167 @@
 use super::*;
 
 #[test]
+fn held_row_actions_wait_for_release_before_acting_again() {
+    for action in [Key::Delete, Key::Space, Key::Enter] {
+        let (ctx, mut app) = test_app();
+        let list = app.lists[0].key;
+        app.lists[0].data.tasks = ["A", "B", "C", "D"].map(Task::new).to_vec();
+        app.save_list_index(0);
+        let first = app.lists[0].data.tasks[0].id;
+        let second = app.lists[0].data.tasks[1].id;
+        focus(&ctx, &mut app, FocusItem::Task(list, first).id());
+        let press = |ctx: &egui::Context, app: &mut MinimalistApp| {
+            frame(
+                ctx,
+                app,
+                vec![Event::Key {
+                    key: action,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false, // egui detects repeats until a release arrives.
+                    modifiers: Modifiers::NONE,
+                }],
+                430.0,
+            );
+        };
+        press(&ctx, &mut app);
+        if action == Key::Enter {
+            assert_eq!(app.editing, Some((list, first)));
+            key(&ctx, &mut app, Key::Escape, Modifiers::NONE);
+        }
+        if let Some((_, _, started)) = &mut app.delete_animation {
+            *started = std::time::Instant::now() - std::time::Duration::from_secs(1);
+        }
+        idle(&ctx, &mut app);
+        let expected = if action == Key::Delete { second } else { first };
+        let count = if action == Key::Delete { 3 } else { 4 };
+        assert_eq!(app.lists[0].data.tasks.len(), count);
+        assert_eq!(app.lists[0].data.tasks[0].completed, action == Key::Space);
+        let path = app.lists[0].path.clone();
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_times(
+                std::fs::FileTimes::new().set_modified(
+                    std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000),
+                ),
+            )
+            .unwrap();
+        let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+        let saved = std::fs::read(&path).unwrap();
+        for _ in 0..5 {
+            press(&ctx, &mut app);
+            assert!(
+                ctx.input(|input| input.raw.events.iter().any(|event| matches!(event,
+                    Event::Key { key, pressed: true, repeat: true, .. } if *key == action
+                )))
+            );
+            if let Some((_, _, started)) = &mut app.delete_animation {
+                *started = std::time::Instant::now() - std::time::Duration::from_secs(1);
+            }
+            idle(&ctx, &mut app);
+            assert!(
+                app.editing.is_none(),
+                "held {action:?} must not reopen editing"
+            );
+            assert_eq!(app.lists[0].data.tasks.len(), count, "held {action:?}");
+            assert_eq!(app.lists[0].data.tasks[0].completed, action == Key::Space);
+            assert_eq!(
+                ctx.memory(|m| m.focused()),
+                Some(FocusItem::Task(list, expected).id())
+            );
+            assert_eq!(std::fs::read(&path).unwrap(), saved);
+            assert_eq!(
+                std::fs::metadata(&path).unwrap().modified().unwrap(),
+                modified
+            );
+            assert!(app.lists[0].data.archive.is_empty());
+        }
+        // A release followed by a fresh press must still perform the action.
+        frame(
+            &ctx,
+            &mut app,
+            vec![Event::Key {
+                key: action,
+                physical_key: None,
+                pressed: false,
+                repeat: false,
+                modifiers: Modifiers::NONE,
+            }],
+            430.0,
+        );
+        key(&ctx, &mut app, action, Modifiers::NONE);
+        if action == Key::Enter {
+            assert_eq!(app.editing, Some((list, first)));
+        } else if action == Key::Space {
+            assert!(!app.lists[0].data.tasks[0].completed);
+        } else {
+            app.delete_animation.as_mut().unwrap().2 =
+                std::time::Instant::now() - std::time::Duration::from_secs(1);
+            idle(&ctx, &mut app);
+            assert_eq!(app.lists[0].data.tasks.len(), 2);
+            assert_eq!(
+                storage::load_workspace(&app.workspace).unwrap().lists[0]
+                    .data
+                    .tasks
+                    .len(),
+                2
+            );
+        }
+        cleanup(&app);
+    }
+}
+
+#[test]
+fn held_arrows_keep_navigating_and_reordering() {
+    for modifiers in [Modifiers::NONE, Modifiers::ALT] {
+        for movement in [Key::ArrowDown, Key::ArrowUp] {
+            let (ctx, mut app) = test_app();
+            let list = app.lists[0].key;
+            app.lists[0].data.tasks = ["A", "B", "C", "D"].map(Task::new).to_vec();
+            app.save_list_index(0);
+            let start = if movement == Key::ArrowDown { 0 } else { 3 };
+            let task = app.lists[0].data.tasks[start].id;
+            focus(&ctx, &mut app, FocusItem::Task(list, task).id());
+            for step in 1..=2 {
+                frame(
+                    &ctx,
+                    &mut app,
+                    vec![Event::Key {
+                        key: movement,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers,
+                    }],
+                    430.0,
+                );
+                let position = if start == 0 { step } else { start - step };
+                let expected = if modifiers == Modifiers::ALT {
+                    assert_eq!(app.lists[0].data.tasks[position].id, task);
+                    assert_eq!(
+                        storage::load_workspace(&app.workspace).unwrap().lists[0]
+                            .data
+                            .tasks[position]
+                            .id,
+                        task
+                    );
+                    task
+                } else {
+                    app.lists[0].data.tasks[position].id
+                };
+                assert_eq!(
+                    ctx.memory(|m| m.focused()),
+                    Some(FocusItem::Task(list, expected).id())
+                );
+            }
+            cleanup(&app);
+        }
+    }
+}
+
+#[test]
 fn pointer_openers_restore_the_clicked_control() {
     for (label, card) in [
         ("add", false),

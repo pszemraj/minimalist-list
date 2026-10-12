@@ -337,7 +337,18 @@ fn task_commands_edit_complete_reorder_delete_and_keep_identity() {
             )
             .unwrap();
         let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
-        key(&ctx, &mut app, movement, Modifiers::ALT);
+        frame(
+            &ctx,
+            &mut app,
+            vec![Event::Key {
+                key: movement,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Modifiers::ALT,
+            }],
+            430.0,
+        );
         frame(
             &ctx,
             &mut app,
@@ -363,6 +374,18 @@ fn task_commands_edit_complete_reorder_delete_and_keep_identity() {
                 .map(|task| task.id)
                 .collect::<Vec<_>>(),
             order
+        );
+        frame(
+            &ctx,
+            &mut app,
+            vec![Event::Key {
+                key: movement,
+                physical_key: None,
+                pressed: false,
+                repeat: false,
+                modifiers: Modifiers::ALT,
+            }],
+            430.0,
         );
         assert_eq!(
             storage::load_workspace(&app.workspace).unwrap().lists[0]

@@ -449,6 +449,16 @@ impl MinimalistApp {
         // A closing modal can delay the row's response regaining focus by a pass.
         // Record its owner before applying a command that can remove the row.
         self.keyboard.anchor = Some((row, FocusItem::Task(list, task.id)));
+        // Row actions run once per press; consume repeats so widgets cannot
+        // activate them again after focus moves. Navigation keeps repeating.
+        ctx.input_mut(|input| {
+            input.events.retain(|event| {
+                !matches!(event, Event::Key {
+                key: Key::Delete | Key::Space | Key::Enter,
+                pressed: true, repeat: true, modifiers, ..
+            } if modifiers.matches_exact(Modifiers::NONE))
+            });
+        });
         if take_shortcut(ctx, MOVE_TASK_UP) {
             self.apply_row_action(RowAction::Reorder(
                 list,
