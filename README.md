@@ -8,7 +8,7 @@ Minimalist List is a native desktop task list built with `egui` and `eframe`, in
 
 ## Install and run
 
-Install [Rust](https://rust-lang.org/tools/install/) 1.95 or newer on Linux, macOS, or Windows. On Windows, install the Visual Studio C++ build tools when prompted by the Rust installer. On Ubuntu, install the native windowing and OpenGL build dependencies:
+Install [Rust](https://rust-lang.org/tools/install/) 1.95 or newer on Linux, macOS, or Windows. On Windows, install the Visual Studio C++ build tools when prompted by the Rust installer. On macOS, install Xcode Command Line Tools (`xcode-select --install`) if they are not already present. On Ubuntu, install the native windowing and OpenGL build dependencies:
 
 ```bash
 sudo apt install \
@@ -75,15 +75,15 @@ On Linux:
 bash scripts/install-linux.sh
 ```
 
-These scripts build the release binary, add an app-menu shortcut, and enable startup at sign-in. Sign-in starts the app in the tray; opening the app-menu shortcut shows the window. Close or minimize hides it from the taskbar, and the tray menu provides **Show Minimalist List** and **Quit**. Quit the running app before reinstalling. On Linux this requires an X11 or XWayland session with a desktop tray host; without one, the window opens normally.
-
-On macOS, install the binary with:
+On macOS:
 
 ```bash
-cargo install --locked --path .
+bash scripts/install-macos.sh
 ```
 
-The Windows and Linux shortcuts use the installed binary's absolute path and do not require changing `PATH`. See [startup and tray behavior](docs/usage.md#startup-and-system-tray) to disable startup or launch manually.
+These scripts build the release binary and enable startup at sign-in. Windows and Linux get an app-menu shortcut; macOS gets `~/Applications/Minimalist List.app`, which runs as a menu-bar utility without a Dock icon. Sign-in starts hidden; an ordinary fresh launch shows the window. Close or minimize hides the window, and the tray menu provides **Show Minimalist List** and **Quit**. Quit the running app before reinstalling. On Linux this requires an X11 or XWayland session with a desktop tray host; without one, the window opens normally.
+
+Startup entries use the installed binary's absolute path and do not require changing `PATH`. See [startup and tray behavior](docs/usage.md#startup-and-system-tray) to disable startup or launch manually. macOS installation and menu-bar behavior require native validation; cross-platform checks alone do not establish them.
 The app and tray use the same checklist shape on Windows, macOS, and Linux;
 macOS renders the tray icon using the menu bar's appearance. Linux Wayland
 desktops use the installed desktop entry and icon for the app launcher and switcher.

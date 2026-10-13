@@ -150,6 +150,16 @@ fn main() -> eframe::Result {
         }
         options
     };
+    #[cfg(target_os = "macos")]
+    let options = {
+        let mut options = options;
+        options.event_loop_builder = Some(Box::new(move |builder| {
+            use winit::platform::macos::{ActivationPolicy, EventLoopBuilderExtMacOS};
+            builder.with_activation_policy(ActivationPolicy::Accessory);
+            builder.with_activate_ignoring_other_apps(!start_hidden);
+        }));
+        options
+    };
     eframe::run_native(
         "Minimalist List",
         options,

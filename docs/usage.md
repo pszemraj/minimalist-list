@@ -74,10 +74,12 @@ Choose folders and launch-time overrides through [workspace settings](storage.md
 
 ## Startup and system tray
 
-The [Windows and Linux installation scripts](../README.md#install-and-run) enable startup for the current user at sign-in. The startup shortcut passes `--start-hidden`; an ordinary launch opens the window. The flag can also be used with `--data-dir`. If a usable tray is unavailable at startup, the window opens so the app remains accessible.
+The [installation scripts](../README.md#install-and-run) enable startup for the current user at sign-in. The startup entry passes `--start-hidden`; an ordinary launch opens the window. The flag can also be used with `--data-dir`. If a usable tray is unavailable at startup, the window opens so the app remains accessible.
 
-Closing or minimizing the window saves any inline edit and hides it from the taskbar into the system tray. Open the tray icon's menu and choose **Show Minimalist List** to restore it or **Quit** to exit. Activating the icon also restores the window on desktops that support it. Shared-folder polling continues while hidden. Use the tray to reopen a running instance; launching another copy from the app menu starts a separate instance.
+Closing or minimizing the window saves any inline edit and hides it in the system tray (the menu bar on macOS), removing its taskbar entry where applicable. Open the tray icon's menu and choose **Show Minimalist List** to restore it or **Quit** to exit. Activating the icon also restores the window on desktops that support it. Shared-folder polling continues while hidden. Use the tray to reopen a running instance. Windows and Linux app shortcuts can start a separate instance; reopening a running app bundle in Finder is not a supported way to restore its hidden window.
 
 Linux uses X11 or XWayland for hiding and restoration when a desktop tray host is available, such as GNOME's AppIndicator extension or KDE's system tray. Without a usable tray, the app keeps the normal window backend and close/minimize behavior without a startup warning. If the tray host disappears while hidden, the window returns. Exiting saves inline edits and pending clear/delete actions.
 
-To disable startup on Windows, remove **Minimalist List** from the Startup folder (`shell:startup` in Run). On Linux, remove `${XDG_CONFIG_HOME:-$HOME/.config}/autostart/minimalist-list.desktop`. Reinstalling enables startup again. macOS startup registration is not provided by these scripts.
+On macOS, the app uses the menu bar without a Dock icon, including while its window is open. The installer places the app in `~/Applications` and a launch agent in `~/Library/LaunchAgents`. Hidden startup avoids requesting activation over another app. **Quit** exits for the remainder of the session; the launch agent does not keep restarting it.
+
+To disable startup on Windows, remove **Minimalist List** from the Startup folder (`shell:startup` in Run). On Linux, remove `${XDG_CONFIG_HOME:-$HOME/.config}/autostart/minimalist-list.desktop`. On macOS, quit the app and remove `~/Library/LaunchAgents/io.github.pszemraj.minimalist-list.plist`. Reinstalling enables startup again.
