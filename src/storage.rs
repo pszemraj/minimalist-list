@@ -466,8 +466,19 @@ fn default_workspace_dir_from(
     }
 }
 
+#[cfg(not(test))]
 fn settings_path() -> PathBuf {
     settings_path_from(PathPlatform::current(), &|name| env::var_os(name))
+}
+
+/// Gives each test thread its own settings file, away from the user's settings.
+#[cfg(test)]
+fn settings_path() -> PathBuf {
+    thread_local! {
+        static PATH: PathBuf = env::temp_dir()
+            .join(format!("minimalist-list-settings-{}.json", Uuid::new_v4()));
+    }
+    PATH.with(Clone::clone)
 }
 
 fn settings_path_from(

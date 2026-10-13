@@ -43,15 +43,12 @@ Run the checks before committing:
 ```bash
 cargo check --locked --workspace --all-targets --all-features
 cargo fmt --all --check
-cargo test --locked -- --test-threads=1
-cargo test --locked --features eframe/inspection -- --test-threads=1
+cargo test --locked
+cargo test --locked --features eframe/inspection
 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 cargo build --locked --workspace --all-targets --all-features
 rustdoc-checker src --strict
 ```
-
-Run tests serially: GUI tests share the isolated settings file, so parallel tests
-can overwrite each other's saved preferences and workspace selection.
 
 ## GUI inspection
 
@@ -66,7 +63,7 @@ EGUI_INSPECTION=127.0.0.1:5741 \
 cargo run --locked --features eframe/inspection -- --data-dir target/gui-check/workspace
 ```
 
-Attach the GUI inspector to port 5741. Use a distinct port and settings directory for a second instance. XDG overrides apply to Linux; see [platform paths](storage.md#default-directories) for other systems.
+Attach the GUI inspector to port 5741. Use a distinct port and settings directory for a second instance. XDG overrides apply to Linux; see [platform paths](storage.md#default-directories) for other systems. On macOS, settings follow `HOME`: run the built binary with `HOME` set to a directory under `target/` to keep GUI trials away from your own settings.
 
 Exercise the [task interactions](usage.md), both title modes, narrow dialogs, large fonts, pinned mode, and opacity over bright and dark backgrounds. Inspect saved JSON after mutations, restart to check persistence, and repeat the [shared-folder flows](storage.md#file-sync-behavior) with two instances. Check paths, shortcuts, and transparency on native macOS and Windows as well as Linux.
 
