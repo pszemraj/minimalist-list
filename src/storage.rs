@@ -185,7 +185,7 @@ pub fn load_workspace(root: &Path) -> Result<WorkspaceSnapshot, String> {
     paths.sort();
 
     if paths.is_empty() {
-        let list = create_list(root, "Tasks", Accent::Mint)?;
+        let list = create_list(root, "Tasks", Accent::default())?;
         return Ok(WorkspaceSnapshot {
             lists: vec![list],
             fingerprint: workspace_fingerprint(root)?,

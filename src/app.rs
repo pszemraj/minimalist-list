@@ -205,7 +205,7 @@ impl MinimalistApp {
             request_task_focus: initial.is_some(),
             creating_list: false,
             new_list_title: String::new(),
-            new_list_accent: Accent::Mint,
+            new_list_accent: Accent::default(),
             request_list_focus: false,
             editing: None,
             edit_text: String::new(),

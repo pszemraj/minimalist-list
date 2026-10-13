@@ -231,7 +231,7 @@ fn list_creation_arrows_choose_color_then_return_to_name_for_submission() {
         key_edge(&ctx, &mut app, Key::Enter, true);
     }
     assert!(app.creating_list);
-    assert_eq!(app.new_list_accent, Accent::Charcoal);
+    assert_eq!(app.new_list_accent, Accent::Crimson);
     assert_eq!(ctx.memory(|m| m.focused()), Some(Id::new("new-list-title")));
     key_edge(&ctx, &mut app, Key::Enter, false);
     key(&ctx, &mut app, Key::Enter, Modifiers::NONE);
@@ -241,7 +241,7 @@ fn list_creation_arrows_choose_color_then_return_to_name_for_submission() {
         .iter()
         .find(|list| list.data.title == "Arrow-created list")
         .unwrap();
-    assert_eq!(created.data.accent, Accent::Charcoal);
+    assert_eq!(created.data.accent, Accent::Crimson);
     cleanup(&app);
 }
 
