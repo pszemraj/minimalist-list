@@ -8,7 +8,7 @@ Minimalist List is a native desktop task list built with `egui` and `eframe`, in
 
 ## Install and run
 
-Install [Rust](https://rust-lang.org/tools/install/) 1.95 or newer on Linux, macOS, or Windows. On Windows, install the Visual Studio C++ build tools when prompted by the Rust installer. On macOS, install Xcode Command Line Tools (`xcode-select --install`) if they are not already present. On Ubuntu, install the native windowing and OpenGL build dependencies:
+Requires [Rust 1.95+](https://rustup.rs/), Visual Studio C++ build tools on Windows, and Xcode Command Line Tools on macOS (`xcode-select --install`). Ubuntu build dependencies:
 
 ```bash
 sudo apt install \
@@ -27,24 +27,6 @@ git clone https://github.com/pszemraj/minimalist-list.git
 cd minimalist-list
 cargo run
 ```
-
-If Rust is already installed through rustup, update it and build from the repository directory:
-
-```bash
-rustup update stable
-rustc +stable --version
-cargo +stable build --locked --release
-```
-
-Confirm that the reported version is at least 1.95. Cargo's [`rust-version`](https://doc.rust-lang.org/cargo/reference/rust-version.html) rejects older compilers; it does not upgrade them. The explicit [`+stable`](https://rust-lang.github.io/rustup/overrides.html#toolchain-override-shorthand) selects the updated toolchain even if an older directory override exists.
-
-On macOS or Linux, if `rustup` is missing or `+stable` fails, check which installation supplies the commands:
-
-```bash
-command -v rustc cargo rustup
-```
-
-A separate installation, such as Homebrew's Rust, must be upgraded through its package manager, or replaced on `PATH` by the rustup installation.
 
 Check the version without opening a window:
 
