@@ -13,15 +13,21 @@ mkdir -p "$data_home/applications" "$data_home/icons/hicolor/scalable/apps" \
 cp "$repository/assets/minimalist-list.svg" "$data_home/icons/hicolor/scalable/apps/"
 
 # Desktop entries unescape strings before parsing Exec; this is not shell quoting.
-desktop_exec=$(printf '%s' "$install_root/bin/minimalist-list" | \
-  sed 's/\\/\\\\\\\\/g; s/"/\\\\"/g; s/[$`]/\\\\&/g; s/%/%%/g')
+desktop_exec="$install_root/bin/minimalist-list"
+desktop_exec=${desktop_exec//\\/\\\\\\\\}
+desktop_exec=${desktop_exec//\"/\\\\\"}
+desktop_exec=${desktop_exec//\$/\\\\\$}
+desktop_exec=${desktop_exec//\`/\\\\\`}
+desktop_exec=${desktop_exec//%/%%}
+desktop_command='exec \\"\\$@\\"'
 write_entry() {
+  # GIO checks the executable before expanding %% in the installed path.
   cat > "$1" <<EOF
 [Desktop Entry]
 Type=Application
 Name=Minimalist List
 Comment=Native minimalist task lists
-Exec="$desktop_exec"$2
+Exec=/bin/sh -c "$desktop_command" minimalist-list "$desktop_exec"$2
 Icon=minimalist-list
 Terminal=false
 Categories=Utility;Office;
