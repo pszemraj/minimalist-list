@@ -52,7 +52,7 @@ bash scripts/install-macos.sh
 
 Windows and Linux add an app-menu shortcut; macOS installs `~/Applications/Minimalist List.app`.
 
-Sign-in starts the app hidden in the tray or menu bar; an ordinary launch opens the window. Close or minimize hides it again. Use the icon's **Show Minimalist List** or **Quit** action. Linux hiding requires X11/XWayland and a tray host; without one, the window opens normally.
+Sign-in starts the app hidden in the tray or menu bar; an ordinary launch opens the window. Close hides it again, as does minimize on Windows and Linux. Use the icon's **Show Minimalist List** or **Quit** action. Linux hiding requires X11/XWayland and a tray host; without one, the window opens normally.
 
 Quit before reinstalling. See [startup and tray behavior](docs/usage.md#startup-and-system-tray) to disable startup.
 

@@ -129,6 +129,8 @@ fn main() -> eframe::Result {
             .with_min_inner_size([320.0, 280.0])
             .with_transparent(true)
             .with_visible(!start_hidden)
+            // A minimized macOS window stays in the Dock after hiding; close hides instead.
+            .with_minimize_button(!cfg!(target_os = "macos"))
             .with_decorations(settings.window_decorations)
             .with_window_level(level),
         renderer: eframe::Renderer::Glow,

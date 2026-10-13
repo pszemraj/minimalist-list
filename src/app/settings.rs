@@ -171,11 +171,12 @@ impl MinimalistApp {
                 palette.muted,
             ));
             if self.tray.is_some() {
-                ui.label(self.rich(
-                    "Close or minimize hides the window. Use the tray menu to Show or Quit.",
-                    12.0,
-                    palette.muted,
-                ));
+                let hint = if cfg!(target_os = "macos") {
+                    "Close hides the window. Use the menu-bar icon to Show or Quit."
+                } else {
+                    "Close or minimize hides the window. Use the tray menu to Show or Quit."
+                };
+                ui.label(self.rich(hint, 12.0, palette.muted));
             }
         });
         if window_changed {
