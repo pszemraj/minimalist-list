@@ -28,47 +28,31 @@ cd minimalist-list
 cargo run
 ```
 
-Check the version without opening a window:
+For desktop installation and startup at sign-in, run the installer for your platform.
 
-```bash
-cargo run -- --version
-```
-
-Build and run an optimized binary with:
-
-```bash
-cargo build --release
-./target/release/minimalist-list
-```
-
-On Windows, run `.\target\release\minimalist-list.exe` instead.
-
-`Cargo.lock` is committed, so these commands use the dependency versions shipped with the application.
-
-To install for the current user on Windows, run from PowerShell:
+Windows (PowerShell):
 
 ```powershell
 .\scripts\install-windows.ps1
 ```
 
-On Linux:
+Linux:
 
 ```bash
 bash scripts/install-linux.sh
 ```
 
-On macOS:
+macOS:
 
 ```bash
 bash scripts/install-macos.sh
 ```
 
-These scripts build the release binary and enable startup at sign-in. Windows and Linux get an app-menu shortcut; macOS gets `~/Applications/Minimalist List.app`, which runs as a menu-bar utility without a Dock icon. Sign-in starts hidden; an ordinary fresh launch shows the window. Close or minimize hides the window, and the tray menu provides **Show Minimalist List** and **Quit**. Quit the running app before reinstalling. On Linux this requires an X11 or XWayland session with a desktop tray host; without one, the window opens normally.
+Windows and Linux add an app-menu shortcut; macOS installs `~/Applications/Minimalist List.app`.
 
-Startup entries use the installed binary's absolute path and do not require changing `PATH`. See [startup and tray behavior](docs/usage.md#startup-and-system-tray) to disable startup or launch manually. macOS installation and menu-bar behavior require native validation; cross-platform checks alone do not establish them.
-The app and tray use the same checklist shape on Windows, macOS, and Linux;
-macOS renders the tray icon using the menu bar's appearance. Linux Wayland
-desktops use the installed desktop entry and icon for the app launcher and switcher.
+Sign-in starts the app hidden in the tray or menu bar; an ordinary launch opens the window. Close or minimize hides it again. Use the icon's **Show Minimalist List** or **Quit** action. Linux hiding requires X11/XWayland and a tray host; without one, the window opens normally.
+
+Quit before reinstalling. See [startup and tray behavior](docs/usage.md#startup-and-system-tray) to disable startup.
 
 ## Start using it
 
