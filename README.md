@@ -2,9 +2,11 @@
 
 Minimalist List is a native desktop task list built with `egui` and `eframe`, inspired by MinimaList. It runs without an account or hosted service.
 
-<img src="assets/ui.png" alt="Minimalist List on Windows in the default Charcoal palette, showing tasks, subtasks, and completion" width="320">
-
-*Default Charcoal appearance on Windows, with sample tasks and an expanded checklist.*
+<p align="center">
+  <img src="assets/ui.png" alt="Minimalist List on Windows in the default Charcoal palette, showing tasks, subtasks, and completion" width="360">
+  <br>
+  <sub>Charcoal theme on Windows · Tasks and subtasks</sub>
+</p>
 
 ## Install and run
 
