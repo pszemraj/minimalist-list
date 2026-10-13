@@ -63,22 +63,27 @@ On Windows, run `.\target\release\minimalist-list.exe` instead.
 
 `Cargo.lock` is committed, so these commands use the dependency versions shipped with the application.
 
-To install the binary for the current user:
+To install for the current user on Windows, run from PowerShell:
+
+```powershell
+.\scripts\install-windows.ps1
+```
+
+On Linux:
+
+```bash
+bash scripts/install-linux.sh
+```
+
+These scripts build the release binary, add an app-menu shortcut, and enable startup at sign-in. Sign-in starts the app in the tray; opening the app-menu shortcut shows the window. Close or minimize hides it from the taskbar, and the tray menu provides **Show Minimalist List** and **Quit**. Quit the running app before reinstalling. On Linux this requires an X11 or XWayland session with a desktop tray host; without one, the window opens normally.
+
+On macOS, install the binary with:
 
 ```bash
 cargo install --locked --path .
 ```
 
-On Linux, install the desktop entry and checklist icon as well:
-
-```bash
-mkdir -p "${XDG_DATA_HOME:-$HOME/.local/share}/applications" \
-  "${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/scalable/apps"
-cp minimalist-list.desktop "${XDG_DATA_HOME:-$HOME/.local/share}/applications/"
-cp assets/minimalist-list.svg "${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/scalable/apps/"
-```
-
-The desktop entry expects `minimalist-list` to be available on the desktop session's `PATH`.
+The Windows and Linux shortcuts use the installed binary's absolute path and do not require changing `PATH`. See [startup and tray behavior](docs/usage.md#startup-and-system-tray) to disable startup or launch manually.
 The app and tray use the same checklist shape on Windows, macOS, and Linux;
 macOS renders the tray icon using the menu bar's appearance. Linux Wayland
 desktops use the installed desktop entry and icon for the app launcher and switcher.
