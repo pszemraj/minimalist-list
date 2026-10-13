@@ -29,24 +29,37 @@ Keep source files below 1,000 lines and split by actual responsibilities rather 
 
 ## Verification
 
+On Linux, isolate settings and temporary fixtures before running the checks:
+
+```bash
+mkdir -p target/agent-checks/tmp target/agent-checks/config target/agent-checks/data
+export TMPDIR="$PWD/target/agent-checks/tmp"
+export XDG_CONFIG_HOME="$PWD/target/agent-checks/config"
+export XDG_DATA_HOME="$PWD/target/agent-checks/data"
+```
+
 Run the checks before committing:
 
 ```bash
 cargo check --locked --workspace --all-targets --all-features
 cargo fmt --all --check
-cargo test --locked
-cargo test --locked --features eframe/inspection
+cargo test --locked -- --test-threads=1
+cargo test --locked --features eframe/inspection -- --test-threads=1
 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 cargo build --locked --workspace --all-targets --all-features
 rustdoc-checker src --strict
 ```
+
+Run tests serially: GUI tests share the isolated settings file, so parallel tests
+can overwrite each other's saved preferences and workspace selection.
 
 ## GUI inspection
 
 On Linux, use separate settings and workspace directories to keep GUI trials away from everyday tasks:
 
 ```bash
-mkdir -p target/gui-check/config target/gui-check/data
+mkdir -p target/gui-check/tmp target/gui-check/config target/gui-check/data
+TMPDIR="$PWD/target/gui-check/tmp" \
 XDG_CONFIG_HOME="$PWD/target/gui-check/config" \
 XDG_DATA_HOME="$PWD/target/gui-check/data" \
 EGUI_INSPECTION=127.0.0.1:5741 \
