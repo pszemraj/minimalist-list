@@ -9,6 +9,8 @@ label=io.github.pszemraj.minimalist-list
 
 cargo install --locked --path "$repository" --root "$staging" --force
 mkdir -p "$app/Contents/MacOS" "$agents"
+# Replace rather than overwrite: macOS caches code signatures per file.
+rm -f "$app/Contents/MacOS/minimalist-list"
 cp "$staging/bin/minimalist-list" "$app/Contents/MacOS/minimalist-list"
 
 cat > "$app/Contents/Info.plist" <<EOF
@@ -24,6 +26,7 @@ cat > "$app/Contents/Info.plist" <<EOF
 </dict>
 </plist>
 EOF
+codesign --force --sign - "$app"
 
 # ProgramArguments are literal strings; only XML characters need escaping.
 binary_xml=$(printf '%s' "$app/Contents/MacOS/minimalist-list" | \
