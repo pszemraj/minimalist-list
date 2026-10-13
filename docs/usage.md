@@ -4,7 +4,7 @@ Shortcuts work while the application has keyboard focus. On macOS, use Command i
 
 Press `Ctrl+/` (`Cmd+/` on macOS) to show the in-app keyboard shortcut reference. Keyboard layouts that require Shift to type `/` are supported. Use Up/Down, Page Up/Page Down, or Home/End to scroll it. Escape or **Close** returns focus to the control you left. Quick add drafts and Find queries remain available underneath the reference.
 
-<img src="../assets/shortcuts.jpg" alt="The keyboard shortcut reference on Windows" width="360">
+<img src="../assets/shortcuts.png" alt="The keyboard shortcut reference on Windows, showing Backspace and task navigation" width="360">
 
 ## Manage lists
 
@@ -14,7 +14,7 @@ Press Backspace (`Delete` on macOS) from an empty task entry or a focused task r
 
 Open a list card's settings to rename, recolor, or delete it. **Delete list** requires activating **Confirm delete list** a second time; holding Enter or Space cannot confirm it. At least one list must remain.
 
-<img src="../assets/lists.jpg" alt="Four example lists with accent colors, task previews, and completion counts" width="360">
+<img src="../assets/lists.png" alt="Four example lists with accent colors, task previews, and completion counts" width="360">
 
 ## Capture and edit tasks
 
@@ -46,7 +46,7 @@ Down from the last task reaches **Show history**, or Down from task entry when n
 
 `Ctrl+F` or the header's `find` action searches task and subtask text across every list, including completed tasks and History. Use Up and Down to select a result, Enter to open it, and Escape to close the overlay. The selected task scrolls into view and is briefly highlighted.
 
-<img src="../assets/find.jpg" alt="Find showing matching tasks from the Projects and Errands lists" width="360">
+<img src="../assets/find.png" alt="Find showing matching tasks from the Projects and Errands lists" width="360">
 
 `Ctrl+Tab` and `Ctrl+Shift+Tab` move between lists, including on macOS, where Command+Tab switches applications.
 
