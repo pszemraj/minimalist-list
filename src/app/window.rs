@@ -29,6 +29,18 @@ impl MinimalistApp {
         }
     }
 
+    /// Starts in the tray, or shows the window if no usable tray exists.
+    ///
+    /// # Arguments
+    ///
+    /// - `ctx` - Native application's egui context.
+    pub fn start_hidden(&mut self, ctx: &egui::Context) {
+        let available = self.tray.as_ref().is_some_and(Tray::available);
+        if !self.hide_window(ctx, available) {
+            self.show_window(ctx);
+        }
+    }
+
     /// Describes the close control's current behavior.
     ///
     /// # Returns
@@ -244,6 +256,12 @@ mod tests {
         app.status = None;
         app.setup_tray(&ctx, false);
         assert!(app.status.is_none());
+        let output = ctx.run_logic(&Default::default(), |ctx| app.start_hidden(ctx));
+        assert!(!app.window_hidden);
+        assert!(
+            output.viewport_commands[&egui::ViewportId::ROOT]
+                .contains(&ViewportCommand::Visible(true))
+        );
         let output = ctx.run_logic(&Default::default(), |ctx| {
             app.handle_window_events(ctx, true, &[], false);
         });

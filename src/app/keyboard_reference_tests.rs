@@ -338,6 +338,17 @@ fn shortcuts_reference_dismissal_accepts_the_very_next_input() {
 fn reference_uses_shared_bindings_and_native_key_names() {
     for (binding, regular, mac) in [
         (SHOW_SHORTCUTS, "Ctrl+/", "Cmd+/"),
+        (BACKSPACE_TO_LISTS, "Backspace", "Delete"),
+        (
+            KeyboardShortcut::new(Modifiers::NONE, Key::PageUp),
+            "PageUp",
+            "Fn+Up",
+        ),
+        (
+            KeyboardShortcut::new(Modifiers::NONE, Key::PageDown),
+            "PageDown",
+            "Fn+Down",
+        ),
         (NEXT_LIST, "Ctrl+Tab", "Ctrl+Tab"),
         (PREVIOUS_LIST, "Ctrl+Shift+Tab", "Ctrl+Shift+Tab"),
         (CLEAR_COMPLETED, "Ctrl+Shift+Backspace", "Shift+Cmd+Delete"),
@@ -375,6 +386,10 @@ fn reference_uses_shared_bindings_and_native_key_names() {
         ("Find tasks and History", FIND),
         ("New list (Lists, list, Settings)", NEW_LIST),
         ("Back to Lists", BACK_TO_LISTS),
+        (
+            "Back to Lists (empty entry or outside text)",
+            BACKSPACE_TO_LISTS,
+        ),
         ("Move completed tasks to History", CLEAR_COMPLETED),
         ("Delete the task", DELETE_TASK),
     ] {

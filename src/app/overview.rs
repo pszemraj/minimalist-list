@@ -41,7 +41,12 @@ impl MinimalistApp {
                     1
                 };
                 let card_width = (width - 12.0 * (columns as f32 - 1.0)) / columns as f32;
-                self.overview_keyboard(ui.ctx(), columns);
+                if self.creating_list {
+                    self.creation_keyboard(ui.ctx());
+                } else {
+                    self.overview_keyboard(ui.ctx(), columns);
+                }
+                self.keyboard.creation_choices.clear();
 
                 let cards: Vec<(Uuid, String, Accent, usize, usize, Vec<String>)> = self
                     .lists
@@ -132,12 +137,23 @@ impl MinimalistApp {
                                             ))
                                             .corner_radius(12.0),
                                     );
+                                    self.keyboard.creation_choices.push(response.id);
                                     if response.clicked() {
                                         self.new_list_accent = accent;
+                                        // Selecting a color does not also submit the form.
+                                        take_key(ui.ctx(), egui::Key::Enter, egui::Modifiers::NONE);
+                                        take_key(ui.ctx(), egui::Key::Space, egui::Modifiers::NONE);
+                                        ui.memory_mut(|memory| {
+                                            memory.request_focus(Id::new("new-list-title"))
+                                        });
                                     }
                                 }
                             });
-                            ui.label(self.rich("Enter creates · Esc cancels", 12.0, palette.muted));
+                            ui.label(self.rich(
+                                "Down: colors · Up: name · Enter creates · Esc cancels",
+                                12.0,
+                                palette.muted,
+                            ));
                             let (submit, cancel) = text_input_shortcuts(ui, &response);
                             if submit {
                                 self.create_list();

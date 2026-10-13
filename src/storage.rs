@@ -108,7 +108,45 @@ pub fn save_settings(settings: &Settings) -> Result<(), String> {
     write_json_atomic(&settings_path(), settings)
 }
 
-/// Expands, creates, and canonicalizes a workspace directory.
+/// Removes surrounding quotes or Unix shell escapes from a typed workspace path.
+///
+/// # Returns
+///
+/// The literal path text to pass to workspace normalization.
+pub fn parse_workspace_input(raw: &str) -> String {
+    parse_workspace_input_from(raw, cfg!(target_os = "windows"))
+}
+
+fn parse_workspace_input_from(raw: &str, windows: bool) -> String {
+    let raw = raw.trim();
+    for quote in ['\'', '"'] {
+        if let Some(path) = raw
+            .strip_prefix(quote)
+            .and_then(|path| path.strip_suffix(quote))
+        {
+            return path.to_owned();
+        }
+    }
+    if windows {
+        return raw.to_owned();
+    }
+    // Terminal drops and shell completion escape spaces and punctuation;
+    // a backslash before a letter or digit remains part of the name.
+    let mut path = String::with_capacity(raw.len());
+    let mut chars = raw.chars().peekable();
+    while let Some(character) = chars.next() {
+        match chars.peek() {
+            Some(&next) if character == '\\' && (next == ' ' || next.is_ascii_punctuation()) => {
+                path.push(next);
+                chars.next();
+            }
+            _ => path.push(character),
+        }
+    }
+    path
+}
+
+/// Expands, creates, and canonicalizes a literal workspace directory.
 ///
 /// # Returns
 ///
@@ -159,7 +197,7 @@ pub fn load_workspace(root: &Path) -> Result<WorkspaceSnapshot, String> {
     paths.sort();
 
     if paths.is_empty() {
-        let list = create_list(root, "Tasks", Accent::Mint)?;
+        let list = create_list(root, "Tasks", Accent::default())?;
         return Ok(WorkspaceSnapshot {
             lists: vec![list],
             fingerprint: workspace_fingerprint(root)?,
@@ -440,8 +478,19 @@ fn default_workspace_dir_from(
     }
 }
 
+#[cfg(not(test))]
 fn settings_path() -> PathBuf {
     settings_path_from(PathPlatform::current(), &|name| env::var_os(name))
+}
+
+/// Gives each test thread its own settings file, away from the user's settings.
+#[cfg(test)]
+fn settings_path() -> PathBuf {
+    thread_local! {
+        static PATH: PathBuf = env::temp_dir()
+            .join(format!("minimalist-list-settings-{}.json", Uuid::new_v4()));
+    }
+    PATH.with(Clone::clone)
 }
 
 fn settings_path_from(

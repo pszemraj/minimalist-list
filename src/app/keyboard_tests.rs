@@ -944,3 +944,6 @@ mod focus_regressions;
 
 #[path = "keyboard_reference_tests.rs"]
 mod reference;
+
+#[path = "keyboard_navigation_tests.rs"]
+mod navigation;

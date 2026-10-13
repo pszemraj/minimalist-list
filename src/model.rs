@@ -10,8 +10,8 @@ pub const FORMAT_VERSION: u32 = 1;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 /// Color accent assigned to a list.
 pub enum Accent {
-    #[default]
     Mint,
+    #[default]
     Charcoal,
     Crimson,
     Sand,

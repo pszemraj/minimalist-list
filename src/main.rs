@@ -1,5 +1,10 @@
 //! Native application entry point and window configuration.
 
+#![cfg_attr(
+    all(target_os = "windows", not(debug_assertions)),
+    windows_subsystem = "windows"
+)]
+
 mod app;
 mod model;
 mod storage;
@@ -21,6 +26,7 @@ const HELP: &str = concat!(
     "Usage: minimalist-list [OPTIONS]\n\n",
     "Options:\n",
     "      --data-dir <PATH>  Use PATH as the workspace for this launch\n",
+    "      --start-hidden     Start in the tray when available\n",
     "  -h, --help             Print help\n",
     "  -V, --version          Print version\n\n",
     "Workspace precedence: --data-dir, MINIMALIST_LIST_WORKSPACE, saved setting, platform default.\n",
@@ -28,7 +34,10 @@ const HELP: &str = concat!(
 
 #[derive(Debug, PartialEq, Eq)]
 enum LaunchAction {
-    Run { data_dir: Option<String> },
+    Run {
+        data_dir: Option<String>,
+        start_hidden: bool,
+    },
     Help,
     Version,
 }
@@ -36,12 +45,14 @@ enum LaunchAction {
 fn parse_launch_args(args: impl IntoIterator<Item = OsString>) -> Result<LaunchAction, String> {
     let mut args = args.into_iter();
     let mut data_dir = None;
+    let mut start_hidden = false;
 
     while let Some(argument) = args.next() {
         let text = argument.to_string_lossy();
         match text.as_ref() {
             "-h" | "--help" => return Ok(LaunchAction::Help),
             "-V" | "--version" => return Ok(LaunchAction::Version),
+            "--start-hidden" => start_hidden = true,
             "--data-dir" => {
                 let path = args
                     .next()
@@ -62,7 +73,10 @@ fn parse_launch_args(args: impl IntoIterator<Item = OsString>) -> Result<LaunchA
         }
     }
 
-    Ok(LaunchAction::Run { data_dir })
+    Ok(LaunchAction::Run {
+        data_dir,
+        start_hidden,
+    })
 }
 
 fn select_workspace_override(
@@ -77,8 +91,11 @@ fn select_workspace_override(
 }
 
 fn main() -> eframe::Result {
-    let data_dir = match parse_launch_args(env::args_os().skip(1)) {
-        Ok(LaunchAction::Run { data_dir }) => data_dir,
+    let (data_dir, start_hidden) = match parse_launch_args(env::args_os().skip(1)) {
+        Ok(LaunchAction::Run {
+            data_dir,
+            start_hidden,
+        }) => (data_dir, start_hidden),
         Ok(LaunchAction::Help) => {
             print!("{HELP}");
             return Ok(());
@@ -111,6 +128,9 @@ fn main() -> eframe::Result {
             .with_inner_size([520.0, 760.0])
             .with_min_inner_size([320.0, 280.0])
             .with_transparent(true)
+            .with_visible(!start_hidden)
+            // A minimized macOS window stays in the Dock after hiding; close hides instead.
+            .with_minimize_button(!cfg!(target_os = "macos"))
             .with_decorations(settings.window_decorations)
             .with_window_level(level),
         renderer: eframe::Renderer::Glow,
@@ -132,12 +152,25 @@ fn main() -> eframe::Result {
         }
         options
     };
+    #[cfg(target_os = "macos")]
+    let options = {
+        let mut options = options;
+        options.event_loop_builder = Some(Box::new(move |builder| {
+            use winit::platform::macos::{ActivationPolicy, EventLoopBuilderExtMacOS};
+            builder.with_activation_policy(ActivationPolicy::Accessory);
+            builder.with_activate_ignoring_other_apps(!start_hidden);
+        }));
+        options
+    };
     eframe::run_native(
         "Minimalist List",
         options,
         Box::new(move |cc| {
             let mut app = MinimalistApp::new(&cc.egui_ctx, settings, workspace_override, warning);
             app.setup_tray(&cc.egui_ctx, tray_supported);
+            if start_hidden {
+                app.start_hidden(&cc.egui_ctx);
+            }
             Ok(Box::new(app))
         }),
     )
@@ -153,7 +186,29 @@ mod tests {
         assert_eq!(
             action,
             Ok(LaunchAction::Run {
-                data_dir: Some("/cli".to_owned())
+                data_dir: Some("/cli".to_owned()),
+                start_hidden: false,
+            })
+        );
+    }
+
+    #[test]
+    fn hidden_start_keeps_workspace_arguments_and_normal_launch_stays_visible() {
+        assert_eq!(
+            parse_launch_args([
+                OsString::from("--start-hidden"),
+                OsString::from("--data-dir=/workspace with spaces"),
+            ]),
+            Ok(LaunchAction::Run {
+                data_dir: Some("/workspace with spaces".into()),
+                start_hidden: true,
+            })
+        );
+        assert_eq!(
+            parse_launch_args([]),
+            Ok(LaunchAction::Run {
+                data_dir: None,
+                start_hidden: false,
             })
         );
     }

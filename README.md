@@ -2,13 +2,15 @@
 
 Minimalist List is a native desktop task list built with `egui` and `eframe`, inspired by MinimaList. It runs without an account or hosted service.
 
-<img src="assets/ui.jpg" alt="Minimalist List on Windows, showing tasks, subtasks, and completion" width="320">
-
-*Windows example with sample tasks and an expanded checklist.*
+<p align="center">
+  <img src="assets/ui.png" alt="Minimalist List on Windows in the default Charcoal palette, showing tasks, subtasks, and completion" width="360">
+  <br>
+  <sub>Charcoal theme on Windows · Tasks and subtasks</sub>
+</p>
 
 ## Install and run
 
-Install [Rust](https://rust-lang.org/tools/install/) 1.95 or newer on Linux, macOS, or Windows. On Windows, install the Visual Studio C++ build tools when prompted by the Rust installer. On Ubuntu, install the native windowing and OpenGL build dependencies:
+Requires [Rust 1.95+](https://rustup.rs/), Visual Studio C++ build tools on Windows, and Xcode Command Line Tools on macOS (`xcode-select --install`). Ubuntu build dependencies:
 
 ```bash
 sudo apt install \
@@ -28,46 +30,37 @@ cd minimalist-list
 cargo run
 ```
 
-Check the version without opening a window:
+For desktop installation and startup at sign-in, run the installer for your platform.
 
-```bash
-cargo run -- --version
+Windows (PowerShell):
+
+```powershell
+.\scripts\install-windows.ps1
 ```
 
-Build and run an optimized binary with:
+Linux:
 
 ```bash
-cargo build --release
-./target/release/minimalist-list
+bash scripts/install-linux.sh
 ```
 
-On Windows, run `.\target\release\minimalist-list.exe` instead.
-
-`Cargo.lock` is committed, so these commands use the dependency versions shipped with the application.
-
-To install the binary for the current user:
+macOS:
 
 ```bash
-cargo install --locked --path .
+bash scripts/install-macos.sh
 ```
 
-On Linux, install the desktop entry and checklist icon as well:
+Windows and Linux add an app-menu shortcut; macOS installs `~/Applications/Minimalist List.app`.
 
-```bash
-mkdir -p "${XDG_DATA_HOME:-$HOME/.local/share}/applications" \
-  "${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/scalable/apps"
-cp minimalist-list.desktop "${XDG_DATA_HOME:-$HOME/.local/share}/applications/"
-cp assets/minimalist-list.svg "${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/scalable/apps/"
-```
+Sign-in starts the app hidden in the tray or menu bar; an ordinary launch opens the window. Close hides it again, as does minimize on Windows and Linux. Use the icon's **Show Minimalist List** or **Quit** action. Linux hiding requires X11/XWayland and a tray host; without one, the window opens normally.
 
-The desktop entry expects `minimalist-list` to be available on the desktop session's `PATH`.
-The app and tray use the same checklist shape on Windows, macOS, and Linux;
-macOS renders the tray icon using the menu bar's appearance. Linux Wayland
-desktops use the installed desktop entry and icon for the app launcher and switcher.
+Quit before reinstalling. See [startup and tray behavior](docs/usage.md#startup-and-system-tray) to disable startup.
 
 ## Start using it
 
 Open a list and type `Buy groceries` into the field at the top. Enter adds the task at the top of the list and returns focus to the field. See [list management](docs/usage.md#manage-lists) to create more lists.
+
+Press Backspace (`Delete` on macOS) when task entry is empty to return to Lists. Use arrows to choose a list and Enter to open it.
 
 Press `Ctrl+/` (`Cmd+/` on macOS) to see the keyboard shortcuts in the app.
 

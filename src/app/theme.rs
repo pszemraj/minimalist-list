@@ -206,7 +206,7 @@ impl MinimalistApp {
     ///
     /// # Returns
     ///
-    /// `true` when the value changed during this frame.
+    /// The toggle response, including its keyboard identity and changed state.
     pub(super) fn toggle_row(
         ui: &mut egui::Ui,
         id: Id,
@@ -214,7 +214,7 @@ impl MinimalistApp {
         value: &mut bool,
         font: FontId,
         palette: Palette,
-    ) -> bool {
+    ) -> egui::Response {
         let mut response = ui.add_sized([ui.available_width(), 36.0], Button::new("").frame(false));
         if response.clicked() {
             *value = !*value;
@@ -287,7 +287,7 @@ impl MinimalistApp {
             );
         }
 
-        response.changed()
+        response
     }
 
     /// Renders content inside the shared rounded surface-card frame.
