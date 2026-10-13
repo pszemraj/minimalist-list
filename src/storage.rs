@@ -108,7 +108,7 @@ pub fn save_settings(settings: &Settings) -> Result<(), String> {
     write_json_atomic(&settings_path(), settings)
 }
 
-/// Removes surrounding quotes or Unix space escapes from a typed workspace path.
+/// Removes surrounding quotes or Unix shell escapes from a typed workspace path.
 ///
 /// # Returns
 ///
@@ -128,10 +128,22 @@ fn parse_workspace_input_from(raw: &str, windows: bool) -> String {
         }
     }
     if windows {
-        raw.to_owned()
-    } else {
-        raw.replace("\\ ", " ")
+        return raw.to_owned();
     }
+    // Terminal drops and shell completion escape spaces and punctuation;
+    // a backslash before a letter or digit remains part of the name.
+    let mut path = String::with_capacity(raw.len());
+    let mut chars = raw.chars().peekable();
+    while let Some(character) = chars.next() {
+        match chars.peek() {
+            Some(&next) if character == '\\' && (next == ' ' || next.is_ascii_punctuation()) => {
+                path.push(next);
+                chars.next();
+            }
+            _ => path.push(character),
+        }
+    }
+    path
 }
 
 /// Expands, creates, and canonicalizes a literal workspace directory.

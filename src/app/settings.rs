@@ -122,7 +122,13 @@ impl MinimalistApp {
                 } else if use_folder.clicked()
                     || (submit && self.workspace_input != self.settings.workspace_path)
                 {
-                    self.switch_workspace(&storage::parse_workspace_input(&self.workspace_input));
+                    // An unchanged field holds the current literal path.
+                    let path = if self.workspace_input == self.settings.workspace_path {
+                        self.workspace_input.clone()
+                    } else {
+                        storage::parse_workspace_input(&self.workspace_input)
+                    };
+                    self.switch_workspace(&path);
                 } else if submit {
                     workspace_response.request_focus();
                 }
