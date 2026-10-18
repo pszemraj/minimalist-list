@@ -6,6 +6,9 @@
 )]
 
 mod app;
+mod instance;
+#[cfg(target_os = "macos")]
+mod macos;
 mod model;
 mod storage;
 mod tray;
@@ -116,12 +119,30 @@ fn main() -> eframe::Result {
     let workspace_override =
         select_workspace_override(data_dir, env::var_os("MINIMALIST_LIST_WORKSPACE"));
 
+    let requested_workspace = workspace_override
+        .as_deref()
+        .unwrap_or(&settings.workspace_path);
+    let requested_workspace = storage::normalize_workspace_path(requested_workspace)
+        .unwrap_or_else(|_| {
+            let fallback = storage::default_workspace_dir();
+            storage::normalize_workspace_path(&fallback.to_string_lossy()).unwrap_or(fallback)
+        });
+    let state_path = storage::window_state_path();
+    let state_dir = state_path
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let instance = match instance::claim(&requested_workspace, state_dir, start_hidden) {
+        Ok(instance::LaunchOutcome::Existing) => return Ok(()),
+        Ok(instance::LaunchOutcome::Primary(instance)) => instance,
+        Err(error) => return Err(eframe::Error::AppCreation(error.into())),
+    };
     let level = if settings.always_on_top {
         WindowLevel::AlwaysOnTop
     } else {
         WindowLevel::Normal
     };
     let options = eframe::NativeOptions {
+        persistence_path: Some(storage::window_state_path()),
         viewport: egui::ViewportBuilder::default()
             .with_app_id("minimalist-list")
             .with_icon(tray::icon_data())
@@ -167,6 +188,7 @@ fn main() -> eframe::Result {
         options,
         Box::new(move |cc| {
             let mut app = MinimalistApp::new(&cc.egui_ctx, settings, workspace_override, warning);
+            app.set_instance_guard(instance, &cc.egui_ctx);
             app.setup_tray(&cc.egui_ctx, tray_supported);
             if start_hidden {
                 app.start_hidden(&cc.egui_ctx);

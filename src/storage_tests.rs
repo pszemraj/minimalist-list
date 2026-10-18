@@ -105,13 +105,11 @@ fn native_paths_reuse_legacy_locations_independently() {
             let (native_data, native_config, legacy_data, legacy_config) = if overrides {
                 let data = case.join("native-data");
                 let config = case.join("native-config");
-                let xdg_data = case.join("xdg-data");
-                let xdg_config = case.join("xdg-config");
+                let xdg_data = home.join(".local/share");
+                let xdg_config = home.join(".config");
                 environment.extend([
                     ("LOCALAPPDATA", data.clone().into_os_string()),
                     ("APPDATA", config.clone().into_os_string()),
-                    ("XDG_DATA_HOME", xdg_data.clone().into_os_string()),
-                    ("XDG_CONFIG_HOME", xdg_config.clone().into_os_string()),
                 ]);
                 match platform {
                     PathPlatform::Windows => (data, config, xdg_data, xdg_config),

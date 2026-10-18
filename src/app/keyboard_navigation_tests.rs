@@ -285,7 +285,6 @@ fn backspace_returns_from_empty_entry_and_task_rows_to_their_overview_card() {
 #[test]
 fn settings_arrows_move_rows_and_page_keys_jump_sections() {
     let (ctx, mut app) = test_app();
-    let list = app.lists[0].key;
     key(&ctx, &mut app, Key::Comma, Modifiers::COMMAND);
     key(&ctx, &mut app, Key::ArrowDown, Modifiers::NONE);
     assert!(!ctx.text_edit_focused());
@@ -299,16 +298,9 @@ fn settings_arrows_move_rows_and_page_keys_jump_sections() {
     assert!(storage::load_settings().unwrap().always_on_top);
     key(&ctx, &mut app, Key::PageDown, Modifiers::NONE);
     assert!(!ctx.text_edit_focused());
+    let appearance = ctx.memory(|m| m.focused());
     key(&ctx, &mut app, Key::PageDown, Modifiers::NONE);
-    assert_eq!(
-        ctx.memory(|m| m.focused()),
-        Some(Id::new(("settings-list-name", list)))
-    );
-    let response = ctx
-        .read_response(Id::new(("settings-list-name", list)))
-        .unwrap();
-    assert!(response.interact_rect.is_positive());
-    key(&ctx, &mut app, Key::PageUp, Modifiers::NONE);
+    assert_eq!(ctx.memory(|m| m.focused()), appearance);
     key(&ctx, &mut app, Key::PageUp, Modifiers::NONE);
     assert_eq!(ctx.memory(|m| m.focused()), pin);
     key(&ctx, &mut app, Key::PageUp, Modifiers::NONE);
@@ -397,7 +389,9 @@ fn settings_horizontal_arrows_edit_text_and_adjust_sliders() {
     let opacity = app.settings.background_opacity;
     key(&ctx, &mut app, Key::ArrowLeft, Modifiers::NONE);
     assert!((app.settings.background_opacity - (opacity - 0.01)).abs() < 0.001);
-    key(&ctx, &mut app, Key::PageDown, Modifiers::NONE);
+    app.close_settings();
+    app.open_settings(Some(list));
+    idle(&ctx, &mut app);
     key(&ctx, &mut app, Key::A, Modifiers::COMMAND);
     type_text(&ctx, &mut app, "abcd");
     key(&ctx, &mut app, Key::Home, Modifiers::NONE);

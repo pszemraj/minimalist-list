@@ -2,7 +2,7 @@
 
 ## Workspace location
 
-Select a folder through **Settings -> Workspace -> Choose folder**, or enter a path and press Enter or **Use typed path**. The active folder is shown above the field. Any writable folder works, including a temporary directory. Selecting a folder opens its lists without moving the previous workspace's files.
+Select a folder through **Settings -> Workspace -> Choose folder**, or enter a path and press Enter or **Use typed path**. The active folder is shown above the field. Any writable folder works, including a temporary directory. Selecting a folder opens its lists without moving the previous workspace's files. A blank typed path does nothing. Pending task edits and list renames save before switching; a failed save keeps the original workspace open for recovery.
 
 Paths beginning with `~/` are expanded. Relative paths are resolved from the process working directory and stored as absolute runtime paths. Without a saved selection, the app uses its [platform default](#default-directories).
 
@@ -31,9 +31,11 @@ Workspace selection follows this order:
 
 The flag and environment variable do not replace the saved setting. Choosing a folder in the application does. Run `minimalist-list --help` for the command summary.
 
+If the selected workspace is temporarily unavailable at startup, its saved path is retained. The visible warning offers **Retry workspace** or **Choose workspace…**. Restore the original folder and retry to reopen it; navigating a temporary fallback does not replace the selection.
+
 ## Default directories
 
-Appearance, pinning, and workspace preferences are stored in the local settings file on each computer.
+Appearance, pinning, and workspace preferences are stored in the local settings file on each computer. Explicit nonempty `XDG_CONFIG_HOME` and `XDG_DATA_HOME` override the native settings and default data roots on every platform, respectively. The table shows defaults when those overrides are absent.
 
 | Platform | Default workspace | Local settings file |
 | --- | --- | --- |
@@ -52,6 +54,8 @@ settings file for both loading and saving. Legacy lookup uses `HOME`, including
 on Windows, as earlier versions did. No files are copied or moved. Fresh installs
 use the native defaults, and launch overrides and saved workspace selections
 keep the precedence shown above.
+
+`window.ron`, beside `settings.json`, stores native window geometry and framework state. Local `instances/` files coordinate launches for each workspace; they do not belong in a synced list folder. Unfinished entry drafts and deletion Undo are session-only and are not written into list JSON.
 
 ## File layout
 
@@ -75,7 +79,9 @@ Edits to different lists write different files, so file-sync services can transf
 
 If a sync service creates a conflict copy containing the same list UUID, the canonical UUID-named file wins. The conflict copy remains untouched and the application reports it.
 
-Every edit writes and flushes a temporary sibling file, then replaces the destination. The app checks disk every five seconds and reloads externally changed list files at the next scan. Reloads wait until inline editing or dragging finishes. A sync service controls when a file arrives on another computer.
+Every edit writes and flushes a temporary sibling file, then replaces the destination. The app checks disk every five seconds and reloads externally changed list files at the next scan. Reloads wait until task or child editing and dragging finish, and while unsaved list changes need recovery. A sync service controls when a file arrives on another computer.
+
+A failed write leaves its changes in memory, shows a visible warning, and offers **Retry save**. Restore folder access and retry before exiting or switching workspaces. Quick add instead retains its draft and destination until its own retry succeeds. Moving a task writes the destination before removing the source and attempts to roll back both lists if either write fails; the two list files are not a single atomic transaction.
 
 ## JSON format
 

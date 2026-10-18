@@ -1,31 +1,58 @@
-//! Subtask, deletion, completion-clearing, and history views.
+//! Measured checklist and read-only History views.
 
-use super::{
-    CLEAR_ANIMATION_SECONDS, DELETE_ANIMATION_SECONDS, MinimalistApp, keyboard::FocusItem,
-    text_input_shortcuts, theme::Palette,
+use super::{MinimalistApp, keyboard::FocusItem, text_input_shortcuts, theme::Palette};
+use crate::model::Task;
+use eframe::egui::{
+    self, Align, Button, CornerRadius, Frame, Id, Layout, Margin, Sense, Stroke, TextEdit, Vec2,
 };
-use crate::model::{ArchivedTask, Subtask, Task};
-use eframe::egui;
-use egui::{
-    Align, Button, CornerRadius, Frame, Id, Layout, Margin, Rect, Sense, Stroke, TextEdit, Vec2,
-};
-use std::time::Instant;
+use std::collections::HashSet;
 use uuid::Uuid;
 
+#[path = "task_operations.rs"]
+mod operations;
+
+#[derive(Default)]
+/// Session-only editors, recovery content, and expanded History entries.
+pub(super) struct TaskDetailsState {
+    pub(super) editor: Option<SubtaskEdit>,
+    deleted: Option<DeletedItem>,
+    expanded_history: HashSet<(Uuid, Uuid)>,
+    pub(super) move_task: Option<(Uuid, Uuid, Uuid)>,
+}
+
+/// A checklist text edit anchored to stable identities.
+pub(super) struct SubtaskEdit {
+    list: Uuid,
+    task: Uuid,
+    subtask: Uuid,
+    text: String,
+    request_focus: bool,
+}
+
+enum DeletedItem {
+    Task {
+        list: Uuid,
+        position: usize,
+        task: Task,
+    },
+    Subtask {
+        list: Uuid,
+        task: Uuid,
+        position: usize,
+        subtask: crate::model::Subtask,
+    },
+}
+
 impl MinimalistApp {
-    /// Renders the animated subtask editor for a task.
+    /// Renders checklist rows at their measured heights with reserved action space.
     ///
     /// # Arguments
     ///
-    /// - `ui` - Destination UI for the panel.
+    /// - `ui` - Destination panel.
     /// - `list_id` - Parent list identity.
-    /// - `task` - Task whose checklist is displayed.
-    /// - `palette` - Colors used to render the panel.
-    /// - `progress` - Panel reveal progress from zero to one.
-    ///
-    /// # Panics
-    ///
-    /// Panics if an internally resolved list index becomes invalid during an interaction.
+    /// - `task` - Task whose children are displayed.
+    /// - `palette` - Panel colors.
+    /// - `progress` - Reveal opacity from zero to one.
     pub(super) fn subtasks_panel(
         &mut self,
         ui: &mut egui::Ui,
@@ -34,525 +61,368 @@ impl MinimalistApp {
         palette: Palette,
         progress: f32,
     ) {
-        let full_height = 66.0 + task.subtasks.len() as f32 * 36.0;
-        let visible_height = (full_height * progress).max(1.0);
         ui.add_space(4.0 * progress);
-        let (clip_rect, _) = ui.allocate_exact_size(
-            Vec2::new(ui.available_width(), visible_height),
-            Sense::hover(),
-        );
-        let content_rect = Rect::from_min_size(
-            clip_rect.min + Vec2::new(0.0, -(1.0 - progress) * 10.0),
-            Vec2::new(clip_rect.width(), full_height),
-        );
-        let mut panel_ui = ui.new_child(
-            egui::UiBuilder::new()
-                .id_salt(("subtasks-panel-content", list_id, task.id))
-                .max_rect(content_rect)
-                .layout(Layout::top_down(Align::LEFT)),
-        );
-        panel_ui.set_clip_rect(clip_rect.intersect(ui.clip_rect()));
-        panel_ui.set_opacity(progress);
-        Frame::NONE
-            .fill(palette.raised)
-            .corner_radius(CornerRadius::same(12))
-            .inner_margin(Margin::same(12))
-            .show(&mut panel_ui, |ui| {
-                for subtask in &task.subtasks {
-                    let row = ui
-                        .scope_builder(
-                            egui::UiBuilder::new().id(Id::new((
-                                "subtask-row",
-                                list_id,
-                                task.id,
-                                subtask.id,
-                            ))),
-                            |ui| {
-                                ui.horizontal(|ui| {
-                                    let completion_progress =
-                                        ui.ctx().animate_bool_with_time_and_easing(
-                                            Id::new((
-                                                "subtask-complete",
-                                                list_id,
-                                                task.id,
-                                                subtask.id,
-                                            )),
-                                            subtask.completed,
-                                            0.20,
-                                            egui::emath::easing::cubic_out,
+        ui.scope(|ui| {
+            ui.set_opacity(progress);
+            Frame::NONE
+                .fill(palette.raised)
+                .corner_radius(CornerRadius::same(12))
+                .inner_margin(Margin::same(12))
+                .show(ui, |ui| {
+                    for subtask in &task.subtasks {
+                        let row = self.subtask_row(ui, list_id, task.id, subtask, palette);
+                        self.detail_spotlight(
+                            ui,
+                            row,
+                            (list_id, task.id, Some(subtask.id), false),
+                            palette,
+                        );
+                    }
+                    let input_font = self.content_font_id(15.0);
+                    let response = ui.add(
+                        TextEdit::singleline(&mut self.new_subtask)
+                            .id(Id::new(("new-subtask", list_id, task.id)))
+                            .font(input_font)
+                            .hint_text("Add subtask")
+                            .desired_width(f32::INFINITY),
+                    );
+                    let (submit, _) = text_input_shortcuts(ui, &response);
+                    self.track_focus(&response, FocusItem::Task(list_id, task.id));
+                    if submit {
+                        self.add_subtask(list_id, task.id);
+                        response.request_focus();
+                    }
+                });
+        });
+    }
+
+    fn subtask_row(
+        &mut self,
+        ui: &mut egui::Ui,
+        list: Uuid,
+        task: Uuid,
+        subtask: &crate::model::Subtask,
+        palette: Palette,
+    ) -> egui::Rect {
+        ui.push_id(("subtask-row", list, task, subtask.id), |ui| {
+            let width = ui.available_width();
+            let spacing = ui.spacing().item_spacing.x;
+            let text_width = (width - 56.0 - 2.0 * spacing).max(1.0);
+            ui.horizontal_top(|ui| {
+                let (rect, _) = ui.allocate_exact_size(Vec2::splat(28.0), Sense::hover());
+                let response = ui.interact(
+                    rect,
+                    FocusItem::Subtask(list, task, subtask.id).id(),
+                    Sense::click(),
+                );
+                let response = self.completion_control(
+                    ui,
+                    response,
+                    subtask.completed,
+                    f32::from(subtask.completed),
+                    palette,
+                    &subtask.text,
+                );
+                self.track_focus(&response, FocusItem::Subtask(list, task, subtask.id));
+                if response.clicked() {
+                    self.toggle_subtask(list, task, subtask.id);
+                }
+                ui.allocate_ui_with_layout(
+                    Vec2::new(text_width, 28.0),
+                    Layout::top_down(Align::LEFT),
+                    |ui| {
+                        let is_editing = self.details.editor.as_ref().is_some_and(|edit| {
+                            edit.list == list && edit.task == task && edit.subtask == subtask.id
+                        });
+                        let font = self.content_font_id(15.0);
+                        if is_editing {
+                            let edit = self.details.editor.as_mut().unwrap();
+                            let response = ui.add(
+                                TextEdit::multiline(&mut edit.text)
+                                    .id(Id::new(("edit-subtask", list, task, subtask.id)))
+                                    .font(font)
+                                    .desired_width(text_width)
+                                    .desired_rows(1)
+                                    .return_key(None),
+                            );
+                            if edit.request_focus {
+                                response.request_focus();
+                                edit.request_focus = false;
+                            }
+                            let (submit, cancel) = text_input_shortcuts(ui, &response);
+                            if cancel {
+                                self.cancel_subtask_edit();
+                            } else if submit || response.lost_focus() {
+                                self.finish_subtask_edit();
+                            }
+                        } else {
+                            let color = if subtask.completed {
+                                palette.muted
+                            } else {
+                                palette.text
+                            };
+                            let label = ui.add(
+                                egui::Label::new(self.content_rich(&subtask.text, 15.0, color))
+                                    .wrap(),
+                            );
+                            let response = ui.interact(
+                                label.rect,
+                                Id::new(("edit-subtask-button", list, task, subtask.id)),
+                                Sense::click(),
+                            );
+                            response.widget_info(|| {
+                                egui::WidgetInfo::labeled(
+                                    egui::WidgetType::Button,
+                                    true,
+                                    format!("Edit subtask: {}", subtask.text),
+                                )
+                            });
+                            self.track_focus(&response, FocusItem::Subtask(list, task, subtask.id));
+                            if response.has_focus() {
+                                ui.painter().rect_stroke(
+                                    response.rect,
+                                    3.0,
+                                    Stroke::new(1.0, palette.accent),
+                                    egui::StrokeKind::Inside,
+                                );
+                            }
+                            if response.clicked() {
+                                self.begin_subtask_edit(list, task, subtask.id);
+                            }
+                        }
+                    },
+                );
+                let delete = ui
+                    .add_sized(
+                        [28.0, 28.0],
+                        Button::new(self.rich("x", 14.0, palette.muted)).frame(false),
+                    )
+                    .on_hover_text("Delete subtask");
+                self.track_focus(&delete, FocusItem::Subtask(list, task, subtask.id));
+                delete.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::WidgetType::Button,
+                        true,
+                        format!("Delete subtask: {}", subtask.text),
+                    )
+                });
+                if delete.has_focus() {
+                    ui.painter().rect_stroke(
+                        delete.rect,
+                        4.0,
+                        Stroke::new(1.0, palette.accent),
+                        egui::StrokeKind::Inside,
+                    );
+                }
+                if delete.clicked() {
+                    self.delete_subtask(list, task, subtask.id);
+                }
+            })
+            .response
+            .rect
+        })
+        .inner
+    }
+
+    /// Expands an archived task for inspection without changing its completion state.
+    ///
+    /// # Arguments
+    ///
+    /// - `list` - Parent list identity.
+    /// - `task` - Archived task identity.
+    pub(super) fn expand_archived(&mut self, list: Uuid, task: Uuid) {
+        self.details.expanded_history.insert((list, task));
+    }
+
+    /// Renders naturally sized History rows and their independent Restore actions.
+    ///
+    /// # Arguments
+    ///
+    /// - `ui` - Destination panel.
+    /// - `list` - Parent list identity.
+    /// - `palette` - Panel colors.
+    /// - `progress` - Reveal opacity from zero to one.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an internally resolved list index is invalid.
+    pub(super) fn history_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        list: Uuid,
+        palette: Palette,
+        progress: f32,
+    ) {
+        let Some(index) = self.list_index(list) else {
+            return;
+        };
+        let archived = self.lists[index].data.archive.clone();
+        ui.add_space(8.0 * progress);
+        ui.scope(|ui| {
+            ui.set_opacity(progress);
+            Frame::NONE
+                .fill(palette.surface)
+                .corner_radius(CornerRadius::same(16))
+                .inner_margin(Margin::same(14))
+                .show(ui, |ui| {
+                    ui.label(self.rich("History", 18.0, palette.text));
+                    for item in archived {
+                        let task = &item.task;
+                        let mut expanded = self.details.expanded_history.contains(&(list, task.id));
+                        if self.spotlight.as_ref().is_some_and(|spotlight| {
+                            spotlight.archived
+                                && spotlight.list_id == list
+                                && spotlight.task_id == task.id
+                                && spotlight.subtask_id.is_some()
+                        }) {
+                            self.expand_archived(list, task.id);
+                            expanded = true;
+                        }
+                        let width =
+                            (ui.available_width() - 76.0 - ui.spacing().item_spacing.x).max(1.0);
+                        let row = ui
+                            .horizontal_top(|ui| {
+                                ui.allocate_ui_with_layout(
+                                    Vec2::new(width, 28.0),
+                                    Layout::top_down(Align::LEFT),
+                                    |ui| {
+                                        let title = ui.add(
+                                            egui::Label::new(self.content_rich(
+                                                format!(
+                                                    "{} {}",
+                                                    if expanded { "▾" } else { "▸" },
+                                                    task.text
+                                                ),
+                                                15.0,
+                                                palette.muted,
+                                            ))
+                                            .wrap(),
                                         );
-                                    let (rect, _) =
-                                        ui.allocate_exact_size(Vec2::splat(26.0), Sense::hover());
-                                    let completion = ui.interact(
-                                        rect,
-                                        FocusItem::Subtask(list_id, task.id, subtask.id).id(),
-                                        Sense::click(),
-                                    );
-                                    let completion = self.completion_control(
-                                        ui,
-                                        completion,
-                                        subtask.completed,
-                                        completion_progress,
-                                        palette,
-                                        &subtask.text,
-                                    );
-                                    self.track_focus(
-                                        &completion,
-                                        FocusItem::Subtask(list_id, task.id, subtask.id),
-                                    );
-                                    if completion.clicked() {
-                                        self.toggle_subtask(list_id, task.id, subtask.id);
-                                    }
-                                    ui.label(
-                                        self.rich(
-                                            &subtask.text,
-                                            15.0,
-                                            palette
-                                                .text
-                                                .lerp_to_gamma(palette.muted, completion_progress),
-                                        ),
-                                    );
-                                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                        let delete = ui.add(
-                                            Button::new(self.rich("x", 14.0, palette.muted))
-                                                .frame(false),
+                                        let response = ui.interact(
+                                            title.rect,
+                                            Id::new(("history-details", list, task.id)),
+                                            Sense::click(),
                                         );
-                                        self.track_focus(
-                                            &delete,
-                                            FocusItem::Subtask(list_id, task.id, subtask.id),
-                                        );
-                                        delete.widget_info(|| {
+                                        response.widget_info(|| {
                                             egui::WidgetInfo::labeled(
                                                 egui::WidgetType::Button,
                                                 true,
-                                                format!("Delete subtask: {}", subtask.text),
+                                                format!(
+                                                    "{} archived task: {}",
+                                                    if expanded { "Collapse" } else { "Inspect" },
+                                                    task.text
+                                                ),
                                             )
                                         });
-                                        if delete.has_focus() {
+                                        self.track_focus(
+                                            &response,
+                                            FocusItem::Archived(list, task.id),
+                                        );
+                                        if response.clicked() {
+                                            if expanded {
+                                                self.details
+                                                    .expanded_history
+                                                    .remove(&(list, task.id));
+                                            } else {
+                                                self.expand_archived(list, task.id);
+                                            }
+                                        }
+                                        if response.has_focus() {
                                             ui.painter().rect_stroke(
-                                                delete.rect,
-                                                4.0,
+                                                response.rect,
+                                                3.0,
                                                 Stroke::new(1.0, palette.accent),
                                                 egui::StrokeKind::Inside,
                                             );
                                         }
-                                        if delete.clicked() {
-                                            self.delete_subtask(list_id, task.id, subtask.id);
-                                        }
-                                    });
-                                })
-                            },
-                        )
-                        .inner;
-                    if let Some(spotlight) = self.spotlight.as_mut().filter(|spotlight| {
-                        !spotlight.archived
-                            && spotlight.list_id == list_id
-                            && spotlight.task_id == task.id
-                            && spotlight.subtask_id == Some(subtask.id)
-                    }) {
-                        if spotlight.scroll_pending {
-                            ui.scroll_to_rect(row.response.rect, Some(Align::Center));
-                            spotlight.scroll_pending = false;
+                                    },
+                                );
+                                let (rect, _) =
+                                    ui.allocate_exact_size(Vec2::new(76.0, 28.0), Sense::hover());
+                                let response = ui.interact(
+                                    rect,
+                                    FocusItem::Archived(list, task.id).id(),
+                                    Sense::click(),
+                                );
+                                ui.painter().text(
+                                    rect.center(),
+                                    egui::Align2::CENTER_CENTER,
+                                    "Restore",
+                                    self.font_id(13.0),
+                                    palette.accent,
+                                );
+                                response.widget_info(|| {
+                                    egui::WidgetInfo::labeled(
+                                        egui::WidgetType::Button,
+                                        true,
+                                        format!("Restore: {}", task.text),
+                                    )
+                                });
+                                self.track_focus(&response, FocusItem::Archived(list, task.id));
+                                if response.clicked() {
+                                    self.restore_archived(list, task.id);
+                                }
+                            })
+                            .response
+                            .rect;
+                        self.detail_spotlight(ui, row, (list, task.id, None, true), palette);
+                        if expanded {
+                            ui.indent(("history-children", list, task.id), |ui| {
+                                if task.subtasks.is_empty() {
+                                    ui.label(self.rich("No subtasks", 13.0, palette.muted));
+                                }
+                                for child in &task.subtasks {
+                                    let response = ui.add(
+                                        egui::Label::new(self.content_rich(
+                                            format!(
+                                                "{} {}",
+                                                if child.completed { "✓" } else { "○" },
+                                                child.text
+                                            ),
+                                            15.0,
+                                            palette.text,
+                                        ))
+                                        .wrap(),
+                                    );
+                                    self.detail_spotlight(
+                                        ui,
+                                        response.rect,
+                                        (list, task.id, Some(child.id), true),
+                                        palette,
+                                    );
+                                }
+                            });
                         }
-                        let opacity =
-                            (1.0 - spotlight.started.elapsed().as_secs_f32() / 1.4).clamp(0.0, 1.0);
-                        ui.painter().rect_stroke(
-                            row.response.rect.shrink(1.0),
-                            8.0,
-                            Stroke::new(1.5, palette.accent.linear_multiply(opacity)),
-                            egui::StrokeKind::Inside,
-                        );
                     }
-                }
-                let subtask_response = ui.add(
-                    TextEdit::singleline(&mut self.new_subtask)
-                        .id(Id::new(("new-subtask", list_id, task.id)))
-                        .hint_text("Add subtask")
-                        .desired_width(f32::INFINITY),
-                );
-                let (submit, _) = text_input_shortcuts(ui, &subtask_response);
-                self.track_focus(&subtask_response, FocusItem::Task(list_id, task.id));
-                if submit {
-                    self.add_subtask(list_id, task.id);
-                    subtask_response.request_focus();
-                }
-            });
+                });
+        });
     }
 
-    fn add_subtask(&mut self, list_id: Uuid, task_id: Uuid) {
-        let text = self.new_subtask.trim();
-        if text.is_empty() {
-            return;
-        }
-        if let Some(index) = self.list_index(list_id)
-            && let Some(task) = self.lists[index]
-                .data
-                .tasks
-                .iter_mut()
-                .find(|task| task.id == task_id)
-        {
-            task.subtasks.push(Subtask::new(text));
-            self.new_subtask.clear();
-            self.save_list_index(index);
-        }
-    }
-
-    fn toggle_subtask(&mut self, list_id: Uuid, task_id: Uuid, subtask_id: Uuid) {
-        if let Some(index) = self.list_index(list_id)
-            && let Some(subtask) = self.lists[index]
-                .data
-                .tasks
-                .iter_mut()
-                .find(|task| task.id == task_id)
-                .and_then(|task| {
-                    task.subtasks
-                        .iter_mut()
-                        .find(|subtask| subtask.id == subtask_id)
-                })
-        {
-            subtask.completed = !subtask.completed;
-            self.save_list_index(index);
-        }
-    }
-
-    fn delete_subtask(&mut self, list_id: Uuid, task_id: Uuid, subtask_id: Uuid) {
-        let neighbors = self.focus_neighbors();
-        if let Some(index) = self.list_index(list_id)
-            && let Some(task) = self.lists[index]
-                .data
-                .tasks
-                .iter_mut()
-                .find(|task| task.id == task_id)
-        {
-            task.subtasks.retain(|subtask| subtask.id != subtask_id);
-            self.save_list_index(index);
-            self.repair_focus(&neighbors);
-        }
-    }
-
-    /// Starts the animation that moves completed tasks into history.
-    pub(super) fn begin_clear_completed(&mut self, list_id: Uuid) {
-        if self.clear_animation.is_none()
-            && self
-                .lists
-                .iter()
-                .any(|list| list.key == list_id && list.data.completed_count() > 0)
-        {
-            self.revealed = None;
-            self.clear_animation = Some((list_id, Instant::now()));
-        }
-    }
-
-    /// Starts the removal animation for a task.
-    ///
-    /// # Arguments
-    ///
-    /// - `list_id` - Parent list identity.
-    /// - `task_id` - Identity of the task to remove.
-    pub(super) fn begin_delete_task(&mut self, list_id: Uuid, task_id: Uuid) {
-        if self.delete_animation.is_none() {
-            self.revealed = None;
-            self.subtasks_for = None;
-            self.delete_animation = Some((list_id, task_id, Instant::now()));
-        }
-    }
-
-    /// Returns the current removal animation progress for a task.
-    ///
-    /// # Arguments
-    ///
-    /// - `list_id` - Parent list identity.
-    /// - `task_id` - Task whose animation is queried.
-    ///
-    /// # Returns
-    ///
-    /// Eased progress from zero to one, or zero when the task is not being removed.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the configured deletion duration is zero.
-    pub(super) fn delete_progress(&self, list_id: Uuid, task_id: Uuid) -> f32 {
-        self.delete_animation
-            .map_or(0.0, |(active_list, active_task, started)| {
-                if active_list != list_id || active_task != task_id {
-                    0.0
-                } else {
-                    egui::emath::easing::cubic_in_out(
-                        (started.elapsed().as_secs_f32() / DELETE_ANIMATION_SECONDS)
-                            .clamp(0.0, 1.0),
-                    )
-                }
-            })
-    }
-
-    /// Removes a task from its list and persists the change.
-    ///
-    /// # Arguments
-    ///
-    /// - `list_id` - Parent list identity.
-    /// - `task_id` - Identity of the task to remove.
-    ///
-    /// # Panics
-    ///
-    /// Panics if an internally resolved list index is invalid.
-    pub(super) fn remove_task(&mut self, list_id: Uuid, task_id: Uuid) {
-        let neighbors = self.focus_neighbors();
-        if let Some(index) = self.list_index(list_id) {
-            if self
-                .drag
-                .as_ref()
-                .is_some_and(|drag| drag.list_id == list_id)
-            {
-                self.drag = None;
-            }
-            self.lists[index]
-                .data
-                .tasks
-                .retain(|task| task.id != task_id);
-            self.save_list_index(index);
-            self.repair_focus(&neighbors);
-        }
-    }
-
-    /// Returns the current clear animation progress for a completed task.
-    ///
-    /// # Arguments
-    ///
-    /// - `list_id` - Parent list identity.
-    /// - `completed` - Whether the task participates in the clear animation.
-    ///
-    /// # Returns
-    ///
-    /// Eased progress from zero to one, or zero for an active task or list.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the configured clear duration is zero.
-    pub(super) fn clear_progress(&self, list_id: Uuid, completed: bool) -> f32 {
-        if !completed {
-            return 0.0;
-        }
-        self.clear_animation.map_or(0.0, |(active_list, started)| {
-            if active_list != list_id {
-                0.0
-            } else {
-                egui::emath::easing::cubic_in_out(
-                    (started.elapsed().as_secs_f32() / CLEAR_ANIMATION_SECONDS).clamp(0.0, 1.0),
-                )
-            }
-        })
-    }
-
-    /// Moves every completed task in a list into its archive.
-    ///
-    /// # Panics
-    ///
-    /// Panics if an internally resolved list index is invalid.
-    pub(super) fn archive_completed(&mut self, list_id: Uuid) {
-        let neighbors = self.focus_neighbors();
-        if let Some(index) = self.list_index(list_id) {
-            if self.lists[index].data.completed_count() == 0 {
-                return;
-            }
-            if self
-                .drag
-                .as_ref()
-                .is_some_and(|drag| drag.list_id == list_id)
-            {
-                self.drag = None;
-            }
-            let mut active = Vec::new();
-            let mut completed = Vec::new();
-            for task in self.lists[index].data.tasks.drain(..) {
-                if task.completed {
-                    completed.push(ArchivedTask::new(task));
-                } else {
-                    active.push(task);
-                }
-            }
-            self.lists[index].data.tasks = active;
-            self.lists[index].data.archive.splice(0..0, completed);
-            self.save_list_index(index);
-            self.repair_focus(&neighbors);
-        }
-    }
-
-    /// Renders the animated archive panel and its restore actions.
-    ///
-    /// # Arguments
-    ///
-    /// - `ui` - Destination UI for the archive panel.
-    /// - `list_id` - List whose archive is displayed.
-    /// - `palette` - Colors used to render the panel.
-    /// - `progress` - Panel reveal progress from zero to one.
-    ///
-    /// # Panics
-    ///
-    /// Panics if an internally resolved list index becomes invalid during an interaction.
-    pub(super) fn history_ui(
+    fn detail_spotlight(
         &mut self,
         ui: &mut egui::Ui,
-        list_id: Uuid,
+        rect: egui::Rect,
+        target: (Uuid, Uuid, Option<Uuid>, bool),
         palette: Palette,
-        progress: f32,
     ) {
-        let Some(index) = self.list_index(list_id) else {
-            return;
-        };
-        let archived = self.lists[index].data.archive.clone();
-        let full_height = 62.0 + archived.len() as f32 * 34.0;
-        let visible_height = (full_height * progress).max(1.0);
-        ui.add_space(8.0 * progress);
-        let (clip_rect, _) = ui.allocate_exact_size(
-            Vec2::new(ui.available_width(), visible_height),
-            Sense::hover(),
-        );
-        let content_rect = Rect::from_min_size(
-            clip_rect.min + Vec2::new(0.0, -(1.0 - progress) * 12.0),
-            Vec2::new(clip_rect.width(), full_height),
-        );
-        let mut history_ui = ui.new_child(
-            egui::UiBuilder::new()
-                .id_salt(("history-panel-content", list_id))
-                .max_rect(content_rect)
-                .layout(Layout::top_down(Align::LEFT)),
-        );
-        history_ui.set_clip_rect(clip_rect.intersect(ui.clip_rect()));
-        history_ui.set_opacity(progress);
-        Frame::NONE
-            .fill(palette.surface)
-            .corner_radius(CornerRadius::same(16))
-            .inner_margin(Margin::same(14))
-            .show(&mut history_ui, |ui| {
-                ui.label(self.rich("History", 18.0, palette.text));
-                for item in archived {
-                    let row = ui.horizontal(|ui| {
-                        ui.label(
-                            self.rich(item.task.text.clone(), 15.0, palette.muted)
-                                .strikethrough(),
-                        );
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            let (rect, _) =
-                                ui.allocate_exact_size(Vec2::new(68.0, 28.0), Sense::hover());
-                            let restore = ui.interact(
-                                rect,
-                                FocusItem::Archived(list_id, item.task.id).id(),
-                                Sense::click(),
-                            );
-                            ui.painter().text(
-                                rect.center(),
-                                egui::Align2::CENTER_CENTER,
-                                "Restore",
-                                self.font_id(13.0),
-                                palette.accent,
-                            );
-                            restore.widget_info(|| {
-                                egui::WidgetInfo::labeled(
-                                    egui::WidgetType::Button,
-                                    true,
-                                    format!("Restore: {}", item.task.text),
-                                )
-                            });
-                            self.track_focus(&restore, FocusItem::Archived(list_id, item.task.id));
-                            if restore.clicked() {
-                                self.restore_archived(list_id, item.task.id);
-                            }
-                        });
-                    });
-                    if let Some(spotlight) = self.spotlight.as_mut().filter(|spotlight| {
-                        spotlight.archived
-                            && spotlight.list_id == list_id
-                            && spotlight.task_id == item.task.id
-                    }) {
-                        if spotlight.scroll_pending {
-                            ui.scroll_to_rect(row.response.rect, Some(Align::Center));
-                            spotlight.scroll_pending = false;
-                        }
-                        let opacity =
-                            (1.0 - spotlight.started.elapsed().as_secs_f32() / 1.4).clamp(0.0, 1.0);
-                        ui.painter().rect_stroke(
-                            row.response.rect.shrink(1.0),
-                            8.0,
-                            Stroke::new(1.5, palette.accent.linear_multiply(opacity)),
-                            egui::StrokeKind::Inside,
-                        );
-                    }
-                }
-            });
-    }
-
-    fn restore_archived(&mut self, list_id: Uuid, task_id: Uuid) {
-        if let Some(index) = self.list_index(list_id)
-            && let Some(position) = self.lists[index]
-                .data
-                .archive
-                .iter()
-                .position(|item| item.task.id == task_id)
-        {
-            let mut task = self.lists[index].data.archive.remove(position).task;
-            task.completed = false;
-            task.completed_at_unix = None;
-            self.lists[index].data.tasks.push(task);
-            if self.lists[index].data.archive.is_empty() {
-                self.history_open = false;
+        let (list, task, child, archived) = target;
+        if let Some(spotlight) = self.spotlight.as_mut().filter(|spotlight| {
+            spotlight.archived == archived
+                && spotlight.list_id == list
+                && spotlight.task_id == task
+                && spotlight.subtask_id == child
+        }) {
+            if spotlight.scroll_pending {
+                ui.scroll_to_rect(rect, Some(Align::Center));
+                spotlight.scroll_pending = false;
             }
-            self.save_list_index(index);
-            self.keyboard.pending = Some(FocusItem::Task(list_id, task_id).id());
+            let opacity = (1.0 - spotlight.started.elapsed().as_secs_f32() / 1.4).clamp(0.0, 1.0);
+            ui.painter().rect_stroke(
+                rect.shrink(1.0),
+                8.0,
+                Stroke::new(1.5, palette.accent.linear_multiply(opacity)),
+                egui::StrokeKind::Inside,
+            );
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{app::tests::test_app, model::TodoList};
-    use std::{
-        fs::{self, File, FileTimes},
-        time::{Duration, UNIX_EPOCH},
-    };
-
-    #[test]
-    fn clearing_completed_only_writes_when_tasks_are_archived() {
-        let (_ctx, mut app) = test_app();
-        let list_id = app.lists[0].key;
-        let active = Task::new("Keep active");
-        let active_id = active.id;
-        app.lists[0].data.tasks.push(active);
-        app.save_list_index(0);
-        let path = app.lists[0].path.clone();
-        let original = fs::read(&path).unwrap();
-        // A fixed old timestamp detects atomic rewrites without relying on clock resolution.
-        File::options()
-            .write(true)
-            .open(&path)
-            .unwrap()
-            .set_times(FileTimes::new().set_modified(UNIX_EPOCH + Duration::from_secs(1_000_000)))
-            .unwrap();
-        let modified = fs::metadata(&path).unwrap().modified().unwrap();
-
-        for _ in 0..2 {
-            app.archive_completed(list_id);
-            assert_eq!(fs::read(&path).unwrap(), original);
-            assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), modified);
-            assert!(app.lists[0].data.archive.is_empty());
-            assert_eq!(app.lists[0].data.tasks[0].id, active_id);
-        }
-
-        let mut completed = Task::new("Move to History");
-        completed.toggle();
-        completed.subtasks.push(Subtask::new("Keep checklist"));
-        let completed_id = completed.id;
-        app.lists[0].data.tasks.push(completed);
-        app.archive_completed(list_id);
-
-        let saved: TodoList = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
-        assert_eq!(saved.tasks.len(), 1);
-        assert_eq!(saved.tasks[0].id, active_id);
-        assert_eq!(saved.archive.len(), 1);
-        assert_eq!(saved.archive[0].task.id, completed_id);
-        assert!(saved.archive[0].task.completed);
-        assert_eq!(saved.archive[0].task.subtasks[0].text, "Keep checklist");
-        assert_ne!(fs::metadata(&path).unwrap().modified().unwrap(), modified);
-        fs::remove_dir_all(&app.workspace).unwrap();
     }
 }

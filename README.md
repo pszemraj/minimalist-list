@@ -56,6 +56,8 @@ Sign-in starts the app hidden in the tray or menu bar; an ordinary launch opens 
 
 Quit before reinstalling. See [startup and tray behavior](docs/usage.md#startup-and-system-tray) to disable startup.
 
+Verify the checkout with `cargo test --locked`; `cargo run --locked -- --version` checks the executable. The [development guide](docs/dev.md#verification) lists the full checks.
+
 ## Start using it
 
 Open a list and type `Buy groceries` into the field at the top. Enter adds the task at the top of the list and returns focus to the field. See [list management](docs/usage.md#manage-lists) to create more lists.
@@ -69,3 +71,5 @@ Press `Ctrl+/` (`Cmd+/` on macOS) to see the keyboard shortcuts in the app.
 - [Tasks, subtasks, search, history, and appearance](docs/usage.md)
 - [Workspace folders, settings paths, and file sync](docs/storage.md)
 - [Source layout, checks, and GUI inspection](docs/dev.md)
+
+Bundled bold fonts: [sources](assets/fonts/SOURCES.txt), [Ubuntu Font Licence](assets/fonts/Ubuntu-LICENSE.txt), and [Hack licenses](assets/fonts/Hack-LICENSE.txt).

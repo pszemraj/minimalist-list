@@ -1,9 +1,15 @@
 //! Application state, navigation, persistence coordination, and root rendering.
 
+#[cfg(test)]
+mod adversarial_tests;
+mod drafts;
 mod keyboard;
 mod list;
 mod overlays;
 mod overview;
+mod persistence;
+#[cfg(test)]
+mod persistence_tests;
 mod settings;
 mod task_details;
 mod task_text;
@@ -17,7 +23,7 @@ use crate::model::Accent;
 use crate::storage::{self, Settings, StoredList, WorkspaceFingerprint};
 use eframe::egui;
 use egui::viewport::WindowLevel;
-use egui::{Align, Button, Color32, CornerRadius, CursorIcon, Frame, Layout, Margin, Stroke, Vec2};
+use egui::{Align, Color32, CornerRadius, CursorIcon, Layout, Stroke, Vec2};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use uuid::Uuid;
@@ -115,8 +121,16 @@ pub struct MinimalistApp {
     hovered_title: Option<(Uuid, Instant)>,
     tray: Option<crate::tray::Tray>,
     window_hidden: bool,
+    instance: Option<crate::instance::InstanceGuard>,
+    #[cfg(target_os = "macos")]
+    reopen: Option<crate::macos::ReopenHandler>,
     quitting: bool,
     keyboard: KeyboardState,
+    persistence: persistence::PersistenceState,
+    drafts: drafts::Drafts,
+    details: task_details::TaskDetailsState,
+    capture_draft: Option<QuickCaptureState>,
+    find_draft: Option<FindState>,
 }
 
 impl MinimalistApp {
@@ -146,7 +160,10 @@ impl MinimalistApp {
             style.spacing.item_spacing = Vec2::new(8.0, 8.0);
             style.spacing.button_padding = Vec2::new(10.0, 6.0);
         });
+        theme::install_fonts(ctx);
+        let settings_baseline = settings.clone();
         let mut persisted_workspace_path = settings.workspace_path.clone();
+        let mut workspace_failure = None;
         if let Some(path) = workspace_override.as_ref() {
             settings.workspace_path.clone_from(path);
         }
@@ -154,13 +171,17 @@ impl MinimalistApp {
         let workspace = match storage::normalize_workspace_path(&settings.workspace_path) {
             Ok(path) => path,
             Err(error) => {
-                status = Some(error);
+                status = Some(format!(
+                    "Workspace {} unavailable: {error}",
+                    settings.workspace_path
+                ));
+                workspace_failure = Some(settings.workspace_path.clone());
                 let fallback = storage::default_workspace_dir();
                 storage::normalize_workspace_path(&fallback.to_string_lossy()).unwrap_or(fallback)
             }
         };
         settings.workspace_path = workspace.to_string_lossy().into_owned();
-        if workspace_override.is_none() {
+        if workspace_override.is_none() && workspace_failure.is_none() {
             persisted_workspace_path.clone_from(&settings.workspace_path);
         }
         let (lists, fingerprint) = match storage::load_workspace(&workspace) {
@@ -171,6 +192,7 @@ impl MinimalistApp {
                 (snapshot.lists, snapshot.fingerprint)
             }
             Err(error) => {
+                workspace_failure = Some(settings.workspace_path.clone());
                 status = Some(error);
                 (Vec::new(), WorkspaceFingerprint::default())
             }
@@ -236,8 +258,16 @@ impl MinimalistApp {
             hovered_title: None,
             tray: None,
             window_hidden: false,
+            instance: None,
+            #[cfg(target_os = "macos")]
+            reopen: None,
             quitting: false,
             keyboard: KeyboardState::default(),
+            persistence: persistence::PersistenceState::new(settings_baseline, workspace_failure),
+            drafts: drafts::Drafts::default(),
+            details: task_details::TaskDetailsState::default(),
+            capture_draft: None,
+            find_draft: None,
         }
     }
 
@@ -260,30 +290,6 @@ impl MinimalistApp {
         self.displayed_palette
     }
 
-    fn save_settings(&mut self) {
-        let mut persisted = self.settings.clone();
-        persisted
-            .workspace_path
-            .clone_from(&self.persisted_workspace_path);
-        if let Err(error) = storage::save_settings(&persisted) {
-            self.status = Some(error);
-        }
-    }
-
-    fn save_list_index(&mut self, index: usize) {
-        let path = self.lists[index].path.clone();
-        match storage::save_list(&self.lists[index]) {
-            Ok(()) => {
-                if let Err(error) =
-                    storage::update_fingerprint_for_file(&mut self.fingerprint, &path)
-                {
-                    self.status = Some(error);
-                }
-            }
-            Err(error) => self.status = Some(error),
-        }
-    }
-
     fn apply_window_preferences(&mut self, ctx: &egui::Context) {
         if self.last_pin_state != Some(self.settings.always_on_top) {
             let level = if self.settings.always_on_top {
@@ -299,12 +305,26 @@ impl MinimalistApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::Decorations(
                 self.settings.window_decorations,
             ));
+            #[cfg(target_os = "macos")]
+            ctx.send_viewport_cmd(egui::ViewportCommand::EnableButtons {
+                close: true,
+                minimized: false,
+                maximize: true,
+            });
             self.last_decorations_state = Some(self.settings.window_decorations);
         }
     }
 
     fn update_motion(&mut self, ctx: &egui::Context) {
         let now = Instant::now();
+        if let Some((_, started)) = &self.persistence.notice {
+            let remaining = Duration::from_secs(3).saturating_sub(started.elapsed());
+            if remaining.is_zero() {
+                self.persistence.notice = None;
+            } else {
+                ctx.request_repaint_after(remaining);
+            }
+        }
         let elapsed = now
             .duration_since(self.last_motion_tick)
             .as_secs_f32()
@@ -379,6 +399,7 @@ impl MinimalistApp {
 
     fn go_to_overview(&mut self) {
         self.finish_inline_edit();
+        self.stash_input_drafts();
         if let Screen::List(id) = self.screen {
             self.keyboard.overview_list = Some(id);
         }
@@ -395,6 +416,7 @@ impl MinimalistApp {
 
     fn open_list(&mut self, id: Uuid) {
         self.finish_inline_edit();
+        self.stash_input_drafts();
         self.keyboard.pending = Some(egui::Id::new(("new-task", id)));
         self.keyboard.overview_list = Some(id);
         self.begin_transition(1.0);
@@ -405,6 +427,7 @@ impl MinimalistApp {
         self.revealed = None;
         self.subtasks_for = None;
         self.editing = None;
+        self.restore_task_draft(id);
         self.request_task_focus = true;
     }
 
@@ -430,7 +453,11 @@ impl MinimalistApp {
         }
         self.keyboard.settings_return = self.navigation_return_focus();
         self.finish_inline_edit();
-        self.keyboard.pending = Some(egui::Id::new("settings-workspace"));
+        self.stash_input_drafts();
+        self.keyboard.pending = Some(list_id.map_or_else(
+            || egui::Id::new("settings-workspace"),
+            |id| egui::Id::new(("settings-list-name", id)),
+        ));
         self.return_screen = Some(self.screen.clone());
         self.settings_list_id = list_id;
         self.rename_input = list_id
@@ -451,11 +478,20 @@ impl MinimalistApp {
         self.begin_transition(-1.0);
         self.screen = self.return_screen.take().unwrap_or(Screen::Overview);
         self.settings_list_id = None;
+        if let Screen::List(id) = self.screen {
+            self.restore_task_draft(id);
+        }
         self.keyboard.pending = self.keyboard.settings_return.take();
     }
 
     fn scan_external_changes(&mut self) {
-        if Instant::now() < self.next_scan || self.drag.is_some() || self.editing.is_some() {
+        if Instant::now() < self.next_scan
+            || self.drag.is_some()
+            || self.editing.is_some()
+            || self.details.editor.is_some()
+            || !self.persistence.dirty_lists.is_empty()
+            || self.persistence.workspace_failure.is_some()
+        {
             return;
         }
         self.next_scan = Instant::now() + SCAN_INTERVAL;
@@ -511,6 +547,12 @@ impl MinimalistApp {
     }
 
     fn switch_workspace(&mut self, raw: &str) {
+        if raw.trim().is_empty() {
+            return;
+        }
+        if !self.finish_pending_changes() {
+            return;
+        }
         let path = match storage::normalize_workspace_path(raw) {
             Ok(path) => path,
             Err(error) => {
@@ -518,9 +560,49 @@ impl MinimalistApp {
                 return;
             }
         };
+        let next_instance = if self
+            .instance
+            .as_ref()
+            .is_some_and(|guard| !guard.owns_workspace(&path))
+        {
+            let state = storage::window_state_path();
+            match crate::instance::claim(
+                &path,
+                state.parent().unwrap_or_else(|| std::path::Path::new(".")),
+                false,
+            ) {
+                Ok(crate::instance::LaunchOutcome::Primary(guard)) => Some(guard),
+                Ok(crate::instance::LaunchOutcome::Existing) => {
+                    self.status =
+                        Some("That workspace is already open; its window has been shown.".into());
+                    return;
+                }
+                Err(error) => {
+                    self.status = Some(error);
+                    return;
+                }
+            }
+        } else {
+            None
+        };
         match storage::load_workspace(&path) {
             Ok(snapshot) => {
+                if let Some(next) = next_instance {
+                    if let Some(previous) = &self.instance {
+                        next.inherit_repaint_context(previous);
+                    }
+                    self.instance = Some(next);
+                }
+                self.stash_input_drafts();
+                self.stash_overlay_drafts();
                 self.workspace = path;
+                self.restore_overlay_drafts();
+                self.persistence.workspace_failure = None;
+                self.details = task_details::TaskDetailsState::default();
+                self.subtasks_for = None;
+                self.editing = None;
+                self.revealed = None;
+                self.history_open = false;
                 self.settings.workspace_path = self.workspace.to_string_lossy().into_owned();
                 self.persisted_workspace_path = self.settings.workspace_path.clone();
                 self.workspace_input = self.settings.workspace_path.clone();
@@ -540,40 +622,23 @@ impl MinimalistApp {
                 self.return_screen = None;
                 self.settings_list_id = None;
                 self.keyboard = KeyboardState::default();
+                if let Screen::List(id) = self.screen {
+                    self.restore_task_draft(id);
+                }
                 self.request_task_focus = matches!(self.screen, Screen::List(_));
             }
             Err(error) => self.status = Some(error),
         }
-    }
-
-    fn status_ui(&mut self, ui: &mut egui::Ui, palette: Palette) {
-        let Some(message) = self.status.clone() else {
-            return;
-        };
-        ui.add_space(8.0);
-        Frame::NONE
-            .fill(Color32::from_rgba_unmultiplied(80, 25, 35, 230))
-            .corner_radius(CornerRadius::same(10))
-            .inner_margin(Margin::same(10))
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(self.rich(message, 13.0, palette.text));
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui
-                            .add(Button::new(self.rich("x", 16.0, palette.text)).frame(false))
-                            .clicked()
-                        {
-                            self.status = None;
-                        }
-                    });
-                });
-            });
     }
 }
 
 impl eframe::App for MinimalistApp {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.finish_pending_changes();
+    }
+
+    fn persist_egui_memory(&self) -> bool {
+        false
     }
 
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
@@ -584,6 +649,21 @@ impl eframe::App for MinimalistApp {
         let minimized = frame
             .winit_window()
             .is_some_and(|window| window.is_minimized().unwrap_or(false));
+        if self
+            .instance
+            .as_ref()
+            .is_some_and(|instance| instance.take_show_request())
+        {
+            self.show_window(ctx);
+        }
+        #[cfg(target_os = "macos")]
+        if self
+            .reopen
+            .as_ref()
+            .is_some_and(|handler| handler.take_show_request())
+        {
+            self.show_window(ctx);
+        }
         self.handle_window_actions(ctx, minimized);
         self.apply_window_preferences(ctx);
         self.update_motion(ctx);
@@ -668,7 +748,22 @@ impl eframe::App for MinimalistApp {
             (1.0 - eased) * 14.0 * self.transition_direction,
             (1.0 - eased) * 10.0,
         );
-        let content_rect = viewport.shrink(margin).translate(offset);
+        let mut content_rect = viewport.shrink(margin).translate(offset);
+        if self.status.is_some()
+            || self.persistence.notice.is_some()
+            || self.persistence.settings_dirty
+            || !self.persistence.dirty_lists.is_empty()
+            || self.persistence.workspace_failure.is_some()
+        {
+            let mut status_ui = ui.new_child(
+                egui::UiBuilder::new()
+                    .id_salt("save-status")
+                    .max_rect(content_rect)
+                    .layout(Layout::top_down(Align::LEFT)),
+            );
+            self.status_ui(&mut status_ui, palette);
+            content_rect.min.y = status_ui.min_rect().bottom() + 8.0;
+        }
         let mut content_ui = ui.new_child(
             egui::UiBuilder::new()
                 .id_salt("main-content")
@@ -676,7 +771,11 @@ impl eframe::App for MinimalistApp {
                 .layout(Layout::top_down(Align::LEFT)),
         );
         content_ui.set_opacity(0.14 + eased * 0.86);
-        if self.quick_capture.is_some() || self.find.is_some() || self.shortcuts.is_some() {
+        if self.quick_capture.is_some()
+            || self.find.is_some()
+            || self.shortcuts.is_some()
+            || self.details.move_task.is_some()
+        {
             content_ui.disable();
         }
         let screen = self.screen.clone();
@@ -685,245 +784,14 @@ impl eframe::App for MinimalistApp {
             Screen::List(id) => self.list_ui(&mut content_ui, id, palette),
             Screen::Settings => self.settings_ui(&mut content_ui, palette),
         }
-        self.status_ui(&mut content_ui, palette);
+
         self.keyboard_focus_ui(&mut content_ui, palette);
         self.overlay_ui(ui.ctx(), palette);
+        self.task_operations_ui(ui.ctx());
         self.finish_keyboard_frame(ui.ctx());
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Runs a headless UI frame and discards texture updates without a renderer.
-    ///
-    /// # Arguments
-    ///
-    /// - `ctx` - Context retaining focus and widget state between frames.
-    /// - `input` - Simulated frame input.
-    /// - `render` - UI to render during the frame.
-    pub(super) fn run_frame(
-        ctx: &egui::Context,
-        input: egui::RawInput,
-        render: impl FnMut(&mut egui::Ui),
-    ) {
-        let mut output = ctx.run_ui(input, render);
-        output.textures_delta.clear();
-    }
-
-    #[test]
-    fn focused_enter_submits_without_nested_context_input() {
-        let ctx = egui::Context::default();
-        let field_id = egui::Id::new("text-input-shortcut-test");
-        let mut title = "Second".to_owned();
-
-        run_frame(&ctx, Default::default(), |ui| {
-            let response = ui.add(egui::TextEdit::singleline(&mut title).id(field_id));
-            response.request_focus();
-        });
-
-        let input = egui::RawInput {
-            events: vec![egui::Event::Key {
-                key: egui::Key::Enter,
-                physical_key: None,
-                pressed: true,
-                repeat: false,
-                modifiers: egui::Modifiers::default(),
-            }],
-            ..Default::default()
-        };
-        let mut submitted = false;
-        run_frame(&ctx, input, |ui| {
-            let response = ui.add(egui::TextEdit::singleline(&mut title).id(field_id));
-            assert!(response.lost_focus());
-            assert!(!response.has_focus());
-            let (submit, cancel) = text_input_shortcuts(ui, &response);
-            submitted = submit;
-            assert!(!cancel);
-        });
-
-        // Nesting the focus query inside `Ui::input` panics or hangs before this can become true.
-        assert!(submitted);
-    }
-
-    /// Creates an application whose task files are confined to a temporary workspace.
-    ///
-    /// # Returns
-    ///
-    /// A context and application ready for isolated UI tests.
-    pub(super) fn test_app() -> (egui::Context, MinimalistApp) {
-        let ctx = egui::Context::default();
-        let workspace = std::env::temp_dir().join(format!("minimalist-list-ui-{}", Uuid::new_v4()));
-        let settings = Settings {
-            workspace_path: workspace.to_string_lossy().into_owned(),
-            ..Settings::default()
-        };
-        let app = MinimalistApp::new(&ctx, settings, None, None);
-        (ctx, app)
-    }
-
-    fn enter_events() -> Vec<egui::Event> {
-        [true, false]
-            .into_iter()
-            .map(|pressed| egui::Event::Key {
-                key: egui::Key::Enter,
-                physical_key: None,
-                pressed,
-                repeat: false,
-                modifiers: egui::Modifiers::default(),
-            })
-            .collect()
-    }
-
-    #[test]
-    fn view_changes_and_task_removal_cancel_drags() {
-        let (ctx, mut app) = test_app();
-        let list_id = app.lists[0].key;
-        let mut task = crate::model::Task::new("Completed last task");
-        task.completed = true;
-        let task_id = task.id;
-        app.lists[0].data.tasks = vec![crate::model::Task::new("Active"), task];
-        let drag = DragState {
-            list_id,
-            task_id,
-            source: 1,
-            target: 1,
-            delta: Vec2::ZERO,
-            source_center: 200.0,
-            height: 36.0,
-        };
-        app.drag = Some(drag.clone());
-        app.begin_transition(1.0);
-        assert!(app.drag.is_none());
-
-        app.drag = Some(drag);
-        app.archive_completed(list_id);
-        assert!(app.drag.is_none());
-        assert_eq!(app.lists[0].data.tasks.len(), 1);
-        let palette = app.palette();
-        run_frame(&ctx, Default::default(), |ui| {
-            app.list_ui(ui, list_id, palette)
-        });
-
-        app.drag = Some(DragState {
-            list_id,
-            task_id: app.lists[0].data.tasks[0].id,
-            source: 0,
-            target: 0,
-            delta: Vec2::ZERO,
-            source_center: 160.0,
-            height: 36.0,
-        });
-        app.remove_task(list_id, app.lists[0].data.tasks[0].id);
-        assert!(app.drag.is_none());
-        run_frame(&ctx, Default::default(), |ui| {
-            app.list_ui(ui, list_id, palette)
-        });
-        std::fs::remove_dir_all(&app.workspace).unwrap();
-    }
-
-    #[test]
-    fn task_row_focus_survives_insertion_and_reordering() {
-        let (ctx, mut app) = test_app();
-        let list_id = app.lists[0].key;
-        app.lists[0].data.tasks = vec![
-            crate::model::Task::new("Packing"),
-            crate::model::Task::new("Laundry"),
-        ];
-        app.request_task_focus = true;
-        let palette = app.palette();
-        run_frame(&ctx, Default::default(), |ui| {
-            app.list_ui(ui, list_id, palette)
-        });
-        for _ in 0..2 {
-            run_frame(
-                &ctx,
-                egui::RawInput {
-                    events: [true, false]
-                        .into_iter()
-                        .map(|pressed| egui::Event::Key {
-                            key: egui::Key::Tab,
-                            physical_key: None,
-                            pressed,
-                            repeat: false,
-                            modifiers: egui::Modifiers::default(),
-                        })
-                        .collect(),
-                    ..Default::default()
-                },
-                |ui| app.list_ui(ui, list_id, palette),
-            );
-        }
-        let focused = ctx.memory(|memory| memory.focused()).unwrap();
-        let before = ctx.read_response(focused).unwrap().rect;
-        assert!(before.top() > 100.0);
-        assert!(before.height() > 20.0);
-        app.lists[0]
-            .data
-            .tasks
-            .insert(0, crate::model::Task::new("New task"));
-        app.lists[0].data.tasks.reverse();
-        for _ in 0..2 {
-            run_frame(&ctx, Default::default(), |ui| {
-                app.list_ui(ui, list_id, palette)
-            });
-        }
-        let after = ctx.read_response(focused).unwrap();
-        assert!(after.has_focus());
-        assert!(
-            after.rect.top() > before.top(),
-            "{focused:?}: {before:?} -> {:?}",
-            after.rect
-        );
-        std::fs::remove_dir_all(&app.workspace).unwrap();
-    }
-
-    #[test]
-    fn subtask_capture_keeps_focus_after_rows_are_inserted() {
-        let (ctx, mut app) = test_app();
-        let list_id = app.lists[0].key;
-        let task = crate::model::Task::new("Packing");
-        app.lists[0].data.tasks.push(task.clone());
-        let field = egui::Id::new(("new-subtask", list_id, task.id));
-        let palette = app.palette();
-        run_frame(&ctx, Default::default(), |ui| {
-            app.subtasks_panel(ui, list_id, &task, palette, 1.0)
-        });
-        ctx.memory_mut(|memory| memory.request_focus(field));
-        for text in ["Charger", "Passport"] {
-            let task = app.lists[0].data.tasks[0].clone();
-            run_frame(
-                &ctx,
-                egui::RawInput {
-                    events: vec![egui::Event::Text(text.to_owned())],
-                    ..Default::default()
-                },
-                |ui| app.subtasks_panel(ui, list_id, &task, palette, 1.0),
-            );
-            run_frame(
-                &ctx,
-                egui::RawInput {
-                    events: enter_events(),
-                    ..Default::default()
-                },
-                |ui| app.subtasks_panel(ui, list_id, &task, palette, 1.0),
-            );
-            let task = app.lists[0].data.tasks[0].clone();
-            run_frame(&ctx, Default::default(), |ui| {
-                app.subtasks_panel(ui, list_id, &task, palette, 1.0)
-            });
-            assert!(ctx.memory(|memory| memory.has_focus(field)));
-            assert!(app.new_subtask.is_empty());
-        }
-        assert_eq!(
-            app.lists[0].data.tasks[0]
-                .subtasks
-                .iter()
-                .map(|subtask| subtask.text.as_str())
-                .collect::<Vec<_>>(),
-            ["Charger", "Passport"]
-        );
-        std::fs::remove_dir_all(&app.workspace).unwrap();
-    }
-}
+#[path = "app/app_tests.rs"]
+mod tests;

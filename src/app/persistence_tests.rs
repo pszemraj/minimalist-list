@@ -1,0 +1,192 @@
+//! Failure recovery, destination-bound drafts, and preference concurrency journeys.
+
+use super::{
+    tests::{run_frame, test_app},
+    *,
+};
+use crate::model::{Accent, Task};
+use std::fs;
+
+fn unavailable_lists(app: &MinimalistApp) {
+    fs::rename(
+        app.workspace.join("lists"),
+        app.workspace.join("lists-offline"),
+    )
+    .unwrap();
+    fs::write(app.workspace.join("lists"), "temporarily unavailable").unwrap();
+}
+
+fn restore_lists(app: &MinimalistApp) {
+    fs::remove_file(app.workspace.join("lists")).unwrap();
+    fs::rename(
+        app.workspace.join("lists-offline"),
+        app.workspace.join("lists"),
+    )
+    .unwrap();
+}
+
+#[test]
+fn failed_creation_and_inline_edit_retry_exact_content_before_restart() {
+    let (ctx, mut app) = test_app();
+    let id = app.lists[0].key;
+    unavailable_lists(&app);
+    app.new_task = "Recover this task".into();
+    let palette = app.palette();
+    run_frame(&ctx, Default::default(), |ui| app.list_ui(ui, id, palette));
+    run_frame(
+        &ctx,
+        egui::RawInput {
+            events: vec![egui::Event::Key {
+                key: egui::Key::Enter,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            ..Default::default()
+        },
+        |ui| app.list_ui(ui, id, palette),
+    );
+    assert_eq!(app.lists[0].data.tasks.len(), 1);
+    assert!(app.persistence.dirty_lists.contains(&id));
+    let task = app.lists[0].data.tasks[0].id;
+    app.editing = Some((id, task));
+    app.edit_text = "Recover the edited title".into();
+    app.finish_inline_edit();
+    app.next_scan = Instant::now();
+    app.scan_external_changes();
+    assert_eq!(app.lists[0].data.tasks[0].text, "Recover the edited title");
+    restore_lists(&app);
+    assert!(app.retry_dirty_lists());
+    assert!(app.retry_dirty_lists());
+    let saved = storage::load_workspace(&app.workspace).unwrap();
+    assert_eq!(saved.lists[0].data.tasks.len(), 1);
+    assert_eq!(
+        saved.lists[0].data.tasks[0].text,
+        "Recover the edited title"
+    );
+    fs::remove_dir_all(app.workspace).unwrap();
+}
+
+#[test]
+fn drafts_return_to_original_list_workspace_and_collapsed_checklist() {
+    let (_, mut app) = test_app();
+    let first = app.lists[0].key;
+    let other = storage::create_list(&app.workspace, "Other", Accent::Mint).unwrap();
+    let second = other.key;
+    app.lists.push(other);
+    app.new_task = "First list draft".into();
+    app.open_list(second);
+    assert!(app.new_task.is_empty());
+    app.new_task = "Second list draft".into();
+    app.open_list(first);
+    assert_eq!(app.new_task, "First list draft");
+    let task = Task::new("Parent");
+    let parent = task.id;
+    app.lists[0].data.tasks.push(task);
+    app.switch_subtask_panel(Some((first, parent)));
+    app.new_subtask = "Checklist draft".into();
+    app.switch_subtask_panel(None);
+    app.switch_subtask_panel(Some((first, parent)));
+    assert_eq!(app.new_subtask, "Checklist draft");
+    let original = app.workspace.clone();
+    let next = original.join("another-workspace");
+    app.switch_workspace(next.to_str().unwrap());
+    assert!(app.new_task.is_empty());
+    app.new_task = "Another workspace draft".into();
+    app.switch_workspace(original.to_str().unwrap());
+    app.open_list(first);
+    assert_eq!(app.new_task, "First list draft");
+    app.open_list(second);
+    assert_eq!(app.new_task, "Second list draft");
+    fs::remove_dir_all(original).unwrap();
+}
+
+#[test]
+fn temporary_startup_failure_preserves_selected_path_and_retry_recovers_it() {
+    let root = std::env::temp_dir().join(format!("unavailable-workspace-{}", Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    let selected = root.join("selected");
+    fs::write(&selected, "temporary obstruction").unwrap();
+    let settings = Settings {
+        workspace_path: selected.to_string_lossy().into_owned(),
+        ..Default::default()
+    };
+    storage::save_settings(&settings).unwrap();
+    let ctx = egui::Context::default();
+    let mut app = MinimalistApp::new(&ctx, settings.clone(), None, None);
+    assert!(app.persistence.workspace_failure.is_some());
+    app.go_to_overview();
+    app.save_settings();
+    assert_eq!(
+        storage::load_settings().unwrap().workspace_path,
+        settings.workspace_path
+    );
+    fs::remove_file(&selected).unwrap();
+    let original = storage::create_list(&selected, "Recovered", Accent::Mint).unwrap();
+    app.switch_workspace(selected.to_str().unwrap());
+    assert_eq!(app.lists[0].key, original.key);
+    assert!(app.persistence.workspace_failure.is_none());
+    app.switch_workspace("   ");
+    assert_eq!(app.lists[0].key, original.key);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn stale_instance_navigation_preserves_newer_appearance_preferences() {
+    let (_, mut first) = test_app();
+    first.save_settings();
+    let (_, mut stale) = test_app();
+    stale.settings = storage::load_settings().unwrap();
+    stale.persistence = persistence::PersistenceState::new(stale.settings.clone(), None);
+    first.settings.bold_text = true;
+    first.settings.always_on_top = true;
+    first.settings.background_opacity = 0.4;
+    first.save_settings();
+    stale.settings.last_list_id = Some(stale.lists[0].key);
+    stale.save_settings();
+    let saved = storage::load_settings().unwrap();
+    assert!(saved.bold_text && saved.always_on_top);
+    assert_eq!(saved.background_opacity, 0.4);
+    assert_eq!(saved.last_list_id, Some(stale.lists[0].key));
+    fs::remove_dir_all(first.workspace).unwrap();
+    fs::remove_dir_all(stale.workspace).unwrap();
+}
+
+#[test]
+fn shutdown_and_workspace_switch_finish_pending_rename() {
+    let (_, mut app) = test_app();
+    let list = app.lists[0].key;
+    app.open_settings(Some(list));
+    app.rename_input = "Saved at shutdown".into();
+    app.finish_pending_changes();
+    assert_eq!(
+        storage::load_workspace(&app.workspace).unwrap().lists[0]
+            .data
+            .title,
+        "Saved at shutdown"
+    );
+    app.rename_input = "Saved before switching".into();
+    let original = app.workspace.clone();
+    app.switch_workspace(original.join("next").to_str().unwrap());
+    assert_eq!(
+        storage::load_workspace(&original).unwrap().lists[0]
+            .data
+            .title,
+        "Saved before switching"
+    );
+    fs::remove_dir_all(original).unwrap();
+}
+
+#[test]
+fn success_acknowledgement_expires_without_dismissing_save_errors() {
+    let (ctx, mut app) = test_app();
+    app.acknowledge("Added to Tasks".into());
+    assert!(app.persistence.notice.is_some());
+    app.status = Some("Changes are unsaved".into());
+    app.persistence.notice.as_mut().unwrap().1 = Instant::now() - Duration::from_secs(4);
+    app.update_motion(&ctx);
+    assert!(app.persistence.notice.is_none());
+    assert_eq!(app.status.as_deref(), Some("Changes are unsaved"));
+    fs::remove_dir_all(app.workspace).unwrap();
+}

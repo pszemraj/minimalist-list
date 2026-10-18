@@ -1,0 +1,9 @@
+Ubuntu-Bold.ttf: Ubuntu 0.83, Canonical Ltd / Dalton Maag.
+Source: https://github.com/google/fonts/raw/main/ufl/ubuntu/Ubuntu-Bold.ttf
+License: Ubuntu-LICENSE.txt (Ubuntu Font Licence 1.0).
+
+Hack-Bold.ttf: Hack v3.003, Source Foundry Authors.
+Source: https://github.com/source-foundry/Hack/raw/v3.003/build/ttf/Hack-Bold.ttf
+License: Hack-LICENSE.txt (MIT and Bitstream Vera licenses; DejaVu public domain).
+
+These unmodified faces supplement egui's existing Ubuntu Light and Hack Regular.

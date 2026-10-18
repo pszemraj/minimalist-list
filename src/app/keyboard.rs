@@ -326,6 +326,17 @@ fn take_shortcut(ctx: &egui::Context, binding: KeyboardShortcut) -> bool {
 impl MinimalistApp {
     /// Routes app commands before rendering widgets so one key has one effect.
     pub(super) fn handle_app_shortcuts(&mut self, ctx: &egui::Context) {
+        self.route_app_shortcuts(ctx);
+        // A shortcut can replace the screen and queue a different input during
+        // this frame. Focus it before its widget consumes accompanying text.
+        if let Some(target) = self.keyboard.pending
+            && self.keyboard.requested != Some(target)
+        {
+            self.focus_now(ctx, target);
+        }
+    }
+
+    fn route_app_shortcuts(&mut self, ctx: &egui::Context) {
         // Activation and dismissal act once per press, even when a widget changes
         // focus or closes an overlay. Keep text events and navigation repeats intact.
         let escape = ctx.input_mut(|input| {
@@ -366,6 +377,9 @@ impl MinimalistApp {
         if let Some(id) = self.keyboard.requested {
             ctx.memory_mut(|memory| memory.request_focus(id));
         }
+        if self.details.move_task.is_some() {
+            return;
+        }
         if egui::Popup::is_any_open(ctx) {
             return;
         }
@@ -395,23 +409,25 @@ impl MinimalistApp {
                 _ => None,
             };
             self.open_quick_capture(current);
+            self.focus_now(ctx, Id::new("quick-capture-text"));
             return;
         }
         if take_shortcut(ctx, FIND) {
             self.open_find();
+            self.focus_now(ctx, Id::new("find-query"));
             return;
         }
-        if self.quick_capture.is_some() || self.find.is_some() {
+        if self.quick_capture.is_some() || self.find.is_some() || self.details.move_task.is_some() {
+            return;
+        }
+        if !ctx.text_edit_focused() && take_key(ctx, Key::Z, Modifiers::COMMAND) {
+            self.undo_delete();
             return;
         }
         // Like '/', a logical comma may require Shift on the user's layout.
         if ctx.input_mut(|input| input.consume_shortcut(&OPEN_SETTINGS)) {
             if !matches!(self.screen, Screen::Settings) {
-                let list = match self.screen {
-                    Screen::List(id) => Some(id),
-                    _ => None,
-                };
-                self.open_settings(list);
+                self.open_settings(None);
             }
             return;
         }
@@ -511,6 +527,8 @@ impl MinimalistApp {
     fn keyboard_escape(&mut self, ctx: &egui::Context) {
         if matches!(self.screen, Screen::Settings) {
             self.close_settings();
+        } else if self.details.editor.is_some() {
+            self.cancel_subtask_edit();
         } else if let Some((list, task)) = self.editing.take() {
             self.keyboard.pending = Some(FocusItem::Task(list, task).id());
         } else if self.creating_list {
@@ -526,7 +544,8 @@ impl MinimalistApp {
                 }))
         {
             self.close_history();
-        } else if let Some((list, task)) = self.subtasks_for.take() {
+        } else if let Some((list, task)) = self.subtasks_for {
+            self.switch_subtask_panel(None);
             self.keyboard.pending = Some(FocusItem::Task(list, task).id());
         } else if let Some((list, task)) = self.revealed.take() {
             self.keyboard.pending = Some(FocusItem::Task(list, task).id());

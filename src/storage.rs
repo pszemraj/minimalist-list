@@ -108,6 +108,46 @@ pub fn save_settings(settings: &Settings) -> Result<(), String> {
     write_json_atomic(&settings_path(), settings)
 }
 
+/// Saves only preferences changed since this instance last loaded or saved them.
+///
+/// # Arguments
+/// - `desired` - Current preferences, including local edits.
+/// - `baseline` - Preferences last observed by this instance.
+///
+/// # Returns
+/// The merged preferences saved to disk.
+///
+/// # Errors
+/// Returns an error if existing preferences cannot be read or the result cannot be saved.
+pub fn save_settings_changes(desired: &Settings, baseline: &Settings) -> Result<Settings, String> {
+    if !settings_path().exists() {
+        save_settings(desired)?;
+        return Ok(desired.clone());
+    }
+    let mut current = serde_json::to_value(load_settings()?).map_err(|error| error.to_string())?;
+    let current_map = current
+        .as_object_mut()
+        .ok_or("invalid stored preferences")?;
+    let baseline = serde_json::to_value(baseline).map_err(|error| error.to_string())?;
+    let desired = serde_json::to_value(desired).map_err(|error| error.to_string())?;
+    for (key, value) in desired.as_object().ok_or("invalid preferences")? {
+        if baseline.get(key) != Some(value) {
+            current_map.insert(key.clone(), value.clone());
+        }
+    }
+    let merged: Settings = serde_json::from_value(current).map_err(|error| error.to_string())?;
+    save_settings(&merged)?;
+    Ok(merged)
+}
+
+/// Returns the local file used by eframe for native window geometry.
+///
+/// # Returns
+/// A window state file beside the local settings file.
+pub fn window_state_path() -> PathBuf {
+    settings_path().with_file_name("window.ron")
+}
+
 /// Removes surrounding quotes or Unix shell escapes from a typed workspace path.
 ///
 /// # Returns
@@ -156,6 +196,9 @@ fn parse_workspace_input_from(raw: &str, windows: bool) -> String {
 ///
 /// Returns an error when the path cannot be resolved or its list directory cannot be created.
 pub fn normalize_workspace_path(raw: &str) -> Result<PathBuf, String> {
+    if raw.trim().is_empty() {
+        return Err("workspace path is empty".into());
+    }
     let path = expand_tilde(raw.trim());
     let absolute = if path.is_absolute() {
         path
@@ -455,6 +498,9 @@ fn default_workspace_dir_from(
     platform: PathPlatform,
     lookup: &impl Fn(&str) -> Option<OsString>,
 ) -> PathBuf {
+    if let Some(root) = lookup("XDG_DATA_HOME").filter(|value| !value.is_empty()) {
+        return PathBuf::from(root).join(APP_DIR);
+    }
     let root = match platform {
         #[cfg(any(target_os = "windows", test))]
         PathPlatform::Windows => lookup("LOCALAPPDATA")
@@ -497,6 +543,9 @@ fn settings_path_from(
     platform: PathPlatform,
     lookup: &impl Fn(&str) -> Option<OsString>,
 ) -> PathBuf {
+    if let Some(root) = lookup("XDG_CONFIG_HOME").filter(|value| !value.is_empty()) {
+        return PathBuf::from(root).join(APP_DIR).join("settings.json");
+    }
     let root = match platform {
         #[cfg(any(target_os = "windows", test))]
         PathPlatform::Windows => lookup("APPDATA")

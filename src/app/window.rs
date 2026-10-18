@@ -6,6 +6,25 @@ use eframe::egui::{self, ViewportCommand};
 use std::time::Instant;
 
 impl MinimalistApp {
+    /// Retains the workspace claim and attaches launch requests to this event loop.
+    ///
+    /// # Arguments
+    /// - `guard` - Claim for the loaded workspace.
+    /// - `ctx` - Native context to wake on reopening.
+    pub fn set_instance_guard(
+        &mut self,
+        guard: crate::instance::InstanceGuard,
+        ctx: &egui::Context,
+    ) {
+        guard.set_repaint_context(ctx.clone());
+        self.instance = Some(guard);
+        #[cfg(target_os = "macos")]
+        match crate::macos::ReopenHandler::install(ctx) {
+            Ok(handler) => self.reopen = Some(handler),
+            Err(error) => self.status = Some(error),
+        }
+    }
+
     /// Installs the native tray after the window's event loop has started.
     ///
     /// # Arguments
@@ -60,6 +79,10 @@ impl MinimalistApp {
     ///
     /// - `ctx` - Context receiving native window commands.
     pub(super) fn close_window(&mut self, ctx: &egui::Context) {
+        if !self.finish_pending_changes() {
+            self.show_window(ctx);
+            return;
+        }
         let available = self.tray.as_ref().is_some_and(Tray::available);
         if !self.hide_window(ctx, available) {
             ctx.send_viewport_cmd(ViewportCommand::Close);
@@ -71,6 +94,13 @@ impl MinimalistApp {
             return false;
         }
         self.finish_inline_edit();
+        if let Some(id) = self.settings_list_id {
+            self.rename_list(id);
+        }
+        if !self.retry_dirty_lists() {
+            self.show_window(ctx);
+            return true;
+        }
         self.drag = None;
         self.hovered_title = None;
         self.window_hidden = true;
@@ -78,7 +108,8 @@ impl MinimalistApp {
         true
     }
 
-    fn show_window(&mut self, ctx: &egui::Context) {
+    /// Reveals and focuses the existing native window.
+    pub(super) fn show_window(&mut self, ctx: &egui::Context) {
         self.window_hidden = false;
         ctx.send_viewport_cmd(ViewportCommand::Visible(true));
         ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
@@ -136,6 +167,11 @@ impl MinimalistApp {
             return;
         }
         if close_requested {
+            if !self.finish_pending_changes() {
+                ctx.send_viewport_cmd(ViewportCommand::CancelClose);
+                self.show_window(ctx);
+                return;
+            }
             if self.hide_window(ctx, tray_available) {
                 ctx.send_viewport_cmd(ViewportCommand::CancelClose);
             }
@@ -150,28 +186,39 @@ impl MinimalistApp {
     }
 
     fn quit(&mut self, ctx: &egui::Context) {
-        self.finish_pending_changes();
+        if !self.finish_pending_changes() {
+            self.show_window(ctx);
+            return;
+        }
         self.quitting = true;
         ctx.send_viewport_cmd(ViewportCommand::Close);
     }
 
     /// Saves an active inline edit before navigating, hiding, or quitting.
     pub(super) fn finish_inline_edit(&mut self) {
+        self.finish_subtask_edit();
         if let Some((list_id, task_id)) = self.editing {
             self.commit_task_edit(list_id, task_id, &self.edit_text.clone());
         }
     }
 
     /// Saves inline text and accepted delete/archive actions before native shutdown.
-    pub(super) fn finish_pending_changes(&mut self) {
+    ///
+    /// # Returns
+    /// Whether every pending list and preference write succeeded.
+    pub(super) fn finish_pending_changes(&mut self) -> bool {
         self.drag = None;
         self.finish_inline_edit();
+        if let Some(id) = self.settings_list_id {
+            self.rename_list(id);
+        }
         if let Some((list_id, task_id, _)) = self.delete_animation.take() {
             self.remove_task(list_id, task_id);
         }
         if let Some((list_id, _)) = self.clear_animation.take() {
             self.archive_completed(list_id);
         }
+        self.retry_dirty_lists()
     }
 }
 

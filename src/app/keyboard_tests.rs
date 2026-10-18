@@ -266,7 +266,7 @@ fn immediate_arrows_override_entry_and_return_focus_requests() {
 }
 
 #[test]
-fn settings_round_trip_preserves_destination_and_rename_for_ctrl_and_cmd() {
+fn settings_shortcut_opens_global_preferences_and_preserves_destination_for_ctrl_and_cmd() {
     for comma_modifiers in [
         Modifiers {
             ctrl: true,
@@ -291,14 +291,17 @@ fn settings_round_trip_preserves_destination_and_rename_for_ctrl_and_cmd() {
         key(&ctx, &mut app, Key::Comma, comma_modifiers);
         key(&ctx, &mut app, Key::Comma, comma_modifiers);
         assert!(matches!(app.screen, Screen::Settings));
-        app.rename_input = "Renamed".into();
+        assert!(app.settings_list_id.is_none());
+        assert!(
+            ctx.read_response(Id::new(("settings-list-name", list)))
+                .is_none()
+        );
         key(&ctx, &mut app, Key::Escape, Modifiers::NONE);
         assert!(matches!(app.screen, Screen::List(id) if id == list));
         assert_eq!(
             ctx.memory(|m| m.focused()),
             Some(Id::new(("new-task", list)))
         );
-        assert_eq!(app.lists[0].data.title, "Renamed");
         key(
             &ctx,
             &mut app,

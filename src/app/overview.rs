@@ -10,8 +10,8 @@ use crate::model::Accent;
 use crate::storage;
 use eframe::egui;
 use egui::{
-    Align, Button, Color32, CornerRadius, CursorIcon, Frame, Id, Label, Layout, Margin, Rect,
-    ScrollArea, Sense, Stroke, Vec2,
+    Button, Color32, CornerRadius, CursorIcon, Frame, Id, Margin, Rect, ScrollArea, Sense, Stroke,
+    Vec2, text::LayoutJob,
 };
 use uuid::Uuid;
 
@@ -130,6 +130,7 @@ impl MinimalistApp {
                                     let selected = accent == self.new_list_accent;
                                     let response = ui.add(
                                         Button::new(self.rich(accent.label(), 13.0, p.text))
+                                            .selected(selected)
                                             .fill(if selected { p.raised } else { p.surface })
                                             .stroke(Stroke::new(
                                                 if selected { 2.0 } else { 0.0 },
@@ -149,24 +150,53 @@ impl MinimalistApp {
                                     }
                                 }
                             });
-                            ui.label(self.rich(
-                                "Down: colors · Up: name · Enter creates · Esc cancels",
-                                12.0,
-                                palette.muted,
-                            ));
+                            ui.add(
+                                egui::Label::new(self.rich(
+                                    "Down: colors · Up: name · Enter creates · Esc cancels",
+                                    12.0,
+                                    palette.muted,
+                                ))
+                                .wrap(),
+                            );
                             let (submit, cancel) = text_input_shortcuts(ui, &response);
-                            if submit {
+                            let (create_clicked, cancel_clicked) = ui
+                                .horizontal_wrapped(|ui| {
+                                    let create = ui.add_enabled(
+                                        !self.new_list_title.trim().is_empty(),
+                                        Button::new(self.rich("Create list", 15.0, palette.accent)),
+                                    );
+                                    let cancel = ui.add(Button::new(self.rich(
+                                        "Cancel",
+                                        15.0,
+                                        palette.muted,
+                                    )));
+                                    (create.clicked(), cancel.clicked())
+                                })
+                                .inner;
+                            if submit || create_clicked {
                                 self.create_list();
-                            } else if cancel {
+                                if self.creating_list {
+                                    response.request_focus();
+                                }
+                            } else if cancel || cancel_clicked {
                                 self.new_list_title.clear();
                                 self.creating_list = false;
                             }
                         });
                 } else if ui
                     .push_id("new-list", |ui| {
-                        ui.add(
-                            Button::new(self.rich("+ New list", 18.0, palette.accent)).frame(false),
+                        Self::readable_region(
+                            ui,
+                            palette,
+                            self.settings.background_opacity < 1.0,
+                            |ui| {
+                                ui.add(
+                                    Button::new(self.rich("+ New list", 18.0, palette.accent))
+                                        .frame(false),
+                                )
+                            },
                         )
+                        .inner
                     })
                     .inner
                     .on_hover_text(format!("New list ({})", shortcut(NEW_LIST)))
@@ -248,30 +278,65 @@ impl MinimalistApp {
         );
 
         let content_rect = card_rect.shrink2(Vec2::new(18.0, 16.0));
-        let mut card_ui = ui.new_child(
-            egui::UiBuilder::new()
-                .id_salt(("list-card-content", id))
-                .max_rect(content_rect)
-                .layout(Layout::top_down(Align::LEFT)),
+        let painter = ui
+            .painter()
+            .with_clip_rect(content_rect.intersect(ui.clip_rect()));
+        // Reserve the settings target and footer before laying out arbitrary user text.
+        let mut title_job = LayoutJob::simple(
+            title.to_owned(),
+            self.font_id(22.0),
+            card_palette.text,
+            (content_rect.width() - 24.0).max(1.0),
         );
-        card_ui.set_opacity(0.88 + hover * 0.12);
-        card_ui.add(Label::new(self.rich(title, 22.0, card_palette.text)).wrap());
-        card_ui.add_space(8.0);
-        for line in preview {
-            card_ui.add(
-                Label::new(self.rich(format!("— {line}"), 15.0, card_palette.muted)).truncate(),
+        title_job.wrap.max_rows = 2;
+        title_job.wrap.break_anywhere = true;
+        let title_galley = painter.layout_job(title_job);
+        let mut y = content_rect.top() + title_galley.size().y + 8.0;
+        painter.galley(content_rect.min, title_galley, card_palette.text);
+        let footer = painter.layout_no_wrap(
+            format!("{active} active / {completed} done"),
+            self.font_id(13.0),
+            card_palette.accent,
+        );
+        let footer_y = content_rect.bottom() - footer.size().y;
+        let empty = if completed > 0 { "All done" } else { "Empty" };
+        let lines: Vec<String> = if preview.is_empty() {
+            vec![empty.to_owned()]
+        } else {
+            preview.iter().map(|line| format!("— {line}")).collect()
+        };
+        for line in lines {
+            let mut job = LayoutJob::simple(
+                line,
+                self.font_id(15.0),
+                card_palette.muted,
+                content_rect.width(),
             );
+            job.wrap.max_rows = 1;
+            job.wrap.break_anywhere = true;
+            let galley = painter.layout_job(job);
+            if y + galley.size().y > footer_y - 6.0 {
+                break;
+            }
+            let height = galley.size().y;
+            painter.galley(
+                egui::pos2(content_rect.left(), y),
+                galley,
+                card_palette.muted,
+            );
+            y += height + 3.0;
         }
-        if preview.is_empty() {
-            card_ui.label(self.rich("Empty", 15.0, card_palette.muted));
+        painter.galley(
+            egui::pos2(content_rect.left(), footer_y),
+            footer,
+            card_palette.accent,
+        );
+        if response.has_focus() {
+            egui::Tooltip::for_widget(&response).show(|ui| {
+                ui.label(title);
+            });
         }
-        card_ui.with_layout(Layout::bottom_up(Align::LEFT), |ui| {
-            ui.label(self.rich(
-                format!("{active} active / {completed} done"),
-                13.0,
-                card_palette.accent,
-            ));
-        });
+        let response = response.on_hover_text(title);
 
         let settings_rect = Rect::from_center_size(
             card_rect.right_top() + Vec2::new(-18.0, 18.0),
@@ -293,7 +358,14 @@ impl MinimalistApp {
                 },
             )
             .inner
-            .on_hover_text("List settings");
+            .on_hover_text(format!("List options: {title}"));
+        settings.widget_info(|| {
+            egui::WidgetInfo::labeled(
+                egui::WidgetType::Button,
+                true,
+                format!("List options: {title}"),
+            )
+        });
         self.track_focus(&settings, FocusItem::Card(id));
 
         (response, settings)
@@ -321,5 +393,181 @@ impl MinimalistApp {
             }
             Err(error) => self.status = Some(error),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn frame(
+        ctx: &egui::Context,
+        app: &mut MinimalistApp,
+        events: Vec<egui::Event>,
+    ) -> egui::FullOutput {
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(320.0, 760.0),
+                )),
+                time: Some(ctx.input(|input| input.time) + 0.3),
+                events,
+                ..Default::default()
+            },
+            |ui| app.overview_ui(ui, app.palette()),
+        );
+        output.textures_delta.clear();
+        output
+    }
+
+    fn click_label(ctx: &egui::Context, app: &mut MinimalistApp, label: &str) {
+        let output = frame(ctx, app, Vec::new());
+        let point = output
+            .shapes
+            .iter()
+            .find_map(|shape| {
+                if let egui::epaint::Shape::Text(text) = &shape.shape
+                    && text.galley.text() == label
+                {
+                    Some(text.pos + text.galley.size() * 0.5)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(|| panic!("Missing button {label}"));
+        for pressed in [true, false] {
+            frame(
+                ctx,
+                app,
+                vec![
+                    egui::Event::PointerMoved(point),
+                    egui::Event::PointerButton {
+                        pos: point,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+            );
+        }
+    }
+
+    #[test]
+    fn creation_buttons_create_cancel_and_leave_blank_submission_focused() {
+        let (ctx, mut app) = super::super::tests::test_app();
+        app.creating_list = true;
+        app.request_list_focus = true;
+        for _ in 0..3 {
+            frame(&ctx, &mut app, Vec::new());
+        }
+        frame(
+            &ctx,
+            &mut app,
+            [true, false]
+                .into_iter()
+                .map(|pressed| egui::Event::Key {
+                    key: egui::Key::Enter,
+                    physical_key: None,
+                    pressed,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                })
+                .collect(),
+        );
+        frame(
+            &ctx,
+            &mut app,
+            vec![egui::Event::Text("Still focused".into())],
+        );
+        assert_eq!(app.new_list_title, "Still focused");
+        app.new_list_title.clear();
+        let before = app.lists.len();
+        click_label(&ctx, &mut app, "Create list");
+        assert!(app.creating_list);
+        assert_eq!(app.lists.len(), before);
+        app.new_list_title = "Pointer-created list".into();
+        click_label(&ctx, &mut app, "Create list");
+        assert!(!app.creating_list);
+        assert_eq!(app.lists.len(), before + 1);
+        let saved = storage::load_workspace(&app.workspace).unwrap();
+        assert!(
+            saved
+                .lists
+                .iter()
+                .any(|list| list.data.title == "Pointer-created list")
+        );
+        app.creating_list = true;
+        app.new_list_title = "Must not be created".into();
+        for _ in 0..3 {
+            frame(&ctx, &mut app, Vec::new());
+        }
+        click_label(&ctx, &mut app, "Cancel");
+        assert!(!app.creating_list);
+        assert!(app.new_list_title.is_empty());
+        assert_eq!(app.lists.len(), before + 1);
+        std::fs::remove_dir_all(&app.workspace).unwrap();
+    }
+
+    #[test]
+    fn long_cards_keep_title_preview_footer_and_options_inside_the_card() {
+        for width in [210.0, 288.0, 488.0] {
+            for font in [
+                crate::model::FontChoice::Sans,
+                crate::model::FontChoice::Mono,
+            ] {
+                for title in [
+                    "Long title with many words and line breaks\n".repeat(12),
+                    "W".repeat(1000),
+                ] {
+                    let (ctx, mut app) = super::super::tests::test_app();
+                    app.settings.font = font;
+                    app.settings.bold_text = true;
+                    let id = app.lists[0].key;
+                    let mut bounds = Rect::NOTHING;
+                    let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                        let (card, options) = app.list_card(
+                            ui,
+                            id,
+                            &title,
+                            Accent::Charcoal,
+                            3,
+                            0,
+                            &["Long preview ".repeat(80); 1],
+                            width,
+                        );
+                        bounds = card.rect;
+                        assert!(card.rect.contains_rect(options.rect));
+                    });
+                    for shape in &output.shapes {
+                        if let egui::epaint::Shape::Text(text) = &shape.shape {
+                            let rect = Rect::from_min_size(text.pos, text.galley.size());
+                            assert!(
+                                bounds.contains_rect(rect),
+                                "{font:?}, width={width}, {rect:?} outside {bounds:?}"
+                            );
+                            if text.galley.text() == title {
+                                assert!(text.galley.rows.len() <= 2);
+                            }
+                        }
+                    }
+                    output.textures_delta.clear();
+                    std::fs::remove_dir_all(&app.workspace).unwrap();
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn completed_only_card_says_all_done() {
+        let (ctx, mut app) = super::super::tests::test_app();
+        let id = app.lists[0].key;
+        let mut output = ctx.run_ui(Default::default(), |ui| {
+            app.list_card(ui, id, "Completed", Accent::Charcoal, 0, 2, &[], 288.0);
+        });
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::epaint::Shape::Text(text) if text.galley.text() == "All done")));
+        assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape, egui::epaint::Shape::Text(text) if text.galley.text() == "Empty")));
+        output.textures_delta.clear();
+        std::fs::remove_dir_all(&app.workspace).unwrap();
     }
 }

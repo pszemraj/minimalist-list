@@ -142,13 +142,26 @@ impl MinimalistApp {
             }
         }
         painter.galley(position, shown, palette.text);
-        if response.has_focus() {
+        let row_focused = if let super::Screen::List(list) = self.screen {
+            ui.memory(|memory| memory.focused())
+                == Some(super::keyboard::FocusItem::Task(list, task.id).id())
+        } else {
+            false
+        };
+        if response.has_focus() || row_focused {
             ui.painter().rect_stroke(
                 rect,
                 4.0,
                 Stroke::new(1.0, palette.accent),
                 egui::StrokeKind::Inside,
             );
+            if overflow > 0.0 {
+                egui::Tooltip::for_widget(&response).show(|ui| {
+                    ui.add(
+                        egui::Label::new(self.content_rich(&task.text, 16.0, palette.text)).wrap(),
+                    );
+                });
+            }
         }
         response.on_hover_cursor(egui::CursorIcon::Text)
     }
@@ -180,6 +193,41 @@ mod tests {
             assert!(app.task_row_height(&wrapped) > single_height);
             assert!(wrapped.size().x <= 120.0);
         });
+        std::fs::remove_dir_all(&app.workspace).unwrap();
+    }
+
+    #[test]
+    fn primary_keyboard_row_focus_exposes_the_full_truncated_title() {
+        let (ctx, mut app) = super::super::tests::test_app();
+        let list = app.lists[0].key;
+        let task = Task::new(
+            "A long task title that must remain readable through keyboard focus, including the entire final sentence.",
+        );
+        let id = task.id;
+        app.lists[0].data.tasks.push(task.clone());
+        app.request_task_focus = false;
+        let mut frame = || {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(320.0, 520.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| app.list_ui(ui, list, app.palette()),
+            );
+            output.textures_delta.clear();
+            output
+        };
+        frame();
+        ctx.memory_mut(|memory| {
+            memory.request_focus(super::super::keyboard::FocusItem::Task(list, id).id())
+        });
+        frame();
+        frame();
+        let output = frame();
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::epaint::Shape::Text(text) if text.galley.text() == task.text && text.galley.rows.len() > 1)));
         std::fs::remove_dir_all(&app.workspace).unwrap();
     }
 }

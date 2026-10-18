@@ -96,6 +96,7 @@ impl MinimalistApp {
         let (submit, _) = text_input_shortcuts(ui, &create_response);
         if submit {
             self.add_task(list_id);
+            create_response.request_focus();
         }
 
         let top_drag = ui.allocate_response(Vec2::new(ui.available_width(), 14.0), Sense::drag());
@@ -107,11 +108,18 @@ impl MinimalistApp {
         let tasks = self.lists[index].data.tasks.clone();
         let archive_count = self.lists[index].data.archive.len();
         let completed_count = self.lists[index].data.completed_count();
-        let mut action: Option<RowAction> = None;
+        let mut actions = Vec::new();
         let mut row_centers = Vec::new();
         let mut row_heights = Vec::new();
+        if self.drag.as_ref().is_some_and(|drag| {
+            drag.list_id != list_id
+                || tasks.get(drag.source).map(|task| task.id) != Some(drag.task_id)
+        }) {
+            self.drag = None;
+        }
 
         ScrollArea::vertical()
+            .id_salt(("task-list-scroll", &self.workspace, list_id))
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 for (task_index, task) in tasks.iter().enumerate() {
@@ -130,8 +138,8 @@ impl MinimalistApp {
                         )
                         .inner;
                     row_heights.push(ui.next_widget_position().y - row_top);
-                    if row_action.is_some() {
-                        action = row_action;
+                    if let Some(row_action) = row_action {
+                        actions.push(row_action);
                     }
                     if entry_progress < 1.0 {
                         ui.add_space(-row_height * (1.0 - entry_progress));
@@ -143,41 +151,66 @@ impl MinimalistApp {
                 if tasks.is_empty() {
                     ui.vertical_centered(|ui| {
                         ui.add_space(42.0);
-                        ui.label(self.rich("Nothing here.", 20.0, palette.muted));
-                        ui.label(self.rich("Type above and press Enter.", 14.0, palette.muted));
+                        Self::readable_region(
+                            ui,
+                            palette,
+                            self.settings.background_opacity < 1.0,
+                            |ui| {
+                                ui.label(self.rich("Nothing here.", 20.0, palette.muted));
+                                ui.label(self.rich(
+                                    "Type above and press Enter.",
+                                    14.0,
+                                    palette.muted,
+                                ));
+                            },
+                        );
                     });
                 }
                 ui.add_space(24.0);
-                if completed_count > 0
-                    && ui
-                        .add(
-                            Button::new(self.rich(
-                                format!("Clear {completed_count} completed"),
-                                15.0,
-                                palette.muted,
-                            ))
-                            .frame(false),
-                        )
-                        .clicked()
-                {
-                    self.begin_clear_completed(list_id);
-                }
-                if archive_count > 0 {
-                    let history = ui
-                        .push_id(("history-toggle", list_id), |ui| {
+                if completed_count > 0 {
+                    let archive = Self::readable_region(
+                        ui,
+                        palette,
+                        self.settings.background_opacity < 1.0,
+                        |ui| {
                             ui.add(
                                 Button::new(self.rich(
-                                    format!(
-                                        "{} history ({archive_count})",
-                                        if self.history_open { "Hide" } else { "Show" }
-                                    ),
+                                    format!("Archive {completed_count} completed"),
                                     15.0,
-                                    palette.accent,
+                                    palette.muted,
                                 ))
                                 .frame(false),
                             )
-                        })
-                        .inner;
+                        },
+                    )
+                    .inner;
+                    if archive.clicked() {
+                        self.begin_clear_completed(list_id);
+                    }
+                }
+                if archive_count > 0 {
+                    let history = Self::readable_region(
+                        ui,
+                        palette,
+                        self.settings.background_opacity < 1.0,
+                        |ui| {
+                            ui.push_id(("history-toggle", list_id), |ui| {
+                                ui.add(
+                                    Button::new(self.rich(
+                                        format!(
+                                            "{} history ({archive_count})",
+                                            if self.history_open { "Hide" } else { "Show" }
+                                        ),
+                                        15.0,
+                                        palette.accent,
+                                    ))
+                                    .frame(false),
+                                )
+                            })
+                            .inner
+                        },
+                    )
+                    .inner;
                     self.keyboard.history_toggle = Some(history.id);
                     if history.clicked() {
                         self.history_open = !self.history_open;
@@ -203,14 +236,52 @@ impl MinimalistApp {
                         self.history_ui(ui, list_id, palette, history_progress);
                     });
                 }
-                self.keyboard_focus_ui(ui, palette);
+                // The fixed entry lives outside this scroller. Restoring its
+                // focus must not move the list's remembered scroll position.
+                if ui.ctx().memory(|memory| memory.focused()) != Some(create_response.id) {
+                    self.keyboard_focus_ui(ui, palette);
+                }
+                if let Some(drag) = self.drag.as_ref()
+                    && drag.delta.y.abs() >= drag.delta.x.abs() * 1.25
+                    && let Some(pointer) = ui.input(|input| {
+                        input
+                            .pointer
+                            .primary_down()
+                            .then(|| input.pointer.latest_pos())
+                            .flatten()
+                    })
+                {
+                    let viewport = ui.clip_rect();
+                    let edge = 42.0;
+                    let direction = if pointer.y < viewport.top() + edge {
+                        ((viewport.top() + edge - pointer.y) / edge).clamp(0.0, 1.0)
+                    } else {
+                        -((pointer.y - viewport.bottom() + edge) / edge).clamp(0.0, 1.0)
+                    };
+                    if direction != 0.0
+                        && pointer.x >= viewport.left()
+                        && pointer.x <= viewport.right()
+                    {
+                        let step = ui.input(|input| input.stable_dt.min(0.05)) * 480.0;
+                        ui.scroll_with_delta_animation(
+                            Vec2::new(0.0, direction * step),
+                            egui::style::ScrollAnimation::none(),
+                        );
+                        ui.ctx()
+                            .request_repaint_after(std::time::Duration::from_millis(16));
+                    }
+                }
             });
 
         if let Some(drag) = &mut self.drag {
             drag.target = reorder_target(&row_centers, drag.source_center + drag.delta.y);
             drag.height = row_heights[drag.source];
         }
-        if let Some(action) = action {
+        // A pointer click can blur one editor and activate another row in the
+        // same frame. Save the outgoing text before applying any incoming action,
+        // independently of whether that row appears above or below the editor.
+        actions.sort_by_key(|action| !matches!(action, RowAction::CommitEdit(..)));
+        for action in actions {
             self.apply_row_action(action);
         }
     }
@@ -229,6 +300,16 @@ impl MinimalistApp {
             self.request_task_focus = true;
             self.keyboard.pending = Some(Id::new(("new-task", list_id)));
         }
+    }
+
+    /// Shows the same task actions on its row and its title hit region.
+    fn task_context_menu(&mut self, response: &egui::Response, list: Uuid, task: Uuid) {
+        response.context_menu(|ui| {
+            if ui.button("Move to list…").clicked() {
+                self.begin_move_task(list, task);
+                ui.close();
+            }
+        });
     }
 
     fn task_entry_progress(&self, task_id: Uuid) -> f32 {
@@ -272,6 +353,7 @@ impl MinimalistApp {
             )
         });
         self.track_focus(&response, FocusItem::Task(list_id, task.id));
+        self.task_context_menu(&response, list_id, task.id);
         let mut row_ui = parent_ui.new_child(
             egui::UiBuilder::new()
                 .id_salt(("row", task.id))
@@ -305,6 +387,10 @@ impl MinimalistApp {
                 .total_drag_delta()
                 .or_else(|| remembered_drag.as_ref().map(|drag| drag.delta))
                 .unwrap_or(Vec2::ZERO)
+        } else if response.drag_stopped() {
+            remembered_drag.as_ref().map_or(Vec2::ZERO, |drag| {
+                drag.delta + ui.input(|input| input.pointer.delta())
+            })
         } else {
             remembered_drag
                 .as_ref()
@@ -325,7 +411,9 @@ impl MinimalistApp {
             animated_x
         };
         let offset_y = if drag_active && !horizontal {
-            drag_delta.y
+            remembered_drag.as_ref().map_or(drag_delta.y, |drag| {
+                drag.source_center + drag_delta.y - rect.center().y
+            })
         } else {
             0.0
         };
@@ -387,7 +475,7 @@ impl MinimalistApp {
                 Align2::CENTER_CENTER,
                 "Del",
                 self.font_id(13.0),
-                paint_palette.text.linear_multiply(opacity),
+                Color32::from_rgb(50, 10, 16).linear_multiply(opacity),
             );
         }
 
@@ -517,6 +605,7 @@ impl MinimalistApp {
         });
         if let Some(response) = &text_response {
             self.track_focus(response, FocusItem::Task(list_id, task.id));
+            self.task_context_menu(response, list_id, task.id);
         }
 
         if !is_editing {
@@ -657,7 +746,7 @@ impl MinimalistApp {
                     height: rect.height(),
                 });
             }
-            if response.dragged()
+            if (response.dragged() || response.drag_stopped())
                 && let Some(drag) = self
                     .drag
                     .as_mut()
@@ -715,6 +804,10 @@ impl MinimalistApp {
             }
             RowAction::Delete(list_id, task_id) => self.begin_delete_task(list_id, task_id),
             RowAction::BeginEdit(list_id, task_id, text) => {
+                if self.editing == Some((list_id, task_id)) {
+                    return;
+                }
+                self.finish_inline_edit();
                 self.editing = Some((list_id, task_id));
                 self.edit_text = text;
                 self.request_edit_focus = true;
@@ -738,12 +831,12 @@ impl MinimalistApp {
                 }
             }
             RowAction::Subtasks(list_id, task_id) => {
-                self.subtasks_for = if self.subtasks_for == Some((list_id, task_id)) {
+                let target = if self.subtasks_for == Some((list_id, task_id)) {
                     None
                 } else {
                     Some((list_id, task_id))
                 };
-                self.new_subtask.clear();
+                self.switch_subtask_panel(target);
             }
             RowAction::FinishDrag => {
                 if let Some(drag) = self.drag.take() {
@@ -794,7 +887,9 @@ impl MinimalistApp {
             task.text = text.to_owned();
             self.save_list_index(index);
         }
-        self.editing = None;
+        if self.editing == Some((list_id, task_id)) {
+            self.editing = None;
+        }
     }
 }
 
@@ -824,3 +919,7 @@ mod tests {
         assert_eq!(reorder_target(&centers, 500.0), 2);
     }
 }
+
+#[cfg(test)]
+#[path = "list_regression_tests.rs"]
+mod regression_tests;
