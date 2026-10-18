@@ -6,7 +6,12 @@
 )]
 
 mod app;
+mod hotkey;
 mod instance;
+#[cfg(target_os = "linux")]
+mod linux;
+#[cfg(any(target_os = "linux", test))]
+mod linux_cursor;
 #[cfg(target_os = "macos")]
 mod macos;
 mod model;
@@ -145,7 +150,7 @@ fn main() -> eframe::Result {
         persistence_path: Some(storage::window_state_path()),
         viewport: egui::ViewportBuilder::default()
             .with_app_id("minimalist-list")
-            .with_icon(tray::icon_data())
+            .with_icon(tray::window_icon_data())
             .with_inner_size([520.0, 760.0])
             .with_min_inner_size([320.0, 280.0])
             .with_transparent(true)
@@ -183,13 +188,18 @@ fn main() -> eframe::Result {
         }));
         options
     };
-    eframe::run_native(
+    #[cfg(target_os = "linux")]
+    let run_native = linux::run_native;
+    #[cfg(not(target_os = "linux"))]
+    let run_native = eframe::run_native;
+    run_native(
         "Minimalist List",
         options,
         Box::new(move |cc| {
             let mut app = MinimalistApp::new(&cc.egui_ctx, settings, workspace_override, warning);
             app.set_instance_guard(instance, &cc.egui_ctx);
             app.setup_tray(&cc.egui_ctx, tray_supported);
+            app.setup_global_shortcut(&cc.egui_ctx);
             if start_hidden {
                 app.start_hidden(&cc.egui_ctx);
             }

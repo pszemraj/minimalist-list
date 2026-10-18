@@ -92,6 +92,7 @@ impl SearchHit {
 impl MinimalistApp {
     /// Opens the keyboard reference without discarding a capture or search draft.
     pub(super) fn open_shortcuts(&mut self) {
+        self.cancel_overview_drag();
         if self.shortcuts.is_some() {
             return;
         }
@@ -107,6 +108,7 @@ impl MinimalistApp {
 
     /// Opens quick capture, preferring the hinted list when no saved destination applies.
     pub(super) fn open_quick_capture(&mut self, hinted_list_id: Option<Uuid>) {
+        self.cancel_overview_drag();
         self.drag = None;
         if self.quick_capture.is_none() && self.find.is_none() {
             self.keyboard.overlay_return = self.navigation_return_focus();
@@ -148,6 +150,7 @@ impl MinimalistApp {
 
     /// Opens global search and requests focus for its query field.
     pub(super) fn open_find(&mut self) {
+        self.cancel_overview_drag();
         self.drag = None;
         if self.quick_capture.is_none() && self.find.is_none() {
             self.keyboard.overlay_return = self.navigation_return_focus();
@@ -244,6 +247,11 @@ impl MinimalistApp {
                         ui.add_space(10.0);
                         ui.label(self.rich(heading, 17.0, palette.accent));
                         for (action, keys) in shortcuts {
+                            let keys = if action == "Show window (global)" {
+                                crate::hotkey::label(&self.settings.global_shortcut)
+                            } else {
+                                keys
+                            };
                             if ui.available_width() < 380.0 {
                                 ui.label(self.rich(action, 14.0, palette.text));
                                 ui.label(self.rich(keys, 13.0, palette.muted));
@@ -419,21 +427,20 @@ impl MinimalistApp {
                 let mut candidate = self.lists[index].clone();
                 let task_id = task.id;
                 candidate.data.tasks.insert(0, task);
+                self.prepare_list_for_save(&mut candidate);
                 match crate::storage::save_list(&candidate) {
                     Ok(()) => {
                         let title = candidate.data.title.clone();
                         self.lists[index] = candidate;
-                        self.persistence.dirty_lists.remove(&list_id);
-                        if let Err(error) = crate::storage::update_fingerprint_for_file(
-                            &mut self.fingerprint,
-                            &self.lists[index].path,
-                        ) {
-                            self.status = Some(error);
-                        }
+                        self.apply_task_sorts();
+                        self.complete_list_save(index);
                         self.newest_task = Some((task_id, Instant::now()));
                         self.settings.last_capture_list_id = Some(list_id);
                         self.save_settings();
-                        if !self.persistence.settings_dirty {
+                        if !self.persistence.settings_dirty
+                            && self.persistence.dirty_lists.is_empty()
+                            && self.persistence.pending_filenames.is_empty()
+                        {
                             self.status = None;
                         }
                         self.acknowledge(format!("Added to {title}"));

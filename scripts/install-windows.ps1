@@ -15,12 +15,14 @@ $shell = New-Object -ComObject WScript.Shell
 $launcher = $shell.CreateShortcut((Join-Path $programs 'Minimalist List.lnk'))
 $launcher.TargetPath = $binary
 $launcher.WorkingDirectory = $installRoot
+$launcher.IconLocation = "$binary,0"
 $launcher.Save()
 
 $login = $shell.CreateShortcut((Join-Path $startup 'Minimalist List.lnk'))
 $login.TargetPath = $binary
 $login.Arguments = '--start-hidden'
 $login.WorkingDirectory = $installRoot
+$login.IconLocation = "$binary,0"
 $login.Save()
 
 Write-Output 'Installed Minimalist List. Open it from Start; it starts in the tray at your next sign-in.'

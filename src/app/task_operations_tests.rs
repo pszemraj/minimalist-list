@@ -20,6 +20,7 @@ fn archive_commits_completed_editor_and_retires_its_checklist() {
     let (_ctx, mut app) = test_app();
     let list = app.lists[0].key;
     let mut task = Task::new("Before");
+    task.context = "Keep archived context".into();
     task.toggle();
     task.subtasks.push(Subtask::new("Checklist"));
     let id = task.id;
@@ -32,6 +33,10 @@ fn archive_commits_completed_editor_and_retires_its_checklist() {
     assert!(app.editing.is_none());
     assert!(app.subtasks_for.is_none());
     assert_eq!(saved(&app, 0).archive[0].task.text, "After");
+    assert_eq!(
+        saved(&app, 0).archive[0].task.context,
+        "Keep archived context"
+    );
     assert_eq!(saved(&app, 0).archive[0].task.subtasks[0].text, "Checklist");
     fs::remove_dir_all(&app.workspace).unwrap();
 }
@@ -41,6 +46,7 @@ fn task_and_child_undo_restore_identity_content_completion_and_position() {
     let (_ctx, mut app) = test_app();
     let list = app.lists[0].key;
     let mut middle = Task::new("Keep all content");
+    middle.context = "Preserve hidden context\nand links".into();
     middle.toggle();
     middle.subtasks = ["First", "Middle", "Last"].map(Subtask::new).to_vec();
     middle.subtasks[1].completed = true;
@@ -104,6 +110,7 @@ fn move_keeps_one_copy_and_preserves_entire_task() {
     let dest_id = destination.key;
     app.lists.push(destination);
     let mut task = Task::new("Move me");
+    task.context = "Move supporting details intact".into();
     task.toggle();
     task.subtasks.push(Subtask::new("Child"));
     task.subtasks[0].completed = true;
@@ -457,5 +464,55 @@ fn child_undo_follows_its_parent_after_move_to_another_list() {
     app.undo_delete();
     assert!(saved(&app, 0).tasks.is_empty());
     assert_eq!(saved(&app, 1).tasks[0].subtasks[0].id, child);
+    fs::remove_dir_all(&app.workspace).unwrap();
+}
+
+#[test]
+fn deletion_undo_and_history_restore_keep_manual_positions_while_view_is_sorted() {
+    let (_ctx, mut app) = test_app();
+    let list = app.lists[0].key;
+    app.lists[0].data.tasks = ["Zulu", "Alpha", "Middle"].map(Task::new).to_vec();
+    app.lists[0].data.tasks[1].context = "Hidden details must survive sorted Undo".into();
+    let original: Vec<_> = app.lists[0].data.tasks.iter().map(|task| task.id).collect();
+    app.save_list_index(0);
+    app.sort_tasks(list, crate::model::TaskSort::Title);
+    app.remove_task(list, original[1]);
+    app.undo_delete();
+    assert_eq!(
+        saved(&app, 0)
+            .tasks
+            .iter()
+            .map(|task| task.id)
+            .collect::<Vec<_>>(),
+        original
+    );
+    assert_eq!(
+        saved(&app, 0).tasks[1].context,
+        "Hidden details must survive sorted Undo"
+    );
+    let archived = Task::new("Restored last in Manual");
+    let restored_id = archived.id;
+    app.lists[0].data.archive.push(ArchivedTask::new(archived));
+    app.restore_archived(list, restored_id);
+    let mut expected = original;
+    expected.push(restored_id);
+    assert_eq!(
+        saved(&app, 0)
+            .tasks
+            .iter()
+            .map(|task| task.id)
+            .collect::<Vec<_>>(),
+        expected
+    );
+    app.sort_tasks(list, crate::model::TaskSort::Manual);
+    assert_eq!(
+        app.lists[0]
+            .data
+            .tasks
+            .iter()
+            .map(|task| task.id)
+            .collect::<Vec<_>>(),
+        expected
+    );
     fs::remove_dir_all(&app.workspace).unwrap();
 }

@@ -1,6 +1,8 @@
 # Using Minimalist List
 
-Shortcuts work while the application has keyboard focus. On macOS, use Command in place of Ctrl, except list switching uses Control on every platform. Home and End are Fn+Left and Fn+Right on MacBook keyboards; Page Up and Page Down are Fn+Up and Fn+Down.
+The global reveal shortcut works while another application has focus: `Ctrl+Alt+Shift+L`, or `Cmd+Option+Shift+L` on macOS. It shows the existing window and keeps it visible on repeated presses. Change or disable it in **Settings → Global shortcut**; registration conflicts are reported without replacing the previous shortcut. The app must be running. Native Wayland requires a desktop shortcut that launches the app; its built-in registration uses X11.
+
+Other shortcuts work while the application has keyboard focus. On macOS, use Command in place of Ctrl, except list switching uses Control on every platform. Home and End are Fn+Left and Fn+Right on MacBook keyboards; Page Up and Page Down are Fn+Up and Fn+Down.
 
 Press `Ctrl+/` (`Cmd+/` on macOS) to show the in-app keyboard shortcut reference. Keyboard layouts that require Shift to type `/` are supported. Use Up/Down, Page Up/Page Down, or Home/End to scroll it. Escape or **Close** returns focus to the control you left. Quick add drafts and Find queries remain available underneath the reference.
 
@@ -14,6 +16,8 @@ Press Backspace (`Delete` on macOS) from an empty task entry or a focused task r
 
 Open **List options** from a list header or card to rename, recolor, or delete that list. **Delete list** shows its name and affected task and History counts, then requires a separate **Confirm delete list** activation. **Cancel deletion** backs out; holding Enter or Space cannot confirm it. At least one list must remain.
 
+In **Manual** order, drag overview tiles to rearrange them; the order is remembered separately for each workspace. **Sort lists** temporarily shows title, newest, or oldest order. Return to **Manual** to recover the arrangement. In Wrap mode, hovering a card or task for two seconds shows its full title and basic information; context stays hidden.
+
 <img src="../assets/lists.png" alt="Four example lists with accent colors, task previews, and completion counts" width="360">
 
 ## Capture and edit tasks
@@ -24,9 +28,15 @@ Down from task entry focuses the first task. Up and Down move between task rows,
 
 Right opens a task's checklist and focuses its first child, or its add field when empty. Up/Down moves through children and the add field; Down from an expanded parent enters its checklist. Up from the first child returns to its parent. Home selects the first child and End reaches the add field when a child control is focused. Enter or Space on a child's completion control toggles it. Left outside text, or Escape, closes the checklist and returns to its parent. Moving through an open checklist preserves its unfinished entry; Left/Right/Home/End inside the entry keep editing text.
 
+Enable **Settings → Appearance → Show subtasks below tasks** to preview every task's children. Each task's chevron collapses or expands its preview independently; **Edit subtasks** opens the full checklist editor. With this preference off, the checklist opens only when requested. The larger plus, copy, and delete controls remain available beside each task.
+
 `Ctrl+N` or the header's `add` action opens Quick add. A new capture from an open list defaults to that list; Lists and Settings use the last successful destination. Choose a list and press Enter or **Add**; a successful capture names its destination. Switching between Quick add and Find preserves their drafts and destination. An existing capture draft keeps its chosen destination; Escape cancels that capture.
 
 Click task or child text to edit it inline; Tab also reaches child text, where Enter or Space starts editing. Enter or leaving the editor saves; Escape cancels. Editing a child preserves its position and completion. Task editors save before navigating, archiving, hiding, or quitting. The checklist and delete controls on the right become prominent on hover and remain keyboard-focusable.
+
+Right-click a task and choose **Add context…** or **Edit context…** for supporting text. The multiline popup uses explicit **Save** and **Cancel**; context is not displayed in ordinary rows. Its presence is indicated beside the task. Archived context can be inspected without restoring the task.
+
+Use a task's copy icon or `Ctrl+Shift+C` (`Cmd+Shift+C` on macOS) while any part of that task is focused to copy its title, context, and complete checklist with completion markers. This includes active title/child drafts; ordinary `Ctrl+C`/`Cmd+C` retains selected-text copying. Successful copying shows an acknowledgement.
 
 ## Complete, reorder, and remove tasks
 
@@ -35,6 +45,8 @@ Use the circle on the left to complete or reactivate a task. It is keyboard-focu
 Space on a focused task row toggles completion. `Alt+Up` and `Alt+Down` move that task one position (Option on macOS), keeping it focused. Moving past the first or last position leaves the list file untouched. Forward Delete on a focused task row removes it (`Fn+Delete` on Mac keyboards). Delete, Space, and Enter on task rows act once per press; arrow navigation and reordering repeat while held. These row commands do not apply while editing text.
 
 Drag a task vertically to reorder it. Drag right past the threshold to complete or reactivate it. Drag left to reveal Edit and Delete, then drag right to close those actions. Opening Quick add, Find, or the shortcut reference cancels an unfinished drag.
+
+**List options → Sort** selects Manual, Title, Newest, Oldest, or Incomplete first. Sorting changes the view while the JSON keeps manual order. New tasks, edits, completion, Undo, and external reloads preserve that arrangement. Switch to Manual before dragging or using the reorder shortcuts.
 
 `Ctrl+Shift+Backspace` (`Shift+Cmd+Delete` on macOS) or **Archive completed** moves completed tasks into restorable History. With no completed tasks, it leaves the list file untouched.
 
@@ -64,6 +76,8 @@ Escape dismisses one layer per press: an open dropdown, the shortcut reference, 
 
 `Ctrl+,` opens global **Settings**, including layouts that require Shift to type a comma. Workspace, window, and appearance preferences apply to every list. **Current list options** opens the selected list's rename, accent, and deletion controls; **App settings** returns to global preferences. The list header and card open **List options** directly.
 
+**Workspace → Open workspace folder** opens the active folder in Finder, Explorer, or the system file manager.
+
 Escape returns to the previous screen and restores focus. Applied preferences remain saved. Leaving a list-name field, quitting, or switching workspaces applies its rename; an unchanged field preserves external renames. A typed workspace path requires Enter or **Use typed path**; a blank path does nothing, and an unchanged path preserves the current list.
 
 In Settings, use Up/Down to move between rows and Left/Right to move within a row of choices. Enter or Space activates the focused control. Left/Right adjust a focused slider or move the cursor in a text field. Slider steps are 1 for text size and row spacing, and 1% for opacity. Page Up/Page Down jump between the current screen's sections, scrolling the focused control into view.
@@ -87,6 +101,8 @@ The [installation scripts](../README.md#install-and-run) enable startup for the 
 Closing or minimizing the window saves any inline edit and hides it in the system tray (the menu bar on macOS), removing its taskbar entry where applicable. Open the tray icon's menu and choose **Show Minimalist List** to restore it or **Quit** to exit. Activating the icon also restores the window on desktops that support it. Shared-folder polling continues while hidden. Launching the executable again for the same workspace and local settings asks the existing instance to show its window; duplicate `--start-hidden` launches stay quiet. Different workspaces can run separately.
 
 Linux uses X11 or XWayland for hiding and restoration when a desktop tray host is available, such as GNOME's AppIndicator extension or KDE's system tray. Without a usable tray, the app keeps the normal window backend and close/minimize behavior without a startup warning. If the tray host disappears while hidden, the window returns. Exiting saves inline edits and accepted archive/delete actions. If task changes cannot be saved, the window stays available with **Retry save**; recover the folder and retry before quitting.
+
+On X11, cursor theme and size follow the desktop's XSettings, including its display scale. Explicit `XCURSOR_THEME` and `XCURSOR_SIZE` overrides take precedence. Restart the app after changing these desktop settings; native Wayland uses its existing cursor backend.
 
 On macOS, reopening the running app bundle through Finder or `open` restores its existing window. The app uses the menu bar without a Dock icon, including while its window is open. The minimize button is disabled because a hidden minimized window would remain in the Dock; close hides the window instead. The installer places the app in `~/Applications` and a launch agent in `~/Library/LaunchAgents`. Hidden startup avoids requesting activation over another app. **Quit** exits for the remainder of the session; the launch agent does not keep restarting it.
 

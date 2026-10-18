@@ -2,6 +2,8 @@
 
 #[cfg(test)]
 mod adversarial_tests;
+mod context;
+mod desktop;
 mod drafts;
 mod keyboard;
 mod list;
@@ -11,6 +13,7 @@ mod persistence;
 #[cfg(test)]
 mod persistence_tests;
 mod settings;
+mod sorting;
 mod task_details;
 mod task_text;
 mod theme;
@@ -98,6 +101,8 @@ pub struct MinimalistApp {
 
     revealed: Option<(Uuid, Uuid)>,
     drag: Option<DragState>,
+    overview_drag: Option<overview::OverviewDrag>,
+    overview_hover: Option<(Uuid, f64)>,
     history_open: bool,
 
     workspace_input: String,
@@ -122,6 +127,9 @@ pub struct MinimalistApp {
     tray: Option<crate::tray::Tray>,
     window_hidden: bool,
     instance: Option<crate::instance::InstanceGuard>,
+    global_shortcut: Option<crate::hotkey::GlobalShortcut>,
+    global_shortcut_input: String,
+    task_context: Option<context::TaskContextEditor>,
     #[cfg(target_os = "macos")]
     reopen: Option<crate::macos::ReopenHandler>,
     quitting: bool,
@@ -212,8 +220,13 @@ impl MinimalistApp {
             })
             .unwrap_or_else(|| Palette::from_accent(Accent::Charcoal));
         let workspace_input = settings.workspace_path.clone();
+        let global_shortcut_input = if settings.global_shortcut.is_empty() {
+            String::new()
+        } else {
+            crate::hotkey::label(&settings.global_shortcut)
+        };
 
-        Self {
+        let mut app = Self {
             settings,
             persisted_workspace_path,
             workspace,
@@ -236,6 +249,8 @@ impl MinimalistApp {
             new_subtask: String::new(),
             revealed: None,
             drag: None,
+            overview_drag: None,
+            overview_hover: None,
             history_open: false,
             workspace_input,
             rename_input: String::new(),
@@ -259,6 +274,9 @@ impl MinimalistApp {
             tray: None,
             window_hidden: false,
             instance: None,
+            global_shortcut: None,
+            global_shortcut_input,
+            task_context: None,
             #[cfg(target_os = "macos")]
             reopen: None,
             quitting: false,
@@ -268,7 +286,11 @@ impl MinimalistApp {
             details: task_details::TaskDetailsState::default(),
             capture_draft: None,
             find_draft: None,
-        }
+        };
+        app.apply_list_order();
+        app.capture_loaded_task_orders();
+        app.apply_task_sorts();
+        app
     }
 
     fn list_index(&self, id: Uuid) -> Option<usize> {
@@ -390,6 +412,7 @@ impl MinimalistApp {
     }
 
     fn begin_transition(&mut self, direction: f32) {
+        self.cancel_overview_drag();
         self.drag = None;
         self.hovered_title = None;
         self.view_zoom = 0.0;
@@ -466,6 +489,11 @@ impl MinimalistApp {
             .unwrap_or_default();
         self.rename_baseline.clone_from(&self.rename_input);
         self.workspace_input = self.settings.workspace_path.clone();
+        self.global_shortcut_input = if self.settings.global_shortcut.is_empty() {
+            String::new()
+        } else {
+            crate::hotkey::label(&self.settings.global_shortcut)
+        };
         self.delete_armed = false;
         self.begin_transition(1.0);
         self.screen = Screen::Settings;
@@ -487,9 +515,12 @@ impl MinimalistApp {
     fn scan_external_changes(&mut self) {
         if Instant::now() < self.next_scan
             || self.drag.is_some()
+            || self.overview_drag.is_some()
+            || self.task_context.is_some()
             || self.editing.is_some()
             || self.details.editor.is_some()
             || !self.persistence.dirty_lists.is_empty()
+            || !self.persistence.pending_filenames.is_empty()
             || self.persistence.workspace_failure.is_some()
         {
             return;
@@ -518,7 +549,11 @@ impl MinimalistApp {
                     }
                 }
                 storage::sort_lists(&mut lists);
+                self.cancel_overview_drag();
                 self.lists = lists;
+                self.apply_list_order();
+                self.capture_loaded_task_orders_except(&snapshot.failed_paths);
+                self.apply_task_sorts();
                 self.fingerprint = snapshot.fingerprint;
                 if !snapshot.warnings.is_empty() {
                     self.status = Some(snapshot.warnings.join("\n"));
@@ -607,6 +642,9 @@ impl MinimalistApp {
                 self.persisted_workspace_path = self.settings.workspace_path.clone();
                 self.workspace_input = self.settings.workspace_path.clone();
                 self.lists = snapshot.lists;
+                self.apply_list_order();
+                self.capture_loaded_task_orders();
+                self.apply_task_sorts();
                 self.fingerprint = snapshot.fingerprint;
                 if !snapshot.warnings.is_empty() {
                     self.status = Some(snapshot.warnings.join("\n"));
@@ -665,6 +703,7 @@ impl eframe::App for MinimalistApp {
             self.show_window(ctx);
         }
         self.handle_window_actions(ctx, minimized);
+        self.poll_global_shortcut(ctx);
         self.apply_window_preferences(ctx);
         self.update_motion(ctx);
         self.scan_external_changes();
@@ -753,6 +792,7 @@ impl eframe::App for MinimalistApp {
             || self.persistence.notice.is_some()
             || self.persistence.settings_dirty
             || !self.persistence.dirty_lists.is_empty()
+            || !self.persistence.pending_filenames.is_empty()
             || self.persistence.workspace_failure.is_some()
         {
             let mut status_ui = ui.new_child(
@@ -775,6 +815,7 @@ impl eframe::App for MinimalistApp {
             || self.find.is_some()
             || self.shortcuts.is_some()
             || self.details.move_task.is_some()
+            || self.task_context.is_some()
         {
             content_ui.disable();
         }
@@ -788,6 +829,7 @@ impl eframe::App for MinimalistApp {
         self.keyboard_focus_ui(&mut content_ui, palette);
         self.overlay_ui(ui.ctx(), palette);
         self.task_operations_ui(ui.ctx());
+        self.task_context_ui(ui.ctx());
         self.finish_keyboard_frame(ui.ctx());
     }
 }

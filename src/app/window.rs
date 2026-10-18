@@ -93,6 +93,10 @@ impl MinimalistApp {
         if !tray_available {
             return false;
         }
+        if !self.save_task_context() {
+            self.show_window(ctx);
+            return true;
+        }
         self.finish_inline_edit();
         if let Some(id) = self.settings_list_id {
             self.rename_list(id);
@@ -207,6 +211,9 @@ impl MinimalistApp {
     /// # Returns
     /// Whether every pending list and preference write succeeded.
     pub(super) fn finish_pending_changes(&mut self) -> bool {
+        if !self.save_task_context() {
+            return false;
+        }
         self.drag = None;
         self.finish_inline_edit();
         if let Some(id) = self.settings_list_id {

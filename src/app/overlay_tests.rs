@@ -54,10 +54,7 @@ fn shortcut_reference_keyboard_scrolls_within_a_narrow_viewport() {
     }
     let top = draw(None);
     assert!(top.iter().any(|(text, _)| text == "General"));
-    assert!(
-        !top.iter()
-            .any(|(text, _)| text == "Open the selected result")
-    );
+    assert!(!top.iter().any(|(text, _)| text == "Copy task text"));
     assert!(top.iter().all(|(_, pos)| viewport.contains(*pos)));
     draw(Some(Key::PageDown));
     for _ in 0..3 {
@@ -68,11 +65,7 @@ fn shortcut_reference_keyboard_scrolls_within_a_narrow_viewport() {
     for _ in 0..3 {
         draw(None);
     }
-    assert!(
-        draw(None)
-            .iter()
-            .any(|(text, _)| text == "Open the selected result")
-    );
+    assert!(draw(None).iter().any(|(text, _)| text == "Copy task text"));
     draw(Some(Key::Home));
     for _ in 0..3 {
         draw(None);

@@ -6,7 +6,7 @@ use super::{
     text_input_shortcuts,
     theme::Palette,
 };
-use crate::model::Task;
+use crate::model::{Task, TaskSort};
 use eframe::egui;
 use egui::{
     Align, Align2, Button, Color32, CornerRadius, CursorIcon, Frame, Id, Margin, Pos2, Rect,
@@ -51,6 +51,7 @@ impl MinimalistApp {
             self.go_to_overview();
             return;
         };
+        let manual_sort = self.task_sort_mode(list_id) == TaskSort::Manual;
         let title = self.lists[index].data.title.clone();
         self.header(ui, palette, &title, Some(list_id));
         ui.add_space(8.0);
@@ -124,7 +125,8 @@ impl MinimalistApp {
             .show(ui, |ui| {
                 for (task_index, task) in tasks.iter().enumerate() {
                     let row_top = ui.next_widget_position().y;
-                    let galley = self.task_galley(ui, &task.text, ui.available_width() - 126.0);
+                    let reserved = self.task_controls_width(ui, task);
+                    let galley = self.task_galley(ui, &task.text, ui.available_width() - reserved);
                     let row_height = self.task_row_height(&galley);
                     row_centers.push(row_top + row_height * 0.5);
                     let entry_progress = self.task_entry_progress(task.id);
@@ -242,6 +244,7 @@ impl MinimalistApp {
                     self.keyboard_focus_ui(ui, palette);
                 }
                 if let Some(drag) = self.drag.as_ref()
+                    && manual_sort
                     && drag.delta.y.abs() >= drag.delta.x.abs() * 1.25
                     && let Some(pointer) = ui.input(|input| {
                         input
@@ -274,7 +277,11 @@ impl MinimalistApp {
             });
 
         if let Some(drag) = &mut self.drag {
-            drag.target = reorder_target(&row_centers, drag.source_center + drag.delta.y);
+            drag.target = if manual_sort {
+                reorder_target(&row_centers, drag.source_center + drag.delta.y)
+            } else {
+                drag.source
+            };
             drag.height = row_heights[drag.source];
         }
         // A pointer click can blur one editor and activate another row in the
@@ -302,16 +309,6 @@ impl MinimalistApp {
         }
     }
 
-    /// Shows the same task actions on its row and its title hit region.
-    fn task_context_menu(&mut self, response: &egui::Response, list: Uuid, task: Uuid) {
-        response.context_menu(|ui| {
-            if ui.button("Move to list…").clicked() {
-                self.begin_move_task(list, task);
-                ui.close();
-            }
-        });
-    }
-
     fn task_entry_progress(&self, task_id: Uuid) -> f32 {
         self.newest_task.map_or(1.0, |(id, started)| {
             if id == task_id {
@@ -332,11 +329,17 @@ impl MinimalistApp {
         task: &Task,
         palette: Palette,
     ) -> Option<RowAction> {
+        let manual_sort = self.task_sort_mode(list_id) == TaskSort::Manual;
         let entry_progress = self.task_entry_progress(task.id);
         let clear_progress = self.clear_progress(list_id, task.completed);
         let delete_progress = self.delete_progress(list_id, task.id);
         let removal_progress = clear_progress.max(delete_progress);
-        let galley = self.task_galley(parent_ui, &task.text, parent_ui.available_width() - 126.0);
+        let reserved = self.task_controls_width(parent_ui, task);
+        let galley = self.task_galley(
+            parent_ui,
+            &task.text,
+            parent_ui.available_width() - reserved,
+        );
         let desired = Vec2::new(parent_ui.available_width(), self.task_row_height(&galley));
         let sense = if removal_progress > 0.0 {
             Sense::hover()
@@ -353,7 +356,7 @@ impl MinimalistApp {
             )
         });
         self.track_focus(&response, FocusItem::Task(list_id, task.id));
-        self.task_context_menu(&response, list_id, task.id);
+        self.task_actions_menu(&response, list_id, task.id, false);
         let mut row_ui = parent_ui.new_child(
             egui::UiBuilder::new()
                 .id_salt(("row", task.id))
@@ -410,7 +413,7 @@ impl MinimalistApp {
         } else {
             animated_x
         };
-        let offset_y = if drag_active && !horizontal {
+        let offset_y = if drag_active && !horizontal && manual_sort {
             remembered_drag.as_ref().map_or(drag_delta.y, |drag| {
                 drag.source_center + drag_delta.y - rect.center().y
             })
@@ -420,7 +423,7 @@ impl MinimalistApp {
         let target_reorder_shift = self
             .drag
             .as_ref()
-            .filter(|drag| drag.list_id == list_id && drag.task_id != task.id)
+            .filter(|drag| manual_sort && drag.list_id == list_id && drag.task_id != task.id)
             .map_or(0.0, |drag| {
                 if drag.source < drag.target
                     && task_index > drag.source
@@ -577,7 +580,7 @@ impl MinimalistApp {
             .lerp_to_gamma(paint_palette.muted, completion_progress);
         let text_clip = Rect::from_min_max(
             Pos2::new(row_rect.left() + 44.0, row_rect.top()),
-            Pos2::new(row_rect.right() - 82.0, row_rect.bottom()),
+            Pos2::new(row_rect.right() - reserved + 44.0, row_rect.bottom()),
         );
         let strike_progress = if task.completed {
             if drag_active && horizontal && drag_delta.x > 0.0 {
@@ -605,48 +608,27 @@ impl MinimalistApp {
         });
         if let Some(response) = &text_response {
             self.track_focus(response, FocusItem::Task(list_id, task.id));
-            self.task_context_menu(response, list_id, task.id);
+            self.task_actions_menu(response, list_id, task.id, false);
+            self.wrapped_task_preview(ui, response, task, palette);
         }
 
         if !is_editing {
-            let checklist_rect = Rect::from_center_size(
-                Pos2::new(row_rect.right() - 52.0, row_rect.center().y),
-                Vec2::new(42.0, 30.0),
-            );
-            let checklist_label = task
-                .progress()
-                .map_or_else(|| "+".to_owned(), |(done, total)| format!("{done}/{total}"));
-            let checklist_opacity = 0.72 + hover_progress * 0.28;
-            let checklist = ui
-                .put(
-                    checklist_rect,
-                    Button::new(self.rich(
-                        checklist_label,
-                        13.0,
-                        paint_palette.accent.linear_multiply(checklist_opacity),
-                    ))
-                    .frame(false),
-                )
-                .on_hover_text("Subtasks (Right enters; Left or Esc returns)");
-            self.track_focus(&checklist, FocusItem::Task(list_id, task.id));
-            checklist.widget_info(|| {
-                egui::WidgetInfo::labeled(
-                    egui::WidgetType::Button,
-                    true,
-                    format!("Subtasks: {}", task.text),
-                )
-            });
-            if checklist.has_focus() {
-                ui.painter().rect_stroke(
-                    checklist.rect,
-                    4.0,
-                    Stroke::new(1.0, palette.accent),
-                    egui::StrokeKind::Inside,
+            if !task.context.is_empty() {
+                let context_rect = Rect::from_center_size(
+                    Pos2::new(row_rect.right() - reserved + 62.0, row_rect.center().y),
+                    Vec2::new(22.0, 30.0),
                 );
+                self.task_context_control(ui, context_rect, list_id, task.id, paint_palette);
             }
-            if checklist.clicked() {
+            if self.task_checklist_control(ui, row_rect, list_id, task, paint_palette) {
                 return Some(RowAction::Subtasks(list_id, task.id));
             }
+
+            let copy_rect = Rect::from_center_size(
+                Pos2::new(row_rect.right() - 48.0, row_rect.center().y),
+                Vec2::new(26.0, 30.0),
+            );
+            self.task_copy_control(ui, copy_rect, (list_id, task.id, false), paint_palette);
 
             let delete_rect = Rect::from_center_size(
                 Pos2::new(row_rect.right() - 17.0, row_rect.center().y),
@@ -657,8 +639,8 @@ impl MinimalistApp {
                     delete_rect,
                     Button::new(
                         self.rich(
-                            "x",
-                            14.0,
+                            "×",
+                            25.0,
                             paint_palette
                                 .danger
                                 .linear_multiply(0.72 + hover_progress * 0.28),
@@ -767,18 +749,7 @@ impl MinimalistApp {
             }
         }
 
-        let subtasks_open = self.subtasks_for == Some((list_id, task.id));
-        let subtasks_progress = ui.ctx().animate_bool_with_time_and_easing(
-            Id::new(("subtasks-panel", list_id, task.id)),
-            subtasks_open,
-            0.22,
-            egui::emath::easing::cubic_out,
-        );
-        if subtasks_progress > 0.001 {
-            parent_ui.add_enabled_ui(subtasks_open, |ui| {
-                self.subtasks_panel(ui, list_id, task, palette, subtasks_progress);
-            });
-        }
+        self.task_children_below(parent_ui, list_id, task, palette);
 
         None
     }
@@ -818,6 +789,9 @@ impl MinimalistApp {
                 self.commit_task_edit(list_id, task_id, &text);
             }
             RowAction::Reorder(list_id, task_id, target) => {
+                if self.task_sort_mode(list_id) != TaskSort::Manual {
+                    return;
+                }
                 if let Some(index) = self.list_index(list_id) {
                     let tasks = &mut self.lists[index].data.tasks;
                     if let Some(source) = tasks.iter().position(|task| task.id == task_id) {
@@ -831,12 +805,7 @@ impl MinimalistApp {
                 }
             }
             RowAction::Subtasks(list_id, task_id) => {
-                let target = if self.subtasks_for == Some((list_id, task_id)) {
-                    None
-                } else {
-                    Some((list_id, task_id))
-                };
-                self.switch_subtask_panel(target);
+                self.toggle_task_subtasks(list_id, task_id);
             }
             RowAction::FinishDrag => {
                 if let Some(drag) = self.drag.take() {

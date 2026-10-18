@@ -37,7 +37,7 @@ fn task_secondary_controls_navigate_to_primary_rows_without_activating_them() {
         app.lists[0].data.tasks = vec![first.clone(), second.clone()];
         focus(&ctx, &mut app, FocusItem::Task(list, first.id).id());
         if delete_control {
-            tab_to_label(&ctx, &mut app, "x");
+            tab_to_label(&ctx, &mut app, "×");
         } else {
             key(&ctx, &mut app, Key::Tab, Modifiers::NONE);
         }
@@ -300,6 +300,16 @@ fn settings_arrows_move_rows_and_page_keys_jump_sections() {
     assert!(!ctx.text_edit_focused());
     let appearance = ctx.memory(|m| m.focused());
     key(&ctx, &mut app, Key::PageDown, Modifiers::NONE);
+    assert_eq!(
+        ctx.memory(|m| m.focused()),
+        Some(Id::new("settings-global-shortcut"))
+    );
+    key(&ctx, &mut app, Key::PageDown, Modifiers::NONE);
+    assert_eq!(
+        ctx.memory(|m| m.focused()),
+        Some(Id::new("settings-global-shortcut"))
+    );
+    key(&ctx, &mut app, Key::PageUp, Modifiers::NONE);
     assert_eq!(ctx.memory(|m| m.focused()), appearance);
     key(&ctx, &mut app, Key::PageUp, Modifiers::NONE);
     assert_eq!(ctx.memory(|m| m.focused()), pin);

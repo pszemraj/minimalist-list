@@ -120,7 +120,7 @@ impl MinimalistApp {
             ui.label(self.rich("App settings", 20.0, palette.text));
             ui.add(
                 Label::new(self.rich(
-                    "Workspace, window, and appearance apply to every list.",
+                    "Workspace, window, appearance, and shortcuts apply to every list.",
                     12.0,
                     palette.muted,
                 ))
@@ -166,9 +166,15 @@ impl MinimalistApp {
                 let use_folder = ui.add(
                     Button::new(self.rich("Use typed path", 15.0, palette.muted)).frame(false),
                 );
-                self.keyboard
-                    .settings_rows
-                    .push(vec![choose_folder.id, use_folder.id]);
+                let open_folder = ui.button("Open workspace folder");
+                self.keyboard.settings_rows.push(vec![
+                    choose_folder.id,
+                    use_folder.id,
+                    open_folder.id,
+                ]);
+                if open_folder.clicked() {
+                    self.open_workspace_folder();
+                }
                 ui.label(self.rich("Enter applies", 12.0, palette.muted));
                 let (submit, _) = text_input_shortcuts(ui, &workspace_response);
                 // Enter submits path edits. Explicitly using the current folder
@@ -428,10 +434,24 @@ impl MinimalistApp {
                 )
             });
             appearance_changed |= opacity.changed();
+            ui.add_space(10.0);
+            let preview_font = self.font_id(15.0);
+            let previews = Self::toggle_row(
+                ui,
+                Id::new("settings-show-subtasks"),
+                "Show subtasks below tasks",
+                &mut self.settings.show_subtasks,
+                preview_font,
+                palette,
+            );
+            self.keyboard.settings_rows.push(vec![previews.id]);
+            appearance_changed |= previews.changed();
         });
         if appearance_changed {
             self.save_settings();
         }
+        ui.add_space(12.0);
+        self.global_shortcut_settings_ui(ui, palette);
     }
 
     fn list_settings_contents(&mut self, ui: &mut egui::Ui, palette: Palette, list_id: Uuid) {
@@ -439,6 +459,7 @@ impl MinimalistApp {
             .settings_sections
             .push(self.keyboard.settings_rows.len());
         ui.add_space(12.0);
+        self.task_sort_menu(ui, list_id);
         let rename_font = self.font_id(16.0);
         let list_name = self
             .list_index(list_id)
@@ -571,7 +592,9 @@ impl MinimalistApp {
             && self.lists[index].data.title != title
         {
             self.lists[index].data.title = title.to_owned();
+            self.persistence.pending_filenames.insert(list_id);
             self.save_list_index(index);
+            self.apply_list_order();
         }
     }
 
@@ -595,6 +618,7 @@ impl MinimalistApp {
             match storage::delete_list(&list) {
                 Ok(()) => {
                     self.persistence.dirty_lists.remove(&list_id);
+                    self.persistence.pending_filenames.remove(&list_id);
                     storage::remove_file_from_fingerprint(&mut self.fingerprint, &list.path);
                     self.settings.last_list_id = self.lists.first().map(|item| item.key);
                     self.save_settings();
@@ -638,7 +662,7 @@ mod tests {
             "Up/Down: rows · Left/Right: choose or adjust",
             "Current list options",
             "App settings",
-            "Workspace, window, and appearance apply to every list.",
+            "Workspace, window, appearance, and shortcuts apply to every list.",
         ] {
             let (index, text_rect) = output
                 .shapes

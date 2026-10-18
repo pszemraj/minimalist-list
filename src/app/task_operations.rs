@@ -250,10 +250,11 @@ impl MinimalistApp {
             if self.drag.as_ref().is_some_and(|drag| drag.list_id == list) {
                 self.drag = None;
             }
+            let manual_position = self.manual_task_position(list, task).unwrap_or(position);
             let task = self.lists[index].data.tasks.remove(position);
             self.details.deleted = Some(DeletedItem::Task {
                 list,
-                position,
+                position: manual_position,
                 task,
             });
             self.save_list_index(index);
@@ -277,6 +278,7 @@ impl MinimalistApp {
             self.details.deleted = Some(deleted);
             return;
         };
+        let mut restored_task_position = None;
         let focus = match deleted {
             DeletedItem::Task { position, task, .. } => {
                 let focus = FocusItem::Task(list, task.id);
@@ -295,6 +297,7 @@ impl MinimalistApp {
                     return;
                 }
                 let position = position.min(self.lists[index].data.tasks.len());
+                restored_task_position = Some((task.id, position));
                 self.lists[index].data.tasks.insert(position, task);
                 focus
             }
@@ -347,7 +350,11 @@ impl MinimalistApp {
                 focus
             }
         };
+        if let Some((task, position)) = restored_task_position {
+            self.restore_manual_task_position(list, task, position);
+        }
         self.save_list_index(index);
+        self.apply_task_sorts();
         if matches!(self.screen, crate::app::Screen::List(active) if active == list) {
             self.keyboard.pending = Some(focus.id());
         }
@@ -439,7 +446,9 @@ impl MinimalistApp {
             let mut restored = self.lists[index].data.archive.remove(position).task;
             restored.completed = false;
             restored.completed_at_unix = None;
+            let position = self.lists[index].data.tasks.len();
             self.lists[index].data.tasks.push(restored);
+            self.restore_manual_task_position(list, task, position);
             if self.lists[index].data.archive.is_empty() {
                 self.history_open = false;
             }
@@ -502,12 +511,19 @@ impl MinimalistApp {
             return false;
         }
         let neighbors = self.focus_neighbors();
+        let manual_position = self.manual_task_position(source, task).unwrap_or(position);
         let original_source = self.lists[from].data.clone();
         let original_destination = self.lists[to].data.clone();
         let moved = self.lists[from].data.tasks[position].clone();
         self.lists[to].data.tasks.insert(0, moved);
         let destination_saved = self.save_list_index(to);
-        if destination_saved {
+        if destination_saved
+            && let Some(position) = self.lists[from]
+                .data
+                .tasks
+                .iter()
+                .position(|item| item.id == task)
+        {
             self.lists[from].data.tasks.remove(position);
             if self.save_list_index(from) {
                 self.move_subtask_draft(source, destination, task);
@@ -526,6 +542,7 @@ impl MinimalistApp {
         }
         self.lists[from].data = original_source;
         self.lists[to].data = original_destination;
+        self.restore_manual_task_position(source, task, manual_position);
         let failure = self.status.clone();
         self.save_list_index(from);
         self.save_list_index(to);

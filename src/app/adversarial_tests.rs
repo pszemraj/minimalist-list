@@ -65,6 +65,177 @@ fn escape_from_settings_and_typing_in_one_frame_reaches_the_returned_entry() {
 }
 
 #[test]
+fn text_before_escape_is_applied_to_list_name_before_closing_options() {
+    let (ctx, mut app) = tests::test_app();
+    let list = app.lists[0].key;
+    app.open_settings(Some(list));
+    idle(&ctx, &mut app);
+    assert_eq!(
+        ctx.memory(|memory| memory.focused()),
+        Some(egui::Id::new(("settings-list-name", list)))
+    );
+    ui_frame(
+        &ctx,
+        &mut app,
+        key_and_text(egui::Key::A, egui::Modifiers::COMMAND)
+            .into_iter()
+            .take(2)
+            .collect(),
+    );
+    let mut events = vec![egui::Event::Text("New name before Escape".into())];
+    events.extend(
+        key_and_text(egui::Key::Escape, egui::Modifiers::NONE)
+            .into_iter()
+            .take(2),
+    );
+    ui_frame(&ctx, &mut app, events);
+    assert_eq!(app.rename_input, "New name before Escape");
+    idle(&ctx, &mut app);
+    assert!(matches!(app.screen, Screen::List(_)));
+    assert_eq!(app.lists[0].data.title, "New name before Escape");
+    assert!(app.new_task.is_empty());
+    let saved = storage::load_workspace(&app.workspace).unwrap();
+    assert_eq!(saved.lists[0].data.title, "New name before Escape");
+    std::fs::remove_dir_all(app.workspace).unwrap();
+}
+
+#[test]
+fn task_text_before_find_is_saved_while_later_text_reaches_the_query() {
+    let (ctx, mut app) = tests::test_app();
+    let list = app.lists[0].key;
+    let task = Task::new("Original parent");
+    let id = task.id;
+    app.lists[0].data.tasks.push(task);
+    app.editing = Some((list, id));
+    app.edit_text = "Original parent".into();
+    app.request_edit_focus = true;
+    idle(&ctx, &mut app);
+    ui_frame(
+        &ctx,
+        &mut app,
+        key_and_text(egui::Key::A, egui::Modifiers::COMMAND)
+            .into_iter()
+            .take(2)
+            .collect(),
+    );
+    let mut events = vec![egui::Event::Text("New parent before Find".into())];
+    events.extend(key_and_text(egui::Key::F, egui::Modifiers::COMMAND));
+    ui_frame(&ctx, &mut app, events);
+    assert_eq!(app.edit_text, "New parent before Find");
+    ui_frame(
+        &ctx,
+        &mut app,
+        vec![egui::Event::Text(" fresh input".into())],
+    );
+    assert!(app.find.is_some());
+    assert_eq!(app.lists[0].data.tasks[0].text, "New parent before Find");
+    idle(&ctx, &mut app);
+    let output = ui_frame(&ctx, &mut app, Vec::new());
+    let query = ctx.read_response(egui::Id::new("find-query")).unwrap().rect;
+    assert!(output.shapes.iter().any(|shape| {
+        matches!(&shape.shape, egui::epaint::Shape::Text(text)
+            if text.galley.text() == "Native fresh input" && query.contains(text.pos))
+    }));
+    let saved = storage::load_workspace(&app.workspace).unwrap();
+    assert_eq!(saved.lists[0].data.tasks[0].text, "New parent before Find");
+    std::fs::remove_dir_all(app.workspace).unwrap();
+}
+
+#[test]
+fn native_selection_paste_and_ime_commit_finish_before_escape() {
+    for ime in [false, true] {
+        let (ctx, mut app) = tests::test_app();
+        let list = app.lists[0].key;
+        app.open_settings(Some(list));
+        idle(&ctx, &mut app);
+        let mut events: Vec<_> = key_and_text(egui::Key::A, egui::Modifiers::COMMAND)
+            .into_iter()
+            .take(2)
+            .collect();
+        if ime {
+            events.extend([
+                egui::Event::Ime(egui::ImeEvent::Preedit {
+                    text: "候補".into(),
+                    active_range_chars: Some(0..2),
+                }),
+                egui::Event::Ime(egui::ImeEvent::Commit("新しい名前".into())),
+            ]);
+        } else {
+            events.push(egui::Event::Paste("Pasted list name".into()));
+        }
+        events.extend(
+            key_and_text(egui::Key::Escape, egui::Modifiers::NONE)
+                .into_iter()
+                .take(2),
+        );
+        ui_frame(&ctx, &mut app, events);
+        idle(&ctx, &mut app);
+        assert!(matches!(app.screen, Screen::List(_)));
+        let expected = if ime {
+            "新しい名前"
+        } else {
+            "Pasted list name"
+        };
+        assert_eq!(app.lists[0].data.title, expected);
+        assert!(app.new_task.is_empty());
+        assert_eq!(
+            storage::load_workspace(&app.workspace).unwrap().lists[0]
+                .data
+                .title,
+            expected
+        );
+        std::fs::remove_dir_all(app.workspace).unwrap();
+    }
+}
+
+#[test]
+fn parent_edit_before_control_tab_saves_once_and_later_text_reaches_next_list() {
+    let (ctx, mut app) = tests::test_app();
+    let list = app.lists[0].key;
+    let other =
+        storage::create_list(&app.workspace, "Other list", crate::model::Accent::Mint).unwrap();
+    let destination = other.key;
+    app.lists.push(other);
+    let parent = Task::new("Parent before edit");
+    let id = parent.id;
+    app.lists[0].data.tasks.push(parent);
+    app.editing = Some((list, id));
+    app.edit_text = "Parent before edit".into();
+    app.request_edit_focus = true;
+    idle(&ctx, &mut app);
+    ui_frame(
+        &ctx,
+        &mut app,
+        key_and_text(egui::Key::A, egui::Modifiers::COMMAND)
+            .into_iter()
+            .take(2)
+            .collect(),
+    );
+    let mut events = vec![egui::Event::Paste("Parent after paste".into())];
+    events.extend(key_and_text(egui::Key::Tab, egui::Modifiers::CTRL));
+    ui_frame(&ctx, &mut app, events);
+    idle(&ctx, &mut app);
+    assert!(matches!(app.screen, Screen::List(active) if active == destination));
+    assert_eq!(app.new_task, "Native");
+    let source = app.list_index(list).unwrap();
+    assert_eq!(app.lists[source].data.tasks.len(), 1);
+    assert_eq!(app.lists[source].data.tasks[0].text, "Parent after paste");
+    let saved = storage::load_workspace(&app.workspace).unwrap();
+    assert_eq!(
+        saved
+            .lists
+            .iter()
+            .find(|item| item.key == list)
+            .unwrap()
+            .data
+            .tasks[0]
+            .text,
+        "Parent after paste"
+    );
+    std::fs::remove_dir_all(app.workspace).unwrap();
+}
+
+#[test]
 fn opening_settings_and_typing_in_one_frame_reaches_its_workspace_field() {
     let (ctx, mut app) = tests::test_app();
     idle(&ctx, &mut app);

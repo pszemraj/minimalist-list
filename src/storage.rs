@@ -1,6 +1,6 @@
 //! Settings and folder-backed list persistence.
 
-use crate::model::{Accent, FontChoice, TitleOverflow, TodoList};
+use crate::model::{Accent, FontChoice, ListSort, TaskSort, TitleOverflow, TodoList};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 use std::env;
@@ -24,10 +24,17 @@ pub struct Settings {
     pub font_size: f32,
     pub bold_text: bool,
     pub row_padding: f32,
+    pub show_subtasks: bool,
     pub title_overflow: TitleOverflow,
     pub background_opacity: f32,
     pub last_list_id: Option<Uuid>,
     pub last_capture_list_id: Option<Uuid>,
+    #[serde(default)]
+    pub list_order: BTreeMap<String, Vec<Uuid>>,
+    pub list_sort: BTreeMap<String, ListSort>,
+    pub task_sort: BTreeMap<String, TaskSort>,
+    pub manual_task_order: BTreeMap<String, Vec<Uuid>>,
+    pub global_shortcut: String,
 }
 
 impl Default for Settings {
@@ -40,10 +47,16 @@ impl Default for Settings {
             font_size: 19.0,
             bold_text: false,
             row_padding: 6.0,
+            show_subtasks: false,
             title_overflow: TitleOverflow::Scroll,
             background_opacity: 0.85,
             last_list_id: None,
             last_capture_list_id: None,
+            list_order: BTreeMap::new(),
+            list_sort: BTreeMap::new(),
+            task_sort: BTreeMap::new(),
+            manual_task_order: BTreeMap::new(),
+            global_shortcut: "CommandOrControl+Alt+Shift+KeyL".into(),
         }
     }
 }
@@ -131,6 +144,32 @@ pub fn save_settings_changes(desired: &Settings, baseline: &Settings) -> Result<
     let baseline = serde_json::to_value(baseline).map_err(|error| error.to_string())?;
     let desired = serde_json::to_value(desired).map_err(|error| error.to_string())?;
     for (key, value) in desired.as_object().ok_or("invalid preferences")? {
+        if matches!(
+            key.as_str(),
+            "list_order" | "list_sort" | "task_sort" | "manual_task_order"
+        ) {
+            let current_order = current_map
+                .entry(key.clone())
+                .or_insert_with(|| serde_json::json!({}))
+                .as_object_mut()
+                .ok_or("invalid stored list order")?;
+            let old_order = baseline.get(key).and_then(serde_json::Value::as_object);
+            let new_order = value.as_object().ok_or("invalid list order")?;
+            for (workspace, order) in new_order {
+                if old_order.and_then(|old| old.get(workspace)) != Some(order) {
+                    current_order.insert(workspace.clone(), order.clone());
+                }
+            }
+            if let Some(old_order) = old_order {
+                for workspace in old_order
+                    .keys()
+                    .filter(|path| !new_order.contains_key(*path))
+                {
+                    current_order.remove(workspace);
+                }
+            }
+            continue;
+        }
         if baseline.get(key) != Some(value) {
             current_map.insert(key.clone(), value.clone());
         }
@@ -291,17 +330,28 @@ pub fn load_workspace(root: &Path) -> Result<WorkspaceSnapshot, String> {
     })
 }
 
-fn read_list(path: &Path) -> Result<(StoredList, bool), String> {
+fn read_list(path: &Path) -> Result<(StoredList, u8), String> {
     let bytes =
         fs::read(path).map_err(|error| format!("could not read {}: {error}", path.display()))?;
     let mut data = serde_json::from_slice::<TodoList>(&bytes)
         .map_err(|error| format!("ignored {}: {error}", path.display()))?;
 
-    let file_id = path
+    let stem = path
         .file_stem()
         .and_then(|stem| stem.to_str())
-        .and_then(|stem| Uuid::parse_str(stem).ok());
-    let canonical_name = file_id.is_some();
+        .unwrap_or_default();
+    let legacy_id = Uuid::parse_str(stem).ok();
+    let descriptive = stem.rsplit_once("--").and_then(|(name, id)| {
+        (!name.is_empty())
+            .then(|| Uuid::parse_str(id).ok().map(|id| (name, id)))
+            .flatten()
+    });
+    let file_id = legacy_id.or_else(|| descriptive.map(|(_, id)| id));
+    let canonical_name = match descriptive {
+        Some((name, _)) if name == filename_title(&data.title) => 2,
+        _ if file_id.is_some() => 1,
+        _ => 0,
+    };
     let key = file_id.unwrap_or(data.id);
     data.id = key;
 
@@ -337,7 +387,7 @@ pub fn sort_lists(lists: &mut [StoredList]) {
 /// Returns an error when the new list cannot be serialized, written, or installed.
 pub fn create_list(root: &Path, title: &str, accent: Accent) -> Result<StoredList, String> {
     let data = TodoList::new(title, accent);
-    let path = root.join("lists").join(format!("{}.json", data.id));
+    let path = root.join("lists").join(list_file_name(title, data.id));
     let stored = StoredList {
         key: data.id,
         path,
@@ -358,6 +408,78 @@ pub fn create_list(root: &Path, title: &str, accent: Accent) -> Result<StoredLis
 /// Returns an error when the list cannot be serialized, written, or replaced.
 pub fn save_list(list: &StoredList) -> Result<(), String> {
     write_json_atomic(&list.path, &list.data)
+}
+
+fn filename_title(title: &str) -> String {
+    let mut clean = String::new();
+    let mut separator = false;
+    for character in title.chars().flat_map(char::to_lowercase) {
+        if character.is_alphanumeric() {
+            let extra = usize::from(separator && !clean.is_empty());
+            if clean.len() + extra + character.len_utf8() > 96 {
+                break;
+            }
+            if extra > 0 {
+                clean.push('-');
+            }
+            clean.push(character);
+            separator = false;
+        } else {
+            separator = true;
+        }
+    }
+    if clean.is_empty() {
+        "list".into()
+    } else {
+        clean
+    }
+}
+
+fn list_file_name(title: &str, id: Uuid) -> String {
+    format!("{}--{id}.json", filename_title(title))
+}
+
+/// Updates a list's filename to its clean current title and stable identity.
+///
+/// # Arguments
+/// - `list` - A saved list whose title was explicitly changed by the user.
+///
+/// # Returns
+/// Success after renaming, or immediately if its filename is already current.
+///
+/// # Errors
+/// Returns an error if the destination already exists or the original cannot be renamed.
+pub fn rename_list_file(list: &mut StoredList) -> Result<(), String> {
+    let destination = list
+        .path
+        .with_file_name(list_file_name(&list.data.title, list.key));
+    if destination == list.path {
+        return Ok(());
+    }
+    match fs::symlink_metadata(&destination) {
+        Ok(_) => {
+            return Err(format!(
+                "could not rename list: {} already exists",
+                destination.display()
+            ));
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(format!(
+                "could not inspect {}: {error}",
+                destination.display()
+            ));
+        }
+    }
+    fs::rename(&list.path, &destination).map_err(|error| {
+        format!(
+            "could not rename {} to {}: {error}",
+            list.path.display(),
+            destination.display()
+        )
+    })?;
+    list.path = destination;
+    Ok(())
 }
 
 /// Deletes a list's associated file.
@@ -664,3 +786,7 @@ fn expand_tilde(raw: &str) -> PathBuf {
 #[cfg(test)]
 #[path = "storage_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "storage_filename_tests.rs"]
+mod filename_tests;

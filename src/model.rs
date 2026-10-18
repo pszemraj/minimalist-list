@@ -62,6 +62,72 @@ pub enum TitleOverflow {
     Wrap,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// A temporary task ordering that preserves the list's manual arrangement.
+pub enum TaskSort {
+    #[default]
+    Manual,
+    Newest,
+    Oldest,
+    Title,
+    IncompleteFirst,
+}
+
+impl TaskSort {
+    /// All available task ordering modes.
+    pub const ALL: [Self; 5] = [
+        Self::Manual,
+        Self::Newest,
+        Self::Oldest,
+        Self::Title,
+        Self::IncompleteFirst,
+    ];
+
+    /// Returns the menu label for this ordering mode.
+    ///
+    /// # Returns
+    ///
+    /// The user-facing ordering name.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Manual => "Manual order",
+            Self::Newest => "Newest first",
+            Self::Oldest => "Oldest first",
+            Self::Title => "Title A–Z",
+            Self::IncompleteFirst => "Incomplete first",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// A temporary overview ordering that preserves manually arranged list tiles.
+pub enum ListSort {
+    #[default]
+    Manual,
+    Title,
+    Newest,
+    Oldest,
+}
+
+impl ListSort {
+    /// All available overview ordering modes.
+    pub const ALL: [Self; 4] = [Self::Manual, Self::Title, Self::Newest, Self::Oldest];
+
+    /// Returns the menu label for this ordering mode.
+    ///
+    /// # Returns
+    ///
+    /// The user-facing ordering name.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Manual => "Manual order",
+            Self::Title => "Title A–Z",
+            Self::Newest => "Newest first",
+            Self::Oldest => "Oldest first",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 /// A persisted task list with its live tasks and archive.
 pub struct TodoList {
@@ -123,6 +189,9 @@ impl TodoList {
 pub struct Task {
     pub id: Uuid,
     pub text: String,
+    /// Optional task notes, hidden from ordinary task rows.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub context: String,
     pub completed: bool,
     pub created_at_unix: u64,
     pub completed_at_unix: Option<u64>,
@@ -140,11 +209,36 @@ impl Task {
         Self {
             id: Uuid::new_v4(),
             text: text.into(),
+            context: String::new(),
             completed: false,
             created_at_unix: now_unix_seconds(),
             completed_at_unix: None,
             subtasks: Vec::new(),
         }
+    }
+
+    /// Formats the complete task as plain text for copying.
+    ///
+    /// # Returns
+    ///
+    /// The parent, optional context, and children with their completion markers.
+    pub fn full_text(&self) -> String {
+        let mut text = format!("[{}] {}", if self.completed { "x" } else { " " }, self.text);
+        if !self.context.is_empty() {
+            text.push_str("\n\n");
+            text.push_str(&self.context);
+        }
+        if !self.subtasks.is_empty() {
+            text.push('\n');
+            for child in &self.subtasks {
+                text.push_str(&format!(
+                    "\n- [{}] {}",
+                    if child.completed { "x" } else { " " },
+                    child.text
+                ));
+            }
+        }
+        text
     }
 
     /// Flips completion state and updates the completion timestamp.

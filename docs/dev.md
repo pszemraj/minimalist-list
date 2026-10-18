@@ -6,16 +6,25 @@
 src/main.rs                Native eframe setup and launch arguments
 src/instance.rs            Workspace instance claims and window reveal requests
 src/macos.rs               Native app-bundle reopen delegate
+src/hotkey.rs              Native global reveal shortcut registration and wakeups
+src/linux.rs               X11 cursor setup before the native event loop
+src/linux_cursor.rs        XSettings cursor parsing and scale selection
 src/app.rs                 Application state, navigation, syncing, and eframe wiring
 src/app/drafts.rs           Session drafts scoped to workspace, list, and task
 src/app/persistence.rs      Save results, dirty-list retries, and visible status
 src/app/keyboard.rs         Keyboard commands and transient focus restoration
+src/app/keyboard_events.rs  Ordered editor input before screen-changing shortcuts
 src/app/keyboard_levels.rs  Directional list, checklist, History, and form navigation
 src/app/list.rs             Task entry, rows, editing, gestures, and ordering
 src/app/overlays.rs         Quick add, Find, and keyboard reference
 src/app/overview.rs         List cards and list creation
+src/app/overview_order.rs   Manual tile order and native drag event handling
+src/app/sorting.rs          Task view sorting and preserved manual storage order
+src/app/context.rs          Task context editor and complete-task clipboard copy
+src/app/desktop.rs          Global shortcut settings and workspace-folder opening
 src/app/settings.rs         Global preferences and separate List options
 src/app/task_details.rs     Measured checklists and read-only History
+src/app/task_controls.rs    Task controls and optional collapsible child previews
 src/app/task_operations.rs  Child editing, deletion Undo, moving, and archival
 src/app/task_text.rs        Title wrapping and hover scrolling
 src/app/theme.rs            Fonts, palettes, and shared rendering helpers

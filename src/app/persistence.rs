@@ -9,11 +9,16 @@ use uuid::Uuid;
 /// Tracks retryable saves and the last local preference snapshot.
 pub(super) struct PersistenceState {
     pub(super) dirty_lists: HashSet<Uuid>,
+    pub(super) pending_filenames: HashSet<Uuid>,
     pub(super) workspace_failure: Option<String>,
     baseline: Settings,
     pub(super) settings_dirty: bool,
     pub(super) notice: Option<(String, Instant)>,
 }
+
+#[cfg(test)]
+#[path = "filename_retry_tests.rs"]
+mod filename_retry_tests;
 
 impl PersistenceState {
     /// Initializes save coordination from the startup preferences.
@@ -27,6 +32,7 @@ impl PersistenceState {
     pub(super) fn new(baseline: Settings, workspace_failure: Option<String>) -> Self {
         Self {
             dirty_lists: HashSet::new(),
+            pending_filenames: HashSet::new(),
             workspace_failure,
             baseline,
             settings_dirty: false,
@@ -68,29 +74,65 @@ impl MinimalistApp {
     /// Saves one list and retains failed content for explicit retry.
     ///
     /// # Returns
-    /// Whether the list contents reached disk.
+    /// Whether the list contents and any explicitly requested filename update reached disk.
     ///
     /// # Panics
     /// Panics if the caller supplies an invalid loaded-list index.
     pub(super) fn save_list_index(&mut self, index: usize) -> bool {
-        let list = &self.lists[index];
+        let list = self.list_for_save(index);
         let id = list.key;
-        match storage::save_list(list) {
-            Ok(()) => {
-                self.persistence.dirty_lists.remove(&id);
-                if let Err(error) =
-                    storage::update_fingerprint_for_file(&mut self.fingerprint, &list.path)
-                {
-                    self.status = Some(error);
-                }
-                true
-            }
+        let saved = match storage::save_list(&list) {
+            Ok(()) => self.complete_list_save(index),
             Err(error) => {
                 self.persistence.dirty_lists.insert(id);
                 self.status = Some(format!("Changes are unsaved: {error}"));
                 false
             }
+        };
+        self.apply_task_sorts();
+        saved
+    }
+
+    /// Finishes a successful candidate write, including explicitly requested file renames.
+    ///
+    /// # Arguments
+    /// - `index` - Loaded list whose associated file has just been saved.
+    ///
+    /// # Returns
+    /// Whether the content and its pending filename update are both saved.
+    ///
+    /// # Panics
+    /// Panics if the caller supplies an invalid loaded-list index.
+    pub(super) fn complete_list_save(&mut self, index: usize) -> bool {
+        let id = self.lists[index].key;
+        let mut saved = true;
+        if self.persistence.pending_filenames.contains(&id) {
+            let previous = self.lists[index].path.clone();
+            match storage::rename_list_file(&mut self.lists[index]) {
+                Ok(()) => {
+                    self.persistence.pending_filenames.remove(&id);
+                    if previous != self.lists[index].path {
+                        storage::remove_file_from_fingerprint(&mut self.fingerprint, &previous);
+                    }
+                }
+                Err(error) => {
+                    saved = false;
+                    self.persistence.dirty_lists.insert(id);
+                    self.status = Some(format!(
+                        "List name saved; its filename update is pending. Retry save: {error}"
+                    ));
+                }
+            }
         }
+        if let Err(error) =
+            storage::update_fingerprint_for_file(&mut self.fingerprint, &self.lists[index].path)
+        {
+            self.status = Some(error);
+        }
+        if saved {
+            self.persistence.dirty_lists.remove(&id);
+        }
+        saved
     }
 
     /// Retries retained list and preference writes before leaving the workspace.
@@ -100,7 +142,15 @@ impl MinimalistApp {
     pub(super) fn retry_dirty_lists(&mut self) -> bool {
         let live: HashSet<_> = self.lists.iter().map(|list| list.key).collect();
         self.persistence.dirty_lists.retain(|id| live.contains(id));
-        let ids: Vec<_> = self.persistence.dirty_lists.iter().copied().collect();
+        self.persistence
+            .pending_filenames
+            .retain(|id| live.contains(id));
+        let ids: Vec<_> = self
+            .persistence
+            .dirty_lists
+            .union(&self.persistence.pending_filenames)
+            .copied()
+            .collect();
         for id in ids {
             if let Some(index) = self.list_index(id) {
                 self.save_list_index(index);
@@ -109,7 +159,9 @@ impl MinimalistApp {
         if self.persistence.settings_dirty {
             self.save_settings();
         }
-        let saved = self.persistence.dirty_lists.is_empty() && !self.persistence.settings_dirty;
+        let saved = self.persistence.dirty_lists.is_empty()
+            && self.persistence.pending_filenames.is_empty()
+            && !self.persistence.settings_dirty;
         if saved {
             self.status = None;
         }
@@ -137,7 +189,9 @@ impl MinimalistApp {
     /// - `ui` - Reserved status region above the main view.
     /// - `palette` - Current text colors.
     pub(super) fn status_ui(&mut self, ui: &mut egui::Ui, palette: Palette) {
-        let dirty = !self.persistence.dirty_lists.is_empty() || self.persistence.settings_dirty;
+        let dirty = !self.persistence.dirty_lists.is_empty()
+            || !self.persistence.pending_filenames.is_empty()
+            || self.persistence.settings_dirty;
         let failed_workspace = self.persistence.workspace_failure.clone();
         let notice = self
             .persistence

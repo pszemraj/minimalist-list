@@ -64,11 +64,13 @@ The workspace contains one JSON file per list and no shared index:
 ```text
 minimalist-list/
 +-- lists/
-    +-- 1f0f73de-57a8-4c8c-a2ae-3aa5efdc4571.json
-    +-- 70d0f50d-8d45-4d24-88ce-bf82cbfab48a.json
+    +-- errands--1f0f73de-57a8-4c8c-a2ae-3aa5efdc4571.json
+    +-- projects--70d0f50d-8d45-4d24-88ce-bf82cbfab48a.json
 ```
 
-List order comes from `created_at_unix`, with the UUID as a stable tie-breaker. The UUID filename is authoritative for a canonical list file.
+New filenames combine a safe, bounded list title with its stable UUID. Renaming a list updates its filename after saving its contents; name collisions never replace another file. Existing UUID-only filenames remain readable and ordinary saves keep their paths. The filename UUID is authoritative.
+
+Default list order comes from `created_at_unix`, with the UUID as a stable tie-breaker. Manual tile order and temporary list/task sort modes are local workspace-scoped settings. Task JSON always retains manual task order, including while a sorted view is active.
 
 ## File-sync behavior
 
@@ -77,7 +79,7 @@ Edits to different lists write different files, so file-sync services can transf
 > [!IMPORTANT]
 > Minimalist List does not merge simultaneous changes to the same list. Let one device finish syncing before editing that list on another device.
 
-If a sync service creates a conflict copy containing the same list UUID, the canonical UUID-named file wins. The conflict copy remains untouched and the application reports it.
+If files contain the same list UUID, a canonical descriptive filename wins over a legacy UUID-only filename, which wins over arbitrary conflict-copy names. Unselected copies remain untouched and the application reports them.
 
 Every edit writes and flushes a temporary sibling file, then replaces the destination. The app checks disk every five seconds and reloads externally changed list files at the next scan. Reloads wait until task or child editing and dragging finish, and while unsaved list changes need recovery. A sync service controls when a file arrives on another computer.
 
@@ -90,8 +92,10 @@ List files are pretty-printed and hand-editable. `format_version` is currently `
 | Object | Fields |
 | --- | --- |
 | List | `format_version`, `id`, `title`, `created_at_unix`, `accent`, `tasks`, `archive` |
-| Task | `id`, `text`, `completed`, `created_at_unix`, `completed_at_unix`, `subtasks` |
+| Task | `id`, `text`, `completed`, `created_at_unix`, `completed_at_unix`, `subtasks`, optional `context` |
 | Subtask | `id`, `text`, `completed` |
 | Archive entry | `task`, `archived_at_unix` |
 
 Timestamps are Unix seconds. `accent` is one of `Mint`, `Charcoal`, `Crimson`, `Sand`, `Sky`, or `Lavender`.
+
+Missing `context` loads as empty; an empty context is omitted when writing. Context follows a task through Move, Undo, and History. Older application versions do not preserve this new field when rewriting a task.

@@ -10,6 +10,8 @@ fn old_settings_keep_typography_and_default_new_preferences() {
     assert_eq!(settings.row_padding, 12.0);
     assert_eq!(settings.title_overflow, TitleOverflow::Scroll);
     assert_eq!(settings.background_opacity, 0.85);
+    assert!(settings.list_order.is_empty());
+    assert_eq!(settings.global_shortcut, "CommandOrControl+Alt+Shift+KeyL");
     let mut saved = settings;
     saved.title_overflow = TitleOverflow::Wrap;
     saved.background_opacity = 0.2;

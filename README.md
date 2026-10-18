@@ -66,6 +66,8 @@ Press Backspace (`Delete` on macOS) when task entry is empty to return to Lists.
 
 Press `Ctrl+/` (`Cmd+/` on macOS) to see the keyboard shortcuts in the app.
 
+Show the running app from anywhere with `Ctrl+Alt+Shift+L` (`Cmd+Option+Shift+L` on macOS). Change or disable this in **Settings → Global shortcut**. Native Wayland sessions require a desktop launch binding; X11, macOS, and Windows use the registered shortcut.
+
 ## Documentation
 
 - [Tasks, subtasks, search, history, and appearance](docs/usage.md)

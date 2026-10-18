@@ -11,6 +11,9 @@ use uuid::Uuid;
 #[path = "task_operations.rs"]
 mod operations;
 
+#[path = "task_controls.rs"]
+mod controls;
+
 #[derive(Default)]
 /// Session-only editors, recovery content, and expanded History entries.
 pub(super) struct TaskDetailsState {
@@ -18,14 +21,17 @@ pub(super) struct TaskDetailsState {
     deleted: Option<DeletedItem>,
     expanded_history: HashSet<(Uuid, Uuid)>,
     pub(super) move_task: Option<(Uuid, Uuid, Uuid)>,
+    pub(super) menu_task: Option<(Uuid, Uuid, bool)>,
+    pub(super) menu_popup: Option<Id>,
+    collapsed_previews: HashSet<(Uuid, Uuid)>,
 }
 
 /// A checklist text edit anchored to stable identities.
 pub(super) struct SubtaskEdit {
-    list: Uuid,
-    task: Uuid,
-    subtask: Uuid,
-    text: String,
+    pub(super) list: Uuid,
+    pub(super) task: Uuid,
+    pub(super) subtask: Uuid,
+    pub(super) text: String,
     request_focus: bool,
 }
 
@@ -149,6 +155,7 @@ impl MinimalistApp {
                                 response.request_focus();
                                 edit.request_focus = false;
                             }
+                            self.track_focus(&response, FocusItem::Subtask(list, task, subtask.id));
                             let (submit, cancel) = text_input_shortcuts(ui, &response);
                             if cancel {
                                 self.cancel_subtask_edit();
@@ -195,7 +202,7 @@ impl MinimalistApp {
                 let delete = ui
                     .add_sized(
                         [28.0, 28.0],
-                        Button::new(self.rich("x", 14.0, palette.muted)).frame(false),
+                        Button::new(self.rich("×", 23.0, palette.muted)).frame(false),
                     )
                     .on_hover_text("Delete subtask");
                 self.track_focus(&delete, FocusItem::Subtask(list, task, subtask.id));
@@ -279,7 +286,8 @@ impl MinimalistApp {
                             expanded = true;
                         }
                         let width =
-                            (ui.available_width() - 76.0 - ui.spacing().item_spacing.x).max(1.0);
+                            (ui.available_width() - 110.0 - 2.0 * ui.spacing().item_spacing.x)
+                                .max(1.0);
                         let row = ui
                             .horizontal_top(|ui| {
                                 ui.allocate_ui_with_layout(
@@ -318,6 +326,7 @@ impl MinimalistApp {
                                             &response,
                                             FocusItem::Archived(list, task.id),
                                         );
+                                        self.task_actions_menu(&response, list, task.id, true);
                                         if response.clicked() {
                                             if expanded {
                                                 self.details
@@ -336,6 +345,14 @@ impl MinimalistApp {
                                             );
                                         }
                                     },
+                                );
+                                let (copy_rect, _) =
+                                    ui.allocate_exact_size(Vec2::new(26.0, 28.0), Sense::hover());
+                                self.task_copy_control(
+                                    ui,
+                                    copy_rect,
+                                    (list, task.id, true),
+                                    palette,
                                 );
                                 let (rect, _) =
                                     ui.allocate_exact_size(Vec2::new(76.0, 28.0), Sense::hover());
@@ -368,25 +385,17 @@ impl MinimalistApp {
                         self.detail_spotlight(ui, row, (list, task.id, None, true), palette);
                         if expanded {
                             ui.indent(("history-children", list, task.id), |ui| {
+                                if !task.context.is_empty() && ui.button("View context").clicked() {
+                                    self.open_task_context(list, task.id, true);
+                                }
                                 if task.subtasks.is_empty() {
                                     ui.label(self.rich("No subtasks", 13.0, palette.muted));
                                 }
                                 for child in &task.subtasks {
-                                    let response = ui.add(
-                                        egui::Label::new(self.content_rich(
-                                            format!(
-                                                "{} {}",
-                                                if child.completed { "✓" } else { "○" },
-                                                child.text
-                                            ),
-                                            15.0,
-                                            palette.text,
-                                        ))
-                                        .wrap(),
-                                    );
+                                    let row = self.child_preview_row(ui, child, palette);
                                     self.detail_spotlight(
                                         ui,
-                                        response.rect,
+                                        row,
                                         (list, task.id, Some(child.id), true),
                                         palette,
                                     );

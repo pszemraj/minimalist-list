@@ -9,6 +9,9 @@ use uuid::Uuid;
 #[path = "keyboard_levels.rs"]
 mod levels;
 
+#[path = "keyboard_events.rs"]
+mod events;
+
 /// Opens the in-app shortcut reference.
 pub(super) const SHOW_SHORTCUTS: KeyboardShortcut =
     KeyboardShortcut::new(Modifiers::COMMAND, Key::Slash);
@@ -106,6 +109,7 @@ pub(super) struct KeyboardState {
     pub(super) history_toggle: Option<Id>,
     pub(super) creation_choices: Vec<Id>,
     anchor: Option<(Id, FocusItem)>,
+    deferred_events: Vec<Event>,
 }
 
 /// Consumes an exact chord, including its platform-independent command modifier.
@@ -185,7 +189,6 @@ pub(super) type ShortcutGroup = (&'static str, Vec<(&'static str, String)>);
 ///
 /// Context groups containing native shortcut labels.
 pub(super) fn shortcut_groups() -> Vec<ShortcutGroup> {
-    let plain = |key| shortcut(KeyboardShortcut::new(Modifiers::NONE, key));
     let pair = |first, second| format!("{} / {}", shortcut(first), shortcut(second));
     vec![
         (
@@ -197,126 +200,87 @@ pub(super) fn shortcut_groups() -> Vec<ShortcutGroup> {
                 ("Find tasks and History", shortcut(FIND)),
                 ("New list (Lists, list, Settings)", shortcut(NEW_LIST)),
                 (
-                    "Next / previous control",
-                    pair(
-                        KeyboardShortcut::new(Modifiers::NONE, Key::Tab),
-                        KeyboardShortcut::new(Modifiers::SHIFT, Key::Tab),
-                    ),
+                    "Show window (global)",
+                    shortcut(KeyboardShortcut::new(
+                        Modifiers::COMMAND | Modifiers::ALT | Modifiers::SHIFT,
+                        Key::L,
+                    )),
                 ),
-                ("Dismiss the active layer", plain(Key::Escape)),
-            ],
-        ),
-        (
-            "Lists overview",
-            vec![
-                ("Move between cards", "Arrow keys".into()),
-                ("Open the focused list", "Enter / Space".into()),
             ],
         ),
         (
             "Inside a list",
             vec![
                 ("Back to Lists", shortcut(BACK_TO_LISTS)),
-                (
-                    "Back to Lists (empty entry or outside text)",
-                    shortcut(BACKSPACE_TO_LISTS),
-                ),
-                ("Add a task from entry", plain(Key::Enter)),
-                ("Focus the first task from entry", plain(Key::ArrowDown)),
                 ("Next / previous list", pair(NEXT_LIST, PREVIOUS_LIST)),
                 ("Move completed tasks to History", shortcut(CLEAR_COMPLETED)),
             ],
         ),
         (
-            "Focused task row",
+            "Task actions",
             vec![
-                ("Previous / next task", "Up / Down".into()),
-                (
-                    "First / last task",
-                    pair(
-                        KeyboardShortcut::new(Modifiers::NONE, Key::Home),
-                        KeyboardShortcut::new(Modifiers::NONE, Key::End),
-                    ),
-                ),
-                ("Return to entry from the first task", plain(Key::ArrowUp)),
-                ("Edit the title", plain(Key::Enter)),
-                ("Toggle completion", plain(Key::Space)),
-                ("Open / collapse subtasks", "Right / Left".into()),
                 (
                     "Move the task up / down",
                     pair(MOVE_TASK_UP, MOVE_TASK_DOWN),
                 ),
-                ("Delete the task", shortcut(DELETE_TASK)),
-                ("Reach History from the last task", plain(Key::ArrowDown)),
-            ],
-        ),
-        (
-            "Subtasks",
-            vec![
-                ("Previous / next child or add field", "Up / Down".into()),
                 (
-                    "First child / add field (outside text)",
-                    pair(
-                        KeyboardShortcut::new(Modifiers::NONE, Key::Home),
-                        KeyboardShortcut::new(Modifiers::NONE, Key::End),
-                    ),
-                ),
-                ("Toggle focused child", "Enter / Space".into()),
-                ("Collapse and return to parent", "Left / Escape".into()),
-            ],
-        ),
-        (
-            "History",
-            vec![
-                ("Open from History toggle", "Down / Right / Enter".into()),
-                ("Previous / next archived task", "Up / Down".into()),
-                ("Restore focused task", "Enter / Space".into()),
-                ("Close and return to History toggle", "Left / Escape".into()),
-            ],
-        ),
-        (
-            "New list",
-            vec![
-                ("Move between name and colors", "Down / Up".into()),
-                ("Move between colors", "Left / Right".into()),
-                ("Choose color and return to name", "Enter / Space".into()),
-                ("Create from name", plain(Key::Enter)),
-            ],
-        ),
-        (
-            "Text and forms",
-            vec![
-                ("Save an edit / submit a form", plain(Key::Enter)),
-                ("Save an inline edit and continue", plain(Key::Tab)),
-                ("Cancel an inline edit or list creation", plain(Key::Escape)),
-            ],
-        ),
-        (
-            "Settings",
-            vec![
-                ("Previous / next row", "Up / Down".into()),
-                (
-                    "Move within choices / adjust sliders",
-                    "Left / Right".into(),
+                    "Undo deletion",
+                    shortcut(KeyboardShortcut::new(Modifiers::COMMAND, Key::Z)),
                 ),
                 (
-                    "Previous / next section",
-                    pair(
-                        KeyboardShortcut::new(Modifiers::NONE, Key::PageUp),
-                        KeyboardShortcut::new(Modifiers::NONE, Key::PageDown),
-                    ),
+                    "Copy task text",
+                    shortcut(KeyboardShortcut::new(
+                        Modifiers::COMMAND | Modifiers::SHIFT,
+                        Key::C,
+                    )),
                 ),
-                ("Activate the focused control", "Enter / Space".into()),
-            ],
-        ),
-        (
-            "Find",
-            vec![
-                ("Select a result", "Up / Down".into()),
-                ("Open the selected result", plain(Key::Enter)),
             ],
         ),
     ]
+}
+
+fn take_complete_task_copy(ctx: &egui::Context, enabled: bool) -> bool {
+    let binding = Modifiers {
+        shift: true,
+        ..Modifiers::COMMAND
+    };
+    let state_id = Id::new("complete-copy-modifiers");
+    let previous = ctx
+        .data(|data| data.get_temp::<Modifiers>(state_id))
+        .unwrap_or_else(|| ctx.input(|input| input.modifiers));
+    // egui-winit emits Event::Copy for Command+C even with Shift, without a
+    // Key::C event. Replay modifier changes in event order so releasing the
+    // chord before repaint cannot turn it into an ordinary selection copy.
+    let (taken, current) = ctx.input_mut(|input| {
+        let mut current = previous;
+        let mut taken = false;
+        input.events.retain(|event| {
+            match event {
+                Event::ModifiersChanged(modifiers) => current = *modifiers,
+                Event::Key {
+                    key,
+                    pressed,
+                    modifiers,
+                    ..
+                } => {
+                    current = *modifiers;
+                    if enabled && *key == Key::C && *pressed && modifiers.matches_exact(binding) {
+                        taken = true;
+                        return false;
+                    }
+                }
+                Event::Copy if enabled && current.matches_exact(binding) => {
+                    taken = true;
+                    return false;
+                }
+                _ => {}
+            }
+            true
+        });
+        (taken, current)
+    });
+    ctx.data_mut(|data| data.insert_temp(state_id, current));
+    taken
 }
 
 fn take_shortcut(ctx: &egui::Context, binding: KeyboardShortcut) -> bool {
@@ -326,6 +290,7 @@ fn take_shortcut(ctx: &egui::Context, binding: KeyboardShortcut) -> bool {
 impl MinimalistApp {
     /// Routes app commands before rendering widgets so one key has one effect.
     pub(super) fn handle_app_shortcuts(&mut self, ctx: &egui::Context) {
+        self.prepare_editor_event_order(ctx);
         self.route_app_shortcuts(ctx);
         // A shortcut can replace the screen and queue a different input during
         // this frame. Focus it before its widget consumes accompanying text.
@@ -377,6 +342,18 @@ impl MinimalistApp {
         if let Some(id) = self.keyboard.requested {
             ctx.memory_mut(|memory| memory.request_focus(id));
         }
+        let copy_target = (self.shortcuts.is_none()
+            && self.quick_capture.is_none()
+            && self.find.is_none()
+            && self.details.move_task.is_none())
+        .then(|| self.task_copy_target(ctx))
+        .flatten();
+        if take_complete_task_copy(ctx, copy_target.is_some())
+            && let Some((list, task, archived)) = copy_target
+        {
+            self.copy_task(ctx, list, task, archived);
+            return;
+        }
         if self.details.move_task.is_some() {
             return;
         }
@@ -391,7 +368,7 @@ impl MinimalistApp {
         if self.shortcuts.is_some() {
             return;
         }
-        if take_shortcut(ctx, NEW_LIST) {
+        if self.task_context.is_none() && take_shortcut(ctx, NEW_LIST) {
             if self.quick_capture.is_none() && self.find.is_none() {
                 if matches!(self.screen, Screen::Settings) {
                     self.close_settings();
@@ -417,7 +394,11 @@ impl MinimalistApp {
             self.focus_now(ctx, Id::new("find-query"));
             return;
         }
-        if self.quick_capture.is_some() || self.find.is_some() || self.details.move_task.is_some() {
+        if self.quick_capture.is_some()
+            || self.find.is_some()
+            || self.details.move_task.is_some()
+            || self.task_context.is_some()
+        {
             return;
         }
         if !ctx.text_edit_focused() && take_key(ctx, Key::Z, Modifiers::COMMAND) {
@@ -635,6 +616,57 @@ impl MinimalistApp {
             if let FocusItem::Card(list) = item {
                 self.keyboard.overview_list = Some(list);
             }
+        }
+    }
+
+    /// Resolves complete-task copying from every focused task control and editor.
+    ///
+    /// # Arguments
+    ///
+    /// - `ctx` - Context holding the focused control.
+    ///
+    /// # Returns
+    ///
+    /// The owning list, task, and archived state, when focus belongs to a task.
+    pub(super) fn task_copy_target(&self, ctx: &egui::Context) -> Option<(Uuid, Uuid, bool)> {
+        if let Some(editor) = &self.task_context {
+            return Some((editor.list, editor.task, editor.archived));
+        }
+        if egui::Popup::is_any_open(ctx) {
+            return self
+                .details
+                .menu_popup
+                .filter(|popup| egui::Popup::is_id_open(ctx, *popup))
+                .and(self.details.menu_task);
+        }
+        let focused = ctx.memory(|memory| memory.focused());
+        if let Some((list, task)) = self.editing
+            && focused == Some(Id::new(("edit-task", list, task)))
+        {
+            return Some((list, task, false));
+        }
+        if let Some(editor) = &self.details.editor
+            && focused
+                == Some(Id::new((
+                    "edit-subtask",
+                    editor.list,
+                    editor.task,
+                    editor.subtask,
+                )))
+        {
+            return Some((editor.list, editor.task, false));
+        }
+        match self
+            .keyboard
+            .anchor
+            .filter(|(id, _)| Some(*id) == focused)
+            .map(|(_, owner)| owner)
+        {
+            Some(FocusItem::Task(list, task) | FocusItem::Subtask(list, task, _)) => {
+                Some((list, task, false))
+            }
+            Some(FocusItem::Archived(list, task)) => Some((list, task, true)),
+            _ => None,
         }
     }
 

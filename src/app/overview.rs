@@ -6,7 +6,7 @@ use super::{
     text_input_shortcuts,
     theme::Palette,
 };
-use crate::model::Accent;
+use crate::model::{Accent, ListSort, TitleOverflow};
 use crate::storage;
 use eframe::egui;
 use egui::{
@@ -14,6 +14,10 @@ use egui::{
     Vec2, text::LayoutJob,
 };
 use uuid::Uuid;
+
+#[path = "overview_order.rs"]
+mod order;
+pub(super) use order::OverviewDrag;
 
 impl MinimalistApp {
     /// Renders the responsive list overview and list-creation controls.
@@ -28,6 +32,36 @@ impl MinimalistApp {
     /// Panics if the fixed card-column count is zero.
     pub(super) fn overview_ui(&mut self, ui: &mut egui::Ui, palette: Palette) {
         self.header(ui, palette, "Lists", None);
+        Self::readable_region(ui, palette, self.settings.background_opacity < 1.0, |ui| {
+            ui.menu_button(
+                self.rich(
+                    format!("Sort lists · {}", self.list_sort().label()),
+                    13.0,
+                    palette.muted,
+                ),
+                |ui| {
+                    for mode in ListSort::ALL {
+                        if ui
+                            .selectable_label(self.list_sort() == mode, mode.label())
+                            .clicked()
+                        {
+                            self.set_list_sort(mode);
+                            ui.close();
+                        }
+                    }
+                },
+            );
+            if self.list_sort() != ListSort::Manual {
+                ui.add(
+                    egui::Label::new(self.rich(
+                        "Choose Manual order to drag tiles.",
+                        12.0,
+                        palette.muted,
+                    ))
+                    .wrap(),
+                );
+            }
+        });
         ui.add_space(12.0);
         ScrollArea::vertical()
             .auto_shrink([false, false])
@@ -41,6 +75,16 @@ impl MinimalistApp {
                     1
                 };
                 let card_width = (width - 12.0 * (columns as f32 - 1.0)) / columns as f32;
+                if self.overview_drag.is_some()
+                    && ui.input(|input| {
+                        input
+                            .events
+                            .iter()
+                            .any(|event| matches!(event, egui::Event::Key { pressed: true, .. }))
+                    })
+                {
+                    self.cancel_overview_drag();
+                }
                 if self.creating_list {
                     self.creation_keyboard(ui.ctx());
                 } else {
@@ -69,23 +113,34 @@ impl MinimalistApp {
                     })
                     .collect();
 
+                let mut card_rects = Vec::new();
+                let mut open_card = None;
+                let mut open_options = None;
                 for row in cards.chunks(columns) {
                     ui.horizontal(|ui| {
                         for (id, title, accent, active, completed, preview) in row {
                             let (response, settings) = self.list_card(
                                 ui, *id, title, *accent, *active, *completed, preview, card_width,
                             );
+                            card_rects.push((*id, response.rect, settings.rect));
                             if settings.clicked() {
-                                self.open_settings(Some(*id));
-                                self.keyboard.settings_return = Some(settings.id);
+                                open_options = Some((*id, settings.id));
                             } else if response.clicked() {
-                                take_key(ui.ctx(), egui::Key::Enter, egui::Modifiers::NONE);
-                                take_key(ui.ctx(), egui::Key::Space, egui::Modifiers::NONE);
-                                self.open_list(*id);
+                                open_card = Some(*id);
                             }
                         }
                     });
                     ui.add_space(12.0);
+                }
+                if !self.finish_overview_drag(ui, &card_rects, palette) {
+                    if let Some((id, response_id)) = open_options {
+                        self.open_settings(Some(id));
+                        self.keyboard.settings_return = Some(response_id);
+                    } else if let Some(id) = open_card {
+                        take_key(ui.ctx(), egui::Key::Enter, egui::Modifiers::NONE);
+                        take_key(ui.ctx(), egui::Key::Space, egui::Modifiers::NONE);
+                        self.open_list(id);
+                    }
                 }
 
                 let create_progress = ui.ctx().animate_bool_with_time_and_easing(
@@ -223,7 +278,15 @@ impl MinimalistApp {
     ) -> (egui::Response, egui::Response) {
         let card_palette = Palette::from_accent(accent);
         let (slot_rect, _) = ui.allocate_exact_size(Vec2::new(width, 166.0), Sense::hover());
-        let response = ui.interact(slot_rect, FocusItem::Card(id).id(), Sense::click());
+        let response = ui.interact(
+            slot_rect,
+            FocusItem::Card(id).id(),
+            if self.list_sort() == ListSort::Manual {
+                Sense::click_and_drag()
+            } else {
+                Sense::click()
+            },
+        );
         response.widget_info(|| {
             egui::WidgetInfo::labeled(
                 egui::WidgetType::Button,
@@ -331,33 +394,27 @@ impl MinimalistApp {
             footer,
             card_palette.accent,
         );
-        if response.has_focus() {
-            egui::Tooltip::for_widget(&response).show(|ui| {
-                ui.label(title);
-            });
-        }
-        let response = response.on_hover_text(title);
-
         let settings_rect = Rect::from_center_size(
-            card_rect.right_top() + Vec2::new(-18.0, 18.0),
+            slot_rect.right_top() + Vec2::new(-18.0, 18.0),
             Vec2::splat(30.0),
         );
-        let settings = ui
-            .scope_builder(
-                egui::UiBuilder::new().id(Id::new(("list-card-settings", id))),
-                |ui| {
-                    ui.put(
-                        settings_rect,
-                        Button::new(self.rich(
-                            "...",
-                            14.0,
-                            card_palette.muted.linear_multiply(0.24 + hover * 0.76),
-                        ))
-                        .frame(false),
-                    )
-                },
+        // A separate child does not advance the grid's cursor or move its hit
+        // region with the card's purely visual hover animation.
+        let mut controls = ui.new_child(
+            egui::UiBuilder::new()
+                .id(Id::new(("list-card-settings", id)))
+                .max_rect(settings_rect),
+        );
+        let settings = controls
+            .put(
+                settings_rect,
+                Button::new(self.rich(
+                    "...",
+                    14.0,
+                    card_palette.muted.linear_multiply(0.24 + hover * 0.76),
+                ))
+                .frame(false),
             )
-            .inner
             .on_hover_text(format!("List options: {title}"));
         settings.widget_info(|| {
             egui::WidgetInfo::labeled(
@@ -367,8 +424,65 @@ impl MinimalistApp {
             )
         });
         self.track_focus(&settings, FocusItem::Card(id));
+        self.card_hover_info(ui, &response, &settings, id, title);
 
         (response, settings)
+    }
+
+    fn card_hover_info(
+        &mut self,
+        ui: &egui::Ui,
+        response: &egui::Response,
+        settings: &egui::Response,
+        id: Uuid,
+        title: &str,
+    ) {
+        let hovering = self.settings.title_overflow == TitleOverflow::Wrap
+            && response.hovered()
+            && !settings.hovered()
+            && self.overview_drag.is_none()
+            && !ui.input(|input| input.pointer.any_down());
+        let mut delayed = false;
+        if hovering {
+            let now = ui.input(|input| input.time);
+            let started = match self.overview_hover {
+                Some((hovered, started)) if hovered == id => started,
+                _ => {
+                    self.overview_hover = Some((id, now));
+                    now
+                }
+            };
+            delayed = now - started >= 2.0;
+            if !delayed {
+                ui.ctx()
+                    .request_repaint_after(std::time::Duration::from_secs_f64(
+                        (2.0 - (now - started)).max(0.01),
+                    ));
+            }
+        } else if self
+            .overview_hover
+            .is_some_and(|(hovered, _)| hovered == id)
+        {
+            self.overview_hover = None;
+        }
+        if delayed || (response.has_focus() && self.overview_drag.is_none()) {
+            egui::Tooltip::for_widget(response).show(|ui| {
+                ui.add(egui::Label::new(self.rich(title, 18.0, self.palette().text)).wrap());
+                if let Some(index) = self.list_index(id) {
+                    let data = &self.lists[index].data;
+                    ui.label(self.rich(
+                        format!(
+                            "{} active · {} done · {} archived",
+                            data.active_count(),
+                            data.completed_count(),
+                            data.archive.len()
+                        ),
+                        13.0,
+                        self.palette().muted,
+                    ));
+                }
+            });
+        }
     }
 
     fn create_list(&mut self) {
@@ -382,6 +496,7 @@ impl MinimalistApp {
                 let path = list.path.clone();
                 self.lists.push(list);
                 storage::sort_lists(&mut self.lists);
+                self.apply_list_order();
                 self.new_list_title.clear();
                 self.creating_list = false;
                 if let Err(error) =
@@ -397,177 +512,5 @@ impl MinimalistApp {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn frame(
-        ctx: &egui::Context,
-        app: &mut MinimalistApp,
-        events: Vec<egui::Event>,
-    ) -> egui::FullOutput {
-        let mut output = ctx.run_ui(
-            egui::RawInput {
-                screen_rect: Some(Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    egui::vec2(320.0, 760.0),
-                )),
-                time: Some(ctx.input(|input| input.time) + 0.3),
-                events,
-                ..Default::default()
-            },
-            |ui| app.overview_ui(ui, app.palette()),
-        );
-        output.textures_delta.clear();
-        output
-    }
-
-    fn click_label(ctx: &egui::Context, app: &mut MinimalistApp, label: &str) {
-        let output = frame(ctx, app, Vec::new());
-        let point = output
-            .shapes
-            .iter()
-            .find_map(|shape| {
-                if let egui::epaint::Shape::Text(text) = &shape.shape
-                    && text.galley.text() == label
-                {
-                    Some(text.pos + text.galley.size() * 0.5)
-                } else {
-                    None
-                }
-            })
-            .unwrap_or_else(|| panic!("Missing button {label}"));
-        for pressed in [true, false] {
-            frame(
-                ctx,
-                app,
-                vec![
-                    egui::Event::PointerMoved(point),
-                    egui::Event::PointerButton {
-                        pos: point,
-                        button: egui::PointerButton::Primary,
-                        pressed,
-                        modifiers: egui::Modifiers::NONE,
-                    },
-                ],
-            );
-        }
-    }
-
-    #[test]
-    fn creation_buttons_create_cancel_and_leave_blank_submission_focused() {
-        let (ctx, mut app) = super::super::tests::test_app();
-        app.creating_list = true;
-        app.request_list_focus = true;
-        for _ in 0..3 {
-            frame(&ctx, &mut app, Vec::new());
-        }
-        frame(
-            &ctx,
-            &mut app,
-            [true, false]
-                .into_iter()
-                .map(|pressed| egui::Event::Key {
-                    key: egui::Key::Enter,
-                    physical_key: None,
-                    pressed,
-                    repeat: false,
-                    modifiers: egui::Modifiers::NONE,
-                })
-                .collect(),
-        );
-        frame(
-            &ctx,
-            &mut app,
-            vec![egui::Event::Text("Still focused".into())],
-        );
-        assert_eq!(app.new_list_title, "Still focused");
-        app.new_list_title.clear();
-        let before = app.lists.len();
-        click_label(&ctx, &mut app, "Create list");
-        assert!(app.creating_list);
-        assert_eq!(app.lists.len(), before);
-        app.new_list_title = "Pointer-created list".into();
-        click_label(&ctx, &mut app, "Create list");
-        assert!(!app.creating_list);
-        assert_eq!(app.lists.len(), before + 1);
-        let saved = storage::load_workspace(&app.workspace).unwrap();
-        assert!(
-            saved
-                .lists
-                .iter()
-                .any(|list| list.data.title == "Pointer-created list")
-        );
-        app.creating_list = true;
-        app.new_list_title = "Must not be created".into();
-        for _ in 0..3 {
-            frame(&ctx, &mut app, Vec::new());
-        }
-        click_label(&ctx, &mut app, "Cancel");
-        assert!(!app.creating_list);
-        assert!(app.new_list_title.is_empty());
-        assert_eq!(app.lists.len(), before + 1);
-        std::fs::remove_dir_all(&app.workspace).unwrap();
-    }
-
-    #[test]
-    fn long_cards_keep_title_preview_footer_and_options_inside_the_card() {
-        for width in [210.0, 288.0, 488.0] {
-            for font in [
-                crate::model::FontChoice::Sans,
-                crate::model::FontChoice::Mono,
-            ] {
-                for title in [
-                    "Long title with many words and line breaks\n".repeat(12),
-                    "W".repeat(1000),
-                ] {
-                    let (ctx, mut app) = super::super::tests::test_app();
-                    app.settings.font = font;
-                    app.settings.bold_text = true;
-                    let id = app.lists[0].key;
-                    let mut bounds = Rect::NOTHING;
-                    let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-                        let (card, options) = app.list_card(
-                            ui,
-                            id,
-                            &title,
-                            Accent::Charcoal,
-                            3,
-                            0,
-                            &["Long preview ".repeat(80); 1],
-                            width,
-                        );
-                        bounds = card.rect;
-                        assert!(card.rect.contains_rect(options.rect));
-                    });
-                    for shape in &output.shapes {
-                        if let egui::epaint::Shape::Text(text) = &shape.shape {
-                            let rect = Rect::from_min_size(text.pos, text.galley.size());
-                            assert!(
-                                bounds.contains_rect(rect),
-                                "{font:?}, width={width}, {rect:?} outside {bounds:?}"
-                            );
-                            if text.galley.text() == title {
-                                assert!(text.galley.rows.len() <= 2);
-                            }
-                        }
-                    }
-                    output.textures_delta.clear();
-                    std::fs::remove_dir_all(&app.workspace).unwrap();
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn completed_only_card_says_all_done() {
-        let (ctx, mut app) = super::super::tests::test_app();
-        let id = app.lists[0].key;
-        let mut output = ctx.run_ui(Default::default(), |ui| {
-            app.list_card(ui, id, "Completed", Accent::Charcoal, 0, 2, &[], 288.0);
-        });
-        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::epaint::Shape::Text(text) if text.galley.text() == "All done")));
-        assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape, egui::epaint::Shape::Text(text) if text.galley.text() == "Empty")));
-        output.textures_delta.clear();
-        std::fs::remove_dir_all(&app.workspace).unwrap();
-    }
-}
+#[path = "overview_tests.rs"]
+mod tests;

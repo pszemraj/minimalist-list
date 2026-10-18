@@ -386,12 +386,7 @@ fn reference_uses_shared_bindings_and_native_key_names() {
         ("Find tasks and History", FIND),
         ("New list (Lists, list, Settings)", NEW_LIST),
         ("Back to Lists", BACK_TO_LISTS),
-        (
-            "Back to Lists (empty entry or outside text)",
-            BACKSPACE_TO_LISTS,
-        ),
         ("Move completed tasks to History", CLEAR_COMPLETED),
-        ("Delete the task", DELETE_TASK),
     ] {
         let (_, label) = groups
             .iter()
@@ -400,17 +395,34 @@ fn reference_uses_shared_bindings_and_native_key_names() {
             .unwrap();
         assert_eq!(*label, shortcut(binding));
     }
-    let (_, first_last) = groups
-        .iter()
-        .flat_map(|(_, rows)| rows)
-        .find(|(name, _)| *name == "First / last task")
-        .unwrap();
-    assert_eq!(
-        *first_last,
-        format!(
-            "{} / {}",
-            shortcut(KeyboardShortcut::new(Modifiers::NONE, Key::Home)),
-            shortcut(KeyboardShortcut::new(Modifiers::NONE, Key::End)),
-        )
+    for (action, binding) in [
+        (
+            "Copy task text",
+            KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::C),
+        ),
+        (
+            "Undo deletion",
+            KeyboardShortcut::new(Modifiers::COMMAND, Key::Z),
+        ),
+    ] {
+        let (_, label) = groups
+            .iter()
+            .flat_map(|(_, rows)| rows)
+            .find(|(name, _)| *name == action)
+            .unwrap();
+        assert_eq!(*label, shortcut(binding));
+    }
+    assert!(
+        groups
+            .iter()
+            .flat_map(|(_, rows)| rows)
+            .all(|(_, binding)| ![
+                "Enter",
+                "Escape",
+                "Arrow keys",
+                "Up / Down",
+                "Enter / Space"
+            ]
+            .contains(&binding.as_str()))
     );
 }
