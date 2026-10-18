@@ -67,7 +67,10 @@ rustdoc-checker src --strict
 Use separate settings and workspace directories to keep GUI trials away from everyday tasks:
 
 ```bash
-mkdir -p target/gui-check/tmp target/gui-check/config target/gui-check/data
+mkdir -p target/gui-check/tmp target/gui-check/config/minimalist-list target/gui-check/data
+if [ ! -e target/gui-check/config/minimalist-list/settings.json ]; then
+  printf '%s\n' '{"global_shortcut":""}' > target/gui-check/config/minimalist-list/settings.json
+fi
 TMPDIR="$PWD/target/gui-check/tmp" \
 XDG_CONFIG_HOME="$PWD/target/gui-check/config" \
 XDG_DATA_HOME="$PWD/target/gui-check/data" \
@@ -76,6 +79,18 @@ cargo run --locked --features eframe/inspection -- --data-dir target/gui-check/w
 ```
 
 Attach the GUI inspector to port 5741. Use a distinct port and `XDG_CONFIG_HOME` for a second instance, including when testing two instances against one workspace. Otherwise the second launch reveals the first instance. Keep `TMPDIR`, settings, data, screenshots, and logs under `target/`; leave `HOME` unchanged. See [platform paths](storage.md#default-directories).
+
+### Running alongside an installed copy
+
+The fresh test profile above disables the global shortcut so it cannot capture the installed app's binding. Disable the shortcut in existing test profiles too. For an explicit global-shortcut check, use a different chord or quit the regular instance first, then disable the test binding afterward. Keep environment overrides local to the test launch rather than exporting them into a shell used for ordinary builds or installation.
+
+For macOS automation, reuse one development bundle and identifier, separate from the installed app, and launch each by its full path. Rebuilding or reinstalling does not launch the installed copy or stop an older process. Both windows can have the same title, so verify the executable path and selected test workspace before interacting.
+
+Spotlight can index generated `.app` bundles under the ignored `target/` directory, including copies inside installer fixtures. After testing, archive any bundles needed for reuse and remove their extracted `.app` directories. Restore the same development name, identifier, and path for the next check. A separate settings directory protects task data but does not prevent Spotlight from launching the test copy.
+
+Finish every GUI check, including a user-assisted keyboard check, by **quitting the test instance and confirming that its process has exited**. Closing its window only hides it in the tray; it continues to own its shortcut and instance claim. Disable any test shortcut, clean up generated bundles, and open the installed copy explicitly when returning to everyday use.
+
+### Interaction checks
 
 Exercise the [task interactions](usage.md), both title modes, 320- and 520-point windows, maximum text size in both fonts and weights, pinned mode, and opacity over bright and dark backgrounds. Use long text, explicit newlines, and many History rows; every completion, Delete, Add, and Restore control must remain reachable. Inspect saved JSON after edits, Undo, archive, and Move; restart to check persistence and window placement. Repeat the [shared-folder flows](storage.md#file-sync-behavior) with two instances. Check paths, shortcuts, accessibility, and transparency on each native platform.
 
