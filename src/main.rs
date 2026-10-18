@@ -12,6 +12,8 @@ mod instance;
 mod linux;
 #[cfg(any(target_os = "linux", test))]
 mod linux_cursor;
+#[cfg(any(target_os = "linux", test))]
+mod linux_taskbar;
 #[cfg(target_os = "macos")]
 mod macos;
 mod model;
@@ -154,6 +156,7 @@ fn main() -> eframe::Result {
             .with_inner_size([520.0, 760.0])
             .with_min_inner_size([320.0, 280.0])
             .with_transparent(true)
+            .with_taskbar(false)
             .with_visible(!start_hidden)
             // A minimized macOS window stays in the Dock after hiding; close hides instead.
             .with_minimize_button(!cfg!(target_os = "macos"))
@@ -199,6 +202,12 @@ fn main() -> eframe::Result {
             let mut app = MinimalistApp::new(&cc.egui_ctx, settings, workspace_override, warning);
             app.set_instance_guard(instance, &cc.egui_ctx);
             app.setup_tray(&cc.egui_ctx, tray_supported);
+            #[cfg(target_os = "windows")]
+            if let Some(window) = cc.winit_window() {
+                tray::set_window_taskbar_icon(window);
+            }
+            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            app.update_taskbar_presence(cc.winit_window().map(AsRef::as_ref));
             app.setup_global_shortcut(&cc.egui_ctx);
             if start_hidden {
                 app.start_hidden(&cc.egui_ctx);

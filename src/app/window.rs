@@ -48,6 +48,37 @@ impl MinimalistApp {
         }
     }
 
+    /// Keeps Windows and X11 windows out of the taskbar while a usable tray exists.
+    ///
+    /// # Arguments
+    /// - `window` - Current root window; unavailable windows are retried next tick.
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    pub(crate) fn update_taskbar_presence(&mut self, window: Option<&winit::window::Window>) {
+        let Some(window) = window else {
+            return;
+        };
+        if Instant::now() < self.next_taskbar_check {
+            return;
+        }
+        self.next_taskbar_check = Instant::now() + SCAN_INTERVAL;
+        let hidden = self.tray.as_ref().is_some_and(Tray::available);
+        if self.taskbar_hidden == Some(hidden) {
+            return;
+        }
+        #[cfg(target_os = "windows")]
+        {
+            use winit::platform::windows::WindowExtWindows;
+            window.set_skip_taskbar(hidden);
+        }
+        #[cfg(target_os = "linux")]
+        if let Err(error) = crate::linux::set_taskbar_hidden(window, hidden) {
+            self.status
+                .get_or_insert_with(|| format!("Could not update taskbar visibility: {error}"));
+            return;
+        }
+        self.taskbar_hidden = Some(hidden);
+    }
+
     /// Starts in the tray, or shows the window if no usable tray exists.
     ///
     /// # Arguments
@@ -115,6 +146,13 @@ impl MinimalistApp {
     /// Reveals and focuses the existing native window.
     pub(super) fn show_window(&mut self, ctx: &egui::Context) {
         self.window_hidden = false;
+        // X11 window managers may remove state hints when a window is unmapped.
+        // Reapply before the queued reveal, including repeated launch/hotkey requests.
+        #[cfg(any(target_os = "windows", target_os = "linux", test))]
+        {
+            self.taskbar_hidden = None;
+            self.next_taskbar_check = Instant::now();
+        }
         ctx.send_viewport_cmd(ViewportCommand::Visible(true));
         ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
         ctx.send_viewport_cmd(ViewportCommand::Focus);
@@ -265,6 +303,11 @@ mod tests {
             "Changed on another computer"
         );
 
+        // A window manager can discard skip-taskbar state while hidden. A
+        // reveal must invalidate the cache even when its polling deadline is later.
+        app.taskbar_hidden = Some(true);
+        app.next_taskbar_check = Instant::now() + SCAN_INTERVAL;
+
         // A tray Show wins over stale minimize and close input in the same tick.
         let mut close_input = egui::RawInput::default();
         close_input
@@ -276,6 +319,8 @@ mod tests {
             app.handle_window_events(ctx, true, &[Action::Show], false);
         });
         assert!(!app.window_hidden);
+        assert_eq!(app.taskbar_hidden, None);
+        assert!(app.next_taskbar_check <= Instant::now());
         let commands = &output.viewport_commands[&egui::ViewportId::ROOT];
         for command in [
             ViewportCommand::Visible(true),

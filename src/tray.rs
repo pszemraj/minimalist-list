@@ -188,6 +188,22 @@ pub(crate) fn window_icon_data() -> egui::IconData {
         .expect("invalid bundled application icon")
 }
 
+/// Sets Windows' separate large taskbar icon as well as the viewport's small icon.
+///
+/// # Arguments
+/// - `window` - Root window belonging to this application instance.
+///
+/// # Panics
+/// Panics if the bundled image is invalid or cannot form a native icon.
+#[cfg(target_os = "windows")]
+pub(crate) fn set_window_taskbar_icon(window: &winit::window::Window) {
+    use winit::platform::windows::WindowExtWindows;
+    let data = window_icon_data();
+    let icon = winit::window::Icon::from_rgba(data.rgba, data.width, data.height)
+        .expect("invalid bundled application icon");
+    window.set_taskbar_icon(Some(icon));
+}
+
 fn icon_rgba() -> Vec<u8> {
     let mut rgba = vec![0; 32 * 32 * 4];
     // Three checklist rows remain recognizable on both light and dark panels.

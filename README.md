@@ -54,6 +54,8 @@ Windows and Linux add an app-menu shortcut; macOS installs `~/Applications/Minim
 
 Sign-in starts the app hidden in the tray or menu bar; an ordinary launch opens the window. Close hides it again, as does minimize on Windows and Linux. Use the icon's **Show Minimalist List** or **Quit** action. Linux hiding requires X11/XWayland and a tray host; without one, the window opens normally.
 
+The app stays out of the macOS Dock. Windows and X11 request no taskbar entry while the tray is available, including with the window open; without a tray they use a normal taskbar window. Linux desktop support varies, and native Wayland controls its own taskbar behavior.
+
 Quit before reinstalling. See [startup and tray behavior](docs/usage.md#startup-and-system-tray) to disable startup.
 
 Verify the checkout with `cargo test --locked`; `cargo run --locked -- --version` checks the executable. The [development guide](docs/dev.md#verification) lists the full checks.

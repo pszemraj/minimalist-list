@@ -9,6 +9,7 @@ src/macos.rs               Native app-bundle reopen delegate
 src/hotkey.rs              Native global reveal shortcut registration and wakeups
 src/linux.rs               X11 cursor setup before the native event loop
 src/linux_cursor.rs        XSettings cursor parsing and scale selection
+src/linux_taskbar.rs       EWMH state preservation and taskbar request payloads
 src/app.rs                 Application state, navigation, syncing, and eframe wiring
 src/app/drafts.rs           Session drafts scoped to workspace, list, and task
 src/app/persistence.rs      Save results, dirty-list retries, and visible status
@@ -81,6 +82,8 @@ Exercise the [task interactions](usage.md), both title modes, 320- and 520-point
 Close and minimize the test window where supported: it should disappear from the taskbar while its tray icon remains. Repeat with decorations disabled and while editing a task; hiding should save the edit and allow external-file reloads while hidden. Restore it through the icon's Show action, then Quit while hidden and verify that the process and icon disappear and pending clear/delete actions are saved.
 
 Run the installed binary with `--start-hidden`: it should remain in the tray without a taskbar window, then restore through **Show Minimalist List**. An ordinary launch should open the window; repeating it for the same workspace and local settings should reveal the existing instance. A repeated hidden launch should remain quiet. Test both shortcuts with an installation path containing spaces. On Windows, use the release build to verify that no console window is created. Inspect the generated startup entry; checking execution at sign-in requires a real desktop login.
+
+On Windows and X11, the visible window should also stay out of the taskbar while the tray works. Repeat hide/reveal and global shortcut activation; X11 managers can discard window-state hints on unmap, so each reveal reapplies them. Remove the tray host and verify the taskbar entry returns, then restore the host and check it disappears again. Check pinning and maximization while toggling tray availability; unrelated X11 window-state flags must remain intact. Native Wayland taskbar behavior is compositor-controlled.
 
 Repeat without a tray host: the normal backend and close/minimize behavior should remain, with no startup warning. Close during an inline edit or pending clear/delete and inspect the saved JSON after restart. If the tray host disappears while hidden, the window should restore at the next scan.
 

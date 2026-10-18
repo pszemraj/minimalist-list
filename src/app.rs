@@ -126,6 +126,10 @@ pub struct MinimalistApp {
     hovered_title: Option<(Uuid, Instant)>,
     tray: Option<crate::tray::Tray>,
     window_hidden: bool,
+    #[cfg(any(target_os = "windows", target_os = "linux", test))]
+    taskbar_hidden: Option<bool>,
+    #[cfg(any(target_os = "windows", target_os = "linux", test))]
+    next_taskbar_check: Instant,
     instance: Option<crate::instance::InstanceGuard>,
     global_shortcut: Option<crate::hotkey::GlobalShortcut>,
     global_shortcut_input: String,
@@ -273,6 +277,10 @@ impl MinimalistApp {
             hovered_title: None,
             tray: None,
             window_hidden: false,
+            #[cfg(any(target_os = "windows", target_os = "linux", test))]
+            taskbar_hidden: None,
+            #[cfg(any(target_os = "windows", target_os = "linux", test))]
+            next_taskbar_check: Instant::now(),
             instance: None,
             global_shortcut: None,
             global_shortcut_input,
@@ -704,6 +712,8 @@ impl eframe::App for MinimalistApp {
         }
         self.handle_window_actions(ctx, minimized);
         self.poll_global_shortcut(ctx);
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        self.update_taskbar_presence(frame.winit_window().map(AsRef::as_ref));
         self.apply_window_preferences(ctx);
         self.update_motion(ctx);
         self.scan_external_changes();
