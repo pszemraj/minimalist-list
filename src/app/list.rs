@@ -366,6 +366,16 @@ impl MinimalistApp {
         let response = response.on_hover_and_drag_cursor(CursorIcon::Grab);
         let revealed = self.revealed == Some((list_id, task.id));
         let is_editing = self.editing == Some((list_id, task.id));
+        let native_drag = (!is_editing && removal_progress == 0.0)
+            .then(|| {
+                self.coalesced_task_drag(
+                    ui,
+                    (list_id, task.id, task_index),
+                    rect,
+                    rect.right() - reserved + 44.0,
+                )
+            })
+            .flatten();
         let hover_progress = ui.ctx().animate_bool_with_time_and_easing(
             Id::new(("task-hover", list_id, task.id)),
             response.hovered(),
@@ -385,7 +395,11 @@ impl MinimalistApp {
             .as_ref()
             .filter(|drag| drag.list_id == list_id && drag.task_id == task.id)
             .cloned();
-        let drag_delta = if response.dragged() {
+        let drag_delta = if native_drag.is_some() {
+            remembered_drag
+                .as_ref()
+                .map_or(Vec2::ZERO, |drag| drag.delta)
+        } else if response.dragged() {
             response
                 .total_drag_delta()
                 .or_else(|| remembered_drag.as_ref().map(|drag| drag.delta))
@@ -400,7 +414,7 @@ impl MinimalistApp {
                 .map_or(Vec2::ZERO, |drag| drag.delta)
         };
         let horizontal = drag_delta.x.abs() > drag_delta.y.abs() * 1.25;
-        let drag_active = response.dragged() || response.drag_stopped();
+        let drag_active = native_drag.is_some() || response.dragged() || response.drag_stopped();
 
         let resting_x = if revealed { -108.0 } else { 0.0 };
         let animated_x = ui.ctx().animate_value_with_time(
@@ -717,7 +731,7 @@ impl MinimalistApp {
                 }
             }
 
-            if response.drag_started() {
+            if response.drag_started() && native_drag.is_none() {
                 self.drag = Some(DragState {
                     list_id,
                     task_id: task.id,
@@ -728,7 +742,7 @@ impl MinimalistApp {
                     height: rect.height(),
                 });
             }
-            if (response.dragged() || response.drag_stopped())
+            if (native_drag.is_some() || response.dragged() || response.drag_stopped())
                 && let Some(drag) = self
                     .drag
                     .as_mut()
@@ -736,7 +750,7 @@ impl MinimalistApp {
             {
                 drag.delta = drag_delta;
             }
-            if response.drag_stopped() {
+            if response.drag_stopped() || native_drag == Some(true) {
                 return Some(RowAction::FinishDrag);
             }
 

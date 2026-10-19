@@ -338,7 +338,7 @@ fn dragging_at_the_bottom_scrolls_and_saves_the_original_task_identity() {
 
 #[test]
 fn navigation_and_archiving_during_a_real_drag_leave_saved_tasks_usable() {
-    for archive in [false, true] {
+    for (archive, partial_batch) in [(false, false), (true, false), (false, true), (true, true)] {
         let (ctx, mut app) = test_app();
         let list = app.lists[0].key;
         app.lists[0].data.tasks = ["Survivor", "Dragged"].map(Task::new).to_vec();
@@ -361,12 +361,21 @@ fn navigation_and_archiving_during_a_real_drag_leave_saved_tasks_usable() {
             pressed,
             modifiers: Modifiers::NONE,
         };
-        frame(
-            &ctx,
-            &mut app,
-            vec![Event::PointerMoved(start), pointer(start, true)],
-        );
-        frame(&ctx, &mut app, vec![Event::PointerMoved(end)]);
+        if partial_batch {
+            frame(&ctx, &mut app, vec![Event::PointerMoved(start)]);
+            frame(
+                &ctx,
+                &mut app,
+                vec![pointer(start, true), Event::PointerMoved(end)],
+            );
+        } else {
+            frame(
+                &ctx,
+                &mut app,
+                vec![Event::PointerMoved(start), pointer(start, true)],
+            );
+            frame(&ctx, &mut app, vec![Event::PointerMoved(end)]);
+        }
         assert_eq!(app.drag.as_ref().map(|drag| drag.task_id), Some(task));
         if archive {
             key(
@@ -406,8 +415,170 @@ fn navigation_and_archiving_during_a_real_drag_leave_saved_tasks_usable() {
 }
 
 #[test]
+fn task_swipes_from_title_and_row_gutter_preserve_fast_native_gestures() {
+    for batching in [0, 1, 2] {
+        for hit in ["title", "blank", "gutter"] {
+            let (ctx, mut app) = test_app();
+            let list = app.lists[0].key;
+            let task = Task::new("Swipe this task");
+            let id = task.id;
+            app.lists[0].data.tasks.push(task);
+            app.save_list_index(0);
+            app.settings.font_size = 30.0;
+            idle(&ctx, &mut app);
+            let row = ctx
+                .read_response(FocusItem::Task(list, id).id())
+                .unwrap()
+                .rect;
+            let title = ctx.read_response(Id::new(("task-text", id))).unwrap().rect;
+            let start = match hit {
+                "title" => title.left_center() + Vec2::new(12.0, 0.0),
+                "blank" => title.right_center() - Vec2::new(8.0, 0.0),
+                _ => Pos2::new(row.left() + 40.0, row.center().y),
+            };
+            let end = start + Vec2::new(110.0, 0.0);
+            let pointer = |pos, pressed| Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Modifiers::NONE,
+            };
+            if batching == 1 {
+                frame(
+                    &ctx,
+                    &mut app,
+                    vec![
+                        Event::PointerMoved(start),
+                        pointer(start, true),
+                        Event::PointerMoved(end),
+                        pointer(end, false),
+                    ],
+                );
+            } else if batching == 2 {
+                frame(&ctx, &mut app, vec![Event::PointerMoved(start)]);
+                frame(
+                    &ctx,
+                    &mut app,
+                    vec![pointer(start, true), Event::PointerMoved(end)],
+                );
+                frame(&ctx, &mut app, vec![pointer(end, false)]);
+            } else {
+                frame(
+                    &ctx,
+                    &mut app,
+                    vec![Event::PointerMoved(start), pointer(start, true)],
+                );
+                frame(&ctx, &mut app, vec![Event::PointerMoved(end)]);
+                frame(&ctx, &mut app, vec![pointer(end, false)]);
+            }
+            idle(&ctx, &mut app);
+            assert!(
+                storage::load_workspace(&app.workspace).unwrap().lists[0]
+                    .data
+                    .tasks[0]
+                    .completed,
+                "hit={hit}, batching={batching}, editing={:?}",
+                app.editing
+            );
+            std::fs::remove_dir_all(app.workspace).unwrap();
+        }
+    }
+}
+
+#[test]
+fn coalesced_swipes_reveal_actions_without_capturing_row_controls() {
+    for (hit, partial_batch) in [
+        "title",
+        "completion",
+        "copy",
+        "context",
+        "checklist",
+        "delete",
+    ]
+    .into_iter()
+    .flat_map(|hit| [(hit, false), (hit, true)])
+    {
+        let (ctx, mut app) = test_app();
+        let list = app.lists[0].key;
+        let mut task = Task::new("Swipe target");
+        task.context = "Preserved notes".into();
+        task.subtasks.push(crate::model::Subtask::new("Child"));
+        let id = task.id;
+        app.lists[0].data.tasks.push(task);
+        app.save_list_index(0);
+        let before = std::fs::read(&app.lists[0].path).unwrap();
+        idle(&ctx, &mut app);
+        let row = ctx
+            .read_response(FocusItem::Task(list, id).id())
+            .unwrap()
+            .rect;
+        let start = match hit {
+            "title" => ctx
+                .read_response(Id::new(("task-text", id)))
+                .unwrap()
+                .rect
+                .center(),
+            "completion" => Pos2::new(row.left() + 22.0, row.center().y),
+            "delete" => Pos2::new(row.right() - 17.0, row.center().y),
+            _ => {
+                let control = match hit {
+                    "copy" => Id::new(("copy-task", list, id, false)),
+                    "context" => Id::new(("task-context-presence", id)),
+                    _ => Id::new(("task-checklist", list, id)),
+                };
+                ctx.read_response(control).unwrap().rect.center()
+            }
+        };
+        let end = start - Vec2::new(100.0, 0.0);
+        let mut events = vec![
+            Event::PointerMoved(start),
+            Event::PointerButton {
+                pos: start,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: Modifiers::NONE,
+            },
+            Event::PointerMoved(end),
+            Event::PointerButton {
+                pos: end,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: Modifiers::NONE,
+            },
+        ];
+        if partial_batch {
+            let release = events.pop().unwrap();
+            frame(&ctx, &mut app, events);
+            frame(&ctx, &mut app, vec![release]);
+        } else {
+            frame(&ctx, &mut app, events);
+        }
+        idle(&ctx, &mut app);
+        assert_eq!(
+            app.revealed,
+            (hit == "title").then_some((list, id)),
+            "hit={hit}"
+        );
+        assert_eq!(
+            std::fs::read(&app.lists[0].path).unwrap(),
+            before,
+            "hit={hit}"
+        );
+        assert!(app.editing.is_none() && app.task_context.is_none() && app.subtasks_for.is_none());
+        std::fs::remove_dir_all(app.workspace).unwrap();
+    }
+}
+
+#[test]
 fn final_pointer_movement_in_the_release_frame_is_included_in_the_gesture() {
-    for horizontal in [false, true] {
+    for (horizontal, batching) in [
+        (false, 0),
+        (true, 0),
+        (false, 1),
+        (true, 1),
+        (false, 2),
+        (true, 2),
+    ] {
         let (ctx, mut app) = test_app();
         let list = app.lists[0].key;
         app.lists[0].data.tasks = ["Dragged", "Middle", "Last"].map(Task::new).to_vec();
@@ -440,18 +611,43 @@ fn final_pointer_movement_in_the_release_frame_is_included_in_the_gesture() {
             pressed,
             modifiers: Modifiers::NONE,
         };
-        frame(
-            &ctx,
-            &mut app,
-            vec![Event::PointerMoved(start), pointer(start, true)],
-        );
-        frame(&ctx, &mut app, vec![Event::PointerMoved(start + movement)]);
-        assert!(app.drag.is_some());
-        frame(
-            &ctx,
-            &mut app,
-            vec![Event::PointerMoved(end), pointer(end, false)],
-        );
+        if batching == 1 {
+            frame(
+                &ctx,
+                &mut app,
+                vec![
+                    Event::PointerMoved(start),
+                    pointer(start, true),
+                    Event::PointerMoved(end),
+                    pointer(end, false),
+                ],
+            );
+        } else if batching == 2 {
+            frame(&ctx, &mut app, vec![Event::PointerMoved(start)]);
+            frame(
+                &ctx,
+                &mut app,
+                vec![pointer(start, true), Event::PointerMoved(start + movement)],
+            );
+            frame(
+                &ctx,
+                &mut app,
+                vec![Event::PointerMoved(end), pointer(end, false)],
+            );
+        } else {
+            frame(
+                &ctx,
+                &mut app,
+                vec![Event::PointerMoved(start), pointer(start, true)],
+            );
+            frame(&ctx, &mut app, vec![Event::PointerMoved(start + movement)]);
+            assert!(app.drag.is_some());
+            frame(
+                &ctx,
+                &mut app,
+                vec![Event::PointerMoved(end), pointer(end, false)],
+            );
+        }
         idle(&ctx, &mut app);
         let saved = storage::load_workspace(&app.workspace).unwrap();
         if horizontal {

@@ -1,6 +1,6 @@
-//! Parent checklist controls and independent child previews below task rows.
+//! Task-row gestures, parent checklist controls, and independent child previews.
 
-use super::super::{MinimalistApp, keyboard::FocusItem, theme::Palette};
+use super::super::{DragState, MinimalistApp, keyboard::FocusItem, theme::Palette};
 use crate::model::Task;
 use eframe::egui::{
     self, Align2, Button, CornerRadius, Frame, Id, Margin, Rect, Sense, Stroke, Vec2,
@@ -8,6 +8,109 @@ use eframe::egui::{
 use uuid::Uuid;
 
 impl MinimalistApp {
+    /// Preserves native row drags whose press and movement share one input batch.
+    ///
+    /// # Arguments
+    /// - `ui` - Row UI receiving native pointer events.
+    /// - `target` - List, task, and source row index.
+    /// - `row` - Source row bounds.
+    /// - `body_right` - Boundary before the row's action controls.
+    ///
+    /// # Returns
+    /// Whether a captured native drag ended, or `None` for ordinary egui handling.
+    pub(in crate::app) fn coalesced_task_drag(
+        &mut self,
+        ui: &egui::Ui,
+        target: (Uuid, Uuid, usize),
+        row: Rect,
+        body_right: f32,
+    ) -> Option<bool> {
+        let (list, task, source) = target;
+        let state = Id::new(("native-task-drag", list, task));
+        let active = self
+            .drag
+            .as_ref()
+            .is_some_and(|drag| drag.list_id == list && drag.task_id == task);
+        if !active {
+            ui.ctx().data_mut(|data| data.remove::<egui::Pos2>(state));
+        }
+        if !ui.is_enabled() || self.drag.is_some() && !active {
+            return None;
+        }
+        let previous_origin = ui.ctx().data(|data| data.get_temp::<egui::Pos2>(state));
+        let mut origin = previous_origin;
+        let mut delta = self.drag.as_ref().map_or(Vec2::ZERO, |drag| drag.delta);
+        let mut released = false;
+        ui.input(|input| {
+            for event in &input.events {
+                match (event, origin) {
+                    (
+                        egui::Event::PointerButton {
+                            pos,
+                            button: egui::PointerButton::Primary,
+                            pressed: true,
+                            ..
+                        },
+                        _,
+                    ) if self.drag.is_none() => {
+                        let completion = Rect::from_center_size(
+                            egui::pos2(row.left() + 22.0, row.center().y),
+                            Vec2::splat(30.0),
+                        );
+                        origin = (row.contains(*pos)
+                            && pos.x < body_right
+                            && !completion.contains(*pos))
+                        .then_some(*pos);
+                    }
+                    (egui::Event::PointerMoved(pos), Some(start)) => delta = *pos - start,
+                    (
+                        egui::Event::PointerButton {
+                            pos,
+                            button: egui::PointerButton::Primary,
+                            pressed: false,
+                            ..
+                        },
+                        Some(start),
+                    ) => {
+                        delta = *pos - start;
+                        released = true;
+                    }
+                    _ => {}
+                }
+            }
+        });
+        let origin = origin?;
+        let threshold = ui
+            .ctx()
+            .options(|options| options.input_options.max_click_dist);
+        if previous_origin.is_none()
+            && (delta.length() <= threshold || ui.ctx().layer_id_at(origin) != Some(ui.layer_id()))
+        {
+            return None;
+        }
+        if !active {
+            self.drag = Some(DragState {
+                list_id: list,
+                task_id: task,
+                source,
+                target: source,
+                delta,
+                source_center: row.center().y,
+                height: row.height(),
+            });
+        } else if let Some(drag) = &mut self.drag {
+            drag.delta = delta;
+        }
+        ui.ctx().data_mut(|data| {
+            if released {
+                data.remove::<egui::Pos2>(state);
+            } else {
+                data.insert_temp(state, origin);
+            }
+        });
+        Some(released)
+    }
+
     fn checklist_control_width(&self, ui: &egui::Ui, task: &Task) -> f32 {
         task.progress().map_or(36.0, |(done, total)| {
             ui.painter()
