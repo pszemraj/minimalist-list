@@ -536,8 +536,26 @@ pub fn rename_list_file(list: &mut StoredList) -> Result<(), String> {
 ///
 /// # Errors
 ///
-/// Returns an error when the list file cannot be removed.
+/// Returns an error when another readable file has the same identity or the file cannot be removed.
 pub fn delete_list(list: &StoredList) -> Result<(), String> {
+    if let Some(directory) = list.path.parent() {
+        for entry in fs::read_dir(directory)
+            .map_err(|error| format!("could not read {}: {error}", directory.display()))?
+            .filter_map(Result::ok)
+        {
+            let path = entry.path();
+            if path != list.path
+                && path.extension().and_then(|extension| extension.to_str()) == Some("json")
+                && let Ok((other, _)) = read_list(&path)
+                && other.key == list.key
+            {
+                return Err(format!(
+                    "could not delete list: duplicate list identity in {}; resolve the duplicate files first",
+                    path.display()
+                ));
+            }
+        }
+    }
     fs::remove_file(&list.path)
         .map_err(|error| format!("could not delete {}: {error}", list.path.display()))
 }

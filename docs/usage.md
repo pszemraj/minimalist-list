@@ -14,7 +14,7 @@ Press Backspace (`Delete` on macOS) from an empty task entry or a focused task r
 
 `Ctrl+Shift+N` opens list creation from Lists, a list, or Settings. You can also select **+ New list**. New lists default to Charcoal, a muted grey palette. Enter a name, optionally choose an accent, and press Enter or select **Create list**. **Cancel** or Escape closes the form. Down from the name focuses the selected accent; Left/Right moves between colors. Enter or Space chooses the color and returns to the name; the next Enter creates the list. Up returns from colors to the name without selecting.
 
-Open **List options** from a list header or card to rename, recolor, or delete that list. **Delete list** shows its name and affected task and History counts, then requires a separate **Confirm delete list** activation. **Cancel deletion** backs out; holding Enter or Space cannot confirm it. At least one list must remain.
+Open **List options** from a list header or card to rename, recolor, or delete that list. **Delete list** shows its name and affected task and History counts, then requires a separate **Confirm delete list** activation. **Cancel deletion** backs out; holding Enter or Space cannot confirm it. At least one list must remain. If another readable file has the same list identity, resolve the duplicate files before deleting the list.
 
 In **Manual** order, drag overview tiles to rearrange them; the order is remembered separately for each workspace. **Sort lists** temporarily shows title, newest, or oldest order. Return to **Manual** to recover the arrangement. In Wrap mode, hovering a card or task for two seconds shows its full title and basic information; context stays hidden.
 

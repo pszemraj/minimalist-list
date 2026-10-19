@@ -696,6 +696,67 @@ mod tests {
     }
 
     #[test]
+    fn list_deletion_refuses_same_identity_copies_before_and_after_restart() {
+        for restart in [false, true] {
+            let (ctx, mut app) = super::super::tests::test_app();
+            let list = app.lists[0].key;
+            let original = app.lists[0].path.clone();
+            let survivor =
+                storage::create_list(&app.workspace, "Survivor", Accent::Charcoal).unwrap();
+            let survivor_path = survivor.path.clone();
+            app.lists.push(survivor);
+            app.open_settings(Some(list));
+            let mut stale = app.lists[0].clone();
+            stale.data.title = "Renamed".into();
+            stale.path = original.with_file_name(format!("renamed--{list}.json"));
+            storage::save_list(&stale).unwrap();
+            std::fs::File::options()
+                .write(true)
+                .open(&stale.path)
+                .unwrap()
+                .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000))
+                .unwrap();
+            app.lists[0]
+                .data
+                .tasks
+                .push(crate::model::Task::new("Latest saved task"));
+            app.rename_input = "Renamed".into();
+            app.rename_list(list);
+            assert!(app.persistence.pending_filenames.contains(&list));
+            if restart {
+                app = MinimalistApp::new(&ctx, app.settings.clone(), None, None);
+                assert!(app.persistence.pending_filenames.is_empty());
+            }
+            let source_bytes = std::fs::read(&original).unwrap();
+            let stale_bytes = std::fs::read(&stale.path).unwrap();
+            app.delete_list(list);
+            assert!(app.list_index(list).is_some());
+            assert!(
+                app.status
+                    .as_ref()
+                    .unwrap()
+                    .contains("duplicate list identity")
+            );
+            assert_eq!(std::fs::read(&original).unwrap(), source_bytes);
+            assert_eq!(std::fs::read(&stale.path).unwrap(), stale_bytes);
+            let loaded = storage::load_workspace(&app.workspace).unwrap();
+            let current = loaded.lists.iter().find(|item| item.key == list).unwrap();
+            assert_eq!(current.path, original);
+            assert_eq!(current.data.tasks[0].text, "Latest saved task");
+            // Resolving the duplicate permits ordinary deletion without reviving it.
+            std::fs::remove_file(&stale.path).unwrap();
+            app.delete_list(list);
+            assert!(app.list_index(list).is_none());
+            assert!(!app.persistence.pending_filenames.contains(&list));
+            assert!(!original.exists());
+            let loaded = storage::load_workspace(&app.workspace).unwrap();
+            assert_eq!(loaded.lists.len(), 1);
+            assert_eq!(loaded.lists[0].path, survivor_path);
+            std::fs::remove_dir_all(&app.workspace).unwrap();
+        }
+    }
+
+    #[test]
     fn deleting_a_formerly_unsaved_list_removes_its_pending_retry() {
         let (_ctx, mut app) = super::super::tests::test_app();
         let list = app.lists[0].key;
