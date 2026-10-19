@@ -801,7 +801,7 @@ impl eframe::App for MinimalistApp {
         }
         let mut content_ui = ui.new_child(
             egui::UiBuilder::new()
-                .id_salt("main-content")
+                .id(egui::Id::new("main-content"))
                 .max_rect(content_rect)
                 .layout(Layout::top_down(Align::LEFT)),
         );

@@ -47,6 +47,62 @@ fn key_and_text(key: egui::Key, modifiers: egui::Modifiers) -> Vec<egui::Event> 
 }
 
 #[test]
+fn expiring_notice_keeps_settings_opener_in_the_accessibility_tree() {
+    let (ctx, mut app) = tests::test_app();
+    ctx.enable_accesskit();
+    app.acknowledge("Moved to destination".into());
+    let output = ui_frame(&ctx, &mut app, Vec::new());
+    let tree = output.platform_output.accesskit_update.unwrap();
+    let (opener, node) = tree
+        .nodes
+        .iter()
+        .find(|(_, node)| node.label() == Some("List options"))
+        .unwrap();
+    let opener = *opener;
+    let bounds = node.bounds().unwrap();
+    let pos = egui::pos2(
+        ((bounds.x0 + bounds.x1) / 2.0) as f32,
+        ((bounds.y0 + bounds.y1) / 2.0) as f32,
+    );
+    ui_frame(
+        &ctx,
+        &mut app,
+        vec![
+            egui::Event::PointerMoved(pos),
+            egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            },
+            egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ],
+    );
+    assert!(matches!(app.screen, Screen::Settings));
+    idle(&ctx, &mut app);
+    app.persistence.notice = None;
+    ui_frame(&ctx, &mut app, Vec::new());
+    let events = key_and_text(egui::Key::Escape, egui::Modifiers::NONE)
+        .into_iter()
+        .take(2)
+        .collect();
+    let output = ui_frame(&ctx, &mut app, events);
+    let tree = output.platform_output.accesskit_update.unwrap();
+    assert!(
+        tree.nodes.iter().any(|(id, _)| *id == tree.focus),
+        "focused node {:?} is missing from the accessibility tree",
+        tree.focus
+    );
+    assert_eq!(tree.focus, opener);
+    std::fs::remove_dir_all(app.workspace).unwrap();
+}
+
+#[test]
 fn escape_from_settings_and_typing_in_one_frame_reaches_the_returned_entry() {
     let (ctx, mut app) = tests::test_app();
     idle(&ctx, &mut app);
