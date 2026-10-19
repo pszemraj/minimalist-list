@@ -159,15 +159,30 @@ impl MinimalistApp {
         ctx.send_viewport_cmd(ViewportCommand::Focus);
     }
 
-    /// Processes tray events and native close or minimize requests while hidden or visible.
+    /// Processes native reveal, tray, close, and minimize requests while hidden or visible.
     ///
     /// # Arguments
     ///
     /// - `ctx` - Context containing the close request and receiving window commands.
     /// - `minimized` - Current minimized state from the native window.
     pub(super) fn handle_window_actions(&mut self, ctx: &egui::Context, minimized: bool) {
-        let actions: Vec<_> =
+        let mut actions: Vec<_> =
             std::iter::from_fn(|| self.tray.as_ref().and_then(Tray::next_action)).collect();
+        if self
+            .instance
+            .as_ref()
+            .is_some_and(|instance| instance.take_show_request())
+        {
+            actions.push(Action::Show);
+        }
+        #[cfg(target_os = "macos")]
+        if self
+            .reopen
+            .as_ref()
+            .is_some_and(|handler| handler.take_show_request())
+        {
+            actions.push(Action::Show);
+        }
         let close_requested = ctx.input(|input| input.viewport().close_requested());
         // Show and Quit take precedence; idle visible ticks need no D-Bus probe.
         let check_host = actions.is_empty()
@@ -273,6 +288,45 @@ mod tests {
     use super::*;
     use crate::app::tests::test_app;
     use crate::model::Task;
+
+    #[test]
+    fn duplicate_launch_reveals_despite_stale_minimize_and_close_input() {
+        for close_requested in [false, true] {
+            let (ctx, mut app) = test_app();
+            let state = app.workspace.join("instance-state");
+            let crate::instance::LaunchOutcome::Primary(guard) =
+                crate::instance::claim(&app.workspace, &state, false).unwrap()
+            else {
+                panic!("expected a new test instance");
+            };
+            app.set_instance_guard(guard, &ctx);
+            app.window_hidden = true;
+            assert!(matches!(
+                crate::instance::claim(&app.workspace, &state, false).unwrap(),
+                crate::instance::LaunchOutcome::Existing
+            ));
+            let mut input = egui::RawInput::default();
+            if close_requested {
+                input
+                    .viewports
+                    .get_mut(&egui::ViewportId::ROOT)
+                    .unwrap()
+                    .events = vec![egui::ViewportEvent::Close];
+            }
+
+            let output = ctx.run_logic(&input, |ctx| app.handle_window_actions(ctx, true));
+            assert!(!app.window_hidden);
+            let commands = &output.viewport_commands[&egui::ViewportId::ROOT];
+            assert!(commands.contains(&ViewportCommand::Visible(true)));
+            assert!(commands.contains(&ViewportCommand::Minimized(false)));
+            assert!(!commands.contains(&ViewportCommand::Visible(false)));
+            if close_requested {
+                assert!(commands.contains(&ViewportCommand::CancelClose));
+            }
+            app.instance = None;
+            std::fs::remove_dir_all(&app.workspace).unwrap();
+        }
+    }
 
     #[test]
     fn revealing_reapplies_the_saved_window_level_after_mapping() {

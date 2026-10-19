@@ -695,21 +695,6 @@ impl eframe::App for MinimalistApp {
         let minimized = frame
             .winit_window()
             .is_some_and(|window| window.is_minimized().unwrap_or(false));
-        if self
-            .instance
-            .as_ref()
-            .is_some_and(|instance| instance.take_show_request())
-        {
-            self.show_window(ctx);
-        }
-        #[cfg(target_os = "macos")]
-        if self
-            .reopen
-            .as_ref()
-            .is_some_and(|handler| handler.take_show_request())
-        {
-            self.show_window(ctx);
-        }
         self.handle_window_actions(ctx, minimized);
         self.poll_global_shortcut(ctx);
         #[cfg(any(target_os = "windows", target_os = "linux"))]
