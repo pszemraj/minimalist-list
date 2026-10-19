@@ -306,6 +306,84 @@ fn complete_copy_from_editors_keeps_drafts_and_normal_selection_copy() {
 }
 
 #[test]
+fn complete_copy_includes_editor_input_before_the_shortcut_in_the_same_batch() {
+    for editor in ["title", "child", "context"] {
+        for input in ["text", "paste", "ime"] {
+            for native_copy in [false, true] {
+                let (ctx, mut app) = test_app();
+                let list = app.lists[0].key;
+                let mut task = Task::new("Saved title");
+                task.context = "Saved context".into();
+                task.subtasks.push(Subtask::new("Saved child"));
+                let parent = task.id;
+                let child = task.subtasks[0].id;
+                app.lists[0].data.tasks.push(task);
+                app.save_list_index(0);
+                let before = fs::read(&app.lists[0].path).unwrap();
+                app.view_zoom = 1.0;
+                app.request_task_focus = false;
+                match editor {
+                    "title" => {
+                        app.editing = Some((list, parent));
+                        app.edit_text = "Saved title".into();
+                        app.request_edit_focus = true;
+                    }
+                    "child" => {
+                        app.switch_subtask_panel(Some((list, parent)));
+                        app.begin_subtask_edit(list, parent, child);
+                    }
+                    _ => app.open_task_context(list, parent, false),
+                }
+                app_frame(&ctx, &mut app, vec![], 1.0);
+                app_frame(&ctx, &mut app, vec![], 1.3);
+                app_frame(
+                    &ctx,
+                    &mut app,
+                    chord(egui::Key::A, egui::Modifiers::COMMAND),
+                    1.6,
+                );
+                let latest = "Latest editor text";
+                let mut events = match input {
+                    "text" => vec![egui::Event::Text(latest.into())],
+                    "paste" => vec![egui::Event::Paste(latest.into())],
+                    _ => vec![
+                        egui::Event::Ime(egui::ImeEvent::Preedit {
+                            text: "Candidate".into(),
+                            active_range_chars: Some(0..9),
+                        }),
+                        egui::Event::Ime(egui::ImeEvent::Commit(latest.into())),
+                    ],
+                };
+                let modifiers = egui::Modifiers::COMMAND | egui::Modifiers::SHIFT;
+                if native_copy {
+                    events.extend([
+                        egui::Event::ModifiersChanged(modifiers),
+                        egui::Event::Copy,
+                        egui::Event::ModifiersChanged(egui::Modifiers::NONE),
+                    ]);
+                } else {
+                    events.extend(chord(egui::Key::C, modifiers));
+                }
+                let first = app_frame(&ctx, &mut app, events, 1.9);
+                let next = app_frame(&ctx, &mut app, vec![], 2.2);
+                let text = copied(&first).or_else(|| copied(&next)).unwrap();
+                assert!(
+                    text.contains(latest),
+                    "{editor}, {input}, native={native_copy}: {text}"
+                );
+                assert_eq!(fs::read(&app.lists[0].path).unwrap(), before);
+                assert!(match editor {
+                    "title" => app.editing.is_some(),
+                    "child" => app.details.editor.is_some(),
+                    _ => app.task_context.is_some(),
+                });
+                fs::remove_dir_all(app.workspace).unwrap();
+            }
+        }
+    }
+}
+
+#[test]
 fn context_draft_returns_after_find_quick_add_and_shortcuts_without_writing() {
     let (ctx, mut app) = test_app();
     let list = app.lists[0].key;
@@ -568,6 +646,19 @@ fn native_copy_event_with_shift_copies_whole_task_and_plain_copy_keeps_selection
     );
     assert_eq!(copied(&output), Some("Selected editor text"));
     output.textures_delta.clear();
+    let mut events = vec![egui::Event::Text("Latest selected title".into())];
+    events.extend(chord(egui::Key::A, egui::Modifiers::COMMAND));
+    events.extend([
+        egui::Event::ModifiersChanged(egui::Modifiers::COMMAND),
+        egui::Event::Copy,
+        egui::Event::ModifiersChanged(egui::Modifiers::NONE),
+    ]);
+    let first = app_frame(&ctx, &mut app, events, 2.2);
+    let next = app_frame(&ctx, &mut app, vec![], 2.5);
+    assert_eq!(
+        copied(&first).or_else(|| copied(&next)),
+        Some("Latest selected title")
+    );
     assert!(app.editing.is_some());
     fs::remove_dir_all(&app.workspace).unwrap();
 }

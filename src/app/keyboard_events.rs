@@ -1,8 +1,11 @@
-//! Preserves text-editor input that arrived before a screen-changing shortcut.
+//! Preserves text-editor input that arrived before an application shortcut.
 
 use super::*;
 
-fn changes_editor_destination(event: &Event) -> bool {
+fn needs_current_editor_input(event: &Event) -> bool {
+    if matches!(event, Event::Copy) {
+        return true;
+    }
     let Event::Key {
         key,
         pressed: true,
@@ -14,6 +17,7 @@ fn changes_editor_destination(event: &Event) -> bool {
         return false;
     };
     (*key == Key::Escape && !repeat && modifiers.matches_exact(Modifiers::NONE))
+        || (*key == Key::C && modifiers.matches_exact(Modifiers::COMMAND | Modifiers::SHIFT))
         || [
             SHOW_SHORTCUTS,
             OPEN_SETTINGS,
@@ -56,7 +60,7 @@ impl MinimalistApp {
         let boundary = ctx.input(|input| {
             let mut editing_input = false;
             for (index, event) in input.events.iter().enumerate() {
-                if changes_editor_destination(event) {
+                if needs_current_editor_input(event) {
                     return editing_input.then_some(index);
                 }
                 editing_input |= matches!(
