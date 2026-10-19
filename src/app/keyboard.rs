@@ -763,10 +763,16 @@ impl MinimalistApp {
     ///
     /// # Returns
     ///
-    /// The edited task's row or the last focused control.
+    /// The edited task or checklist row, or the last focused control.
     pub(super) fn navigation_return_focus(&self) -> Option<Id> {
         self.editing
             .map(|(list, task)| FocusItem::Task(list, task).id())
+            .or_else(|| {
+                self.details
+                    .editor
+                    .as_ref()
+                    .map(|edit| FocusItem::Subtask(edit.list, edit.task, edit.subtask).id())
+            })
             .or(self.keyboard.pending)
             .or(self.keyboard.last_focus)
             .or_else(|| self.default_focus())
@@ -814,6 +820,10 @@ impl MinimalistApp {
             .filter(|id| Some(*id) == self.keyboard.requested)
         {
             let response = ctx.read_response(id).filter(|response| response.enabled());
+            if response.is_none() {
+                // Keep the retry queued without exposing an absent accessibility focus.
+                ctx.memory_mut(|memory| memory.surrender_focus(id));
+            }
             if response.as_ref().is_some_and(|response| {
                 ctx.memory(|memory| memory.is_above_modal_layer(response.layer_id))
             }) {

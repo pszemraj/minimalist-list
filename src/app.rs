@@ -484,7 +484,9 @@ impl MinimalistApp {
         }
         self.keyboard.settings_return = self.navigation_return_focus();
         self.finish_inline_edit();
+        let subtasks_for = self.subtasks_for;
         self.stash_input_drafts();
+        self.switch_subtask_panel(subtasks_for);
         self.keyboard.pending = Some(list_id.map_or_else(
             || egui::Id::new("settings-workspace"),
             |id| egui::Id::new(("settings-list-name", id)),

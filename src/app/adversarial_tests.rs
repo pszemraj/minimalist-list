@@ -103,6 +103,111 @@ fn expiring_notice_keeps_settings_opener_in_the_accessibility_tree() {
 }
 
 #[test]
+fn settings_return_keeps_checklist_openers_in_every_accessibility_frame() {
+    for show_previews in [false, true] {
+        for control in ["completion", "text", "entry", "editor"] {
+            let (ctx, mut app) = tests::test_app();
+            ctx.enable_accesskit();
+            let list = app.lists[0].key;
+            let mut task = Task::new("Parent");
+            let mut child = crate::model::Subtask::new("Edited child");
+            child.completed = true;
+            let child_id = child.id;
+            task.subtasks.push(child);
+            let task_id = task.id;
+            app.lists[0].data.tasks.push(task);
+            app.save_list_index(0);
+            app.settings.show_subtasks = show_previews;
+            app.switch_subtask_panel(Some((list, task_id)));
+            app.new_subtask = "Unsubmitted child".into();
+            let opener = match control {
+                "completion" | "editor" => {
+                    keyboard::FocusItem::Subtask(list, task_id, child_id).id()
+                }
+                "text" => egui::Id::new(("edit-subtask-button", list, task_id, child_id)),
+                _ => egui::Id::new(("new-subtask", list, task_id)),
+            };
+            let initial_focus = if control == "editor" {
+                app.begin_subtask_edit(list, task_id, child_id);
+                app.details.editor.as_mut().unwrap().text = "Saved child edit".into();
+                egui::Id::new(("edit-subtask", list, task_id, child_id))
+            } else {
+                opener
+            };
+            app.request_task_focus = false;
+            app.keyboard.pending = Some(initial_focus);
+            let render = |app: &mut MinimalistApp, events| {
+                let output = ui_frame(&ctx, app, events);
+                let tree = output.platform_output.accesskit_update.unwrap();
+                assert!(
+                    tree.nodes.iter().any(|(id, _)| *id == tree.focus),
+                    "{control}, previews={show_previews}: missing focused node {:?}",
+                    tree.focus
+                );
+            };
+            for _ in 0..3 {
+                render(&mut app, Vec::new());
+            }
+            for key in [egui::Key::Comma, egui::Key::Escape] {
+                let modifiers = if key == egui::Key::Comma {
+                    egui::Modifiers::COMMAND
+                } else {
+                    egui::Modifiers::NONE
+                };
+                let events = key_and_text(key, modifiers).into_iter().take(2).collect();
+                render(&mut app, events);
+                for _ in 0..3 {
+                    render(&mut app, Vec::new());
+                }
+            }
+            assert_eq!(ctx.memory(|memory| memory.focused()), Some(opener));
+            assert_eq!(app.subtasks_for, Some((list, task_id)));
+            assert_eq!(app.new_subtask, "Unsubmitted child");
+            std::fs::remove_dir_all(app.workspace).unwrap();
+        }
+    }
+}
+
+#[test]
+fn externally_removed_settings_opener_never_receives_accessibility_focus() {
+    let (ctx, mut app) = tests::test_app();
+    ctx.enable_accesskit();
+    let list = app.lists[0].key;
+    let task = Task::new("Removed externally");
+    let removed = task.id;
+    app.lists[0].data.tasks.push(task);
+    app.save_list_index(0);
+    app.request_task_focus = false;
+    app.keyboard.pending = Some(keyboard::FocusItem::Task(list, removed).id());
+    idle(&ctx, &mut app);
+    app.open_settings(None);
+    idle(&ctx, &mut app);
+    let mut external = app.lists[0].clone();
+    external.data.tasks.clear();
+    storage::save_list(&external).unwrap();
+    app.next_scan = std::time::Instant::now();
+    app.scan_external_changes();
+    let events = key_and_text(egui::Key::Escape, egui::Modifiers::NONE)
+        .into_iter()
+        .take(2)
+        .collect();
+    for events in [events, Vec::new(), Vec::new(), Vec::new()] {
+        let output = ui_frame(&ctx, &mut app, events);
+        let tree = output.platform_output.accesskit_update.unwrap();
+        assert!(
+            tree.nodes.iter().any(|(id, _)| *id == tree.focus),
+            "missing focused node {:?}",
+            tree.focus
+        );
+    }
+    assert_eq!(
+        ctx.memory(|memory| memory.focused()),
+        Some(egui::Id::new(("new-task", list)))
+    );
+    std::fs::remove_dir_all(app.workspace).unwrap();
+}
+
+#[test]
 fn escape_from_settings_and_typing_in_one_frame_reaches_the_returned_entry() {
     let (ctx, mut app) = tests::test_app();
     idle(&ctx, &mut app);
