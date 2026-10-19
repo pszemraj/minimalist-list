@@ -319,6 +319,101 @@ fn failed_quick_add_keeps_text_and_retry_saves_exactly_one_task() {
 }
 
 #[test]
+fn failed_quick_add_blocks_shutdown_until_retry_without_losing_destination() {
+    for suspended in [false, true] {
+        let (ctx, mut app) = super::super::tests::test_app();
+        let destination =
+            crate::storage::create_list(&app.workspace, "Destination", Accent::Sky).unwrap();
+        let list = destination.key;
+        app.lists.push(destination);
+        app.open_quick_capture(Some(list));
+        app.quick_capture.as_mut().unwrap().text = "Keep the failed capture".into();
+        overlay_frame(&ctx, &mut app, vec![]);
+        std::fs::rename(app.workspace.join("lists"), app.workspace.join("offline")).unwrap();
+        std::fs::write(app.workspace.join("lists"), "unavailable").unwrap();
+        overlay_frame(&ctx, &mut app, enter());
+        assert!(app.quick_capture.as_ref().unwrap().failure.is_some());
+        if suspended {
+            app.open_find();
+        }
+        assert!(!app.finish_pending_changes(), "suspended={suspended}");
+        let output = ctx.run_logic(&Default::default(), |ctx| app.close_window(ctx));
+        assert!(
+            output
+                .viewport_commands
+                .values()
+                .flatten()
+                .all(|command| *command != egui::ViewportCommand::Close)
+        );
+        let mut input = egui::RawInput::default();
+        input
+            .viewports
+            .get_mut(&egui::ViewportId::ROOT)
+            .unwrap()
+            .events = vec![egui::ViewportEvent::Close];
+        let output = ctx.run_logic(&input, |ctx| app.handle_window_actions(ctx, false));
+        assert!(
+            output.viewport_commands[&egui::ViewportId::ROOT]
+                .contains(&egui::ViewportCommand::CancelClose)
+        );
+        assert!(!app.quitting && !app.window_hidden);
+        let state = app.quick_capture.as_ref().unwrap();
+        assert_eq!(state.text, "Keep the failed capture");
+        assert_eq!(state.selected_list_id, Some(list));
+        assert!(state.failure.is_some());
+        std::fs::remove_file(app.workspace.join("lists")).unwrap();
+        std::fs::rename(app.workspace.join("offline"), app.workspace.join("lists")).unwrap();
+        overlay_frame(&ctx, &mut app, vec![]);
+        overlay_frame(&ctx, &mut app, enter());
+        assert!(app.quick_capture.is_none());
+        assert!(app.finish_pending_changes());
+        let saved = crate::storage::load_workspace(&app.workspace).unwrap();
+        let destination = saved.lists.iter().find(|item| item.key == list).unwrap();
+        assert_eq!(destination.data.tasks.len(), 1);
+        assert_eq!(destination.data.tasks[0].text, "Keep the failed capture");
+        let output = ctx.run_logic(&Default::default(), |ctx| app.close_window(ctx));
+        assert!(
+            output.viewport_commands[&egui::ViewportId::ROOT]
+                .contains(&egui::ViewportCommand::Close)
+        );
+        std::fs::remove_dir_all(app.workspace).unwrap();
+    }
+}
+
+#[test]
+fn unsubmitted_or_explicitly_cancelled_quick_add_does_not_block_shutdown() {
+    for failed_then_cancelled in [false, true] {
+        let (ctx, mut app) = super::super::tests::test_app();
+        app.open_quick_capture(None);
+        app.quick_capture.as_mut().unwrap().text = "Ordinary unsubmitted draft".into();
+        overlay_frame(&ctx, &mut app, vec![]);
+        if failed_then_cancelled {
+            app.quick_capture.as_mut().unwrap().failure = Some("Previous save failed".into());
+            overlay_frame(
+                &ctx,
+                &mut app,
+                vec![egui::Event::Key {
+                    key: Key::Escape,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            );
+            assert!(app.quick_capture.is_none() && app.capture_draft.is_none());
+        }
+        assert!(app.finish_pending_changes());
+        let output = ctx.run_logic(&Default::default(), |ctx| app.close_window(ctx));
+        assert!(
+            output.viewport_commands[&egui::ViewportId::ROOT]
+                .contains(&egui::ViewportCommand::Close)
+        );
+        assert!(app.lists[0].data.tasks.is_empty());
+        std::fs::remove_dir_all(app.workspace).unwrap();
+    }
+}
+
+#[test]
 fn quick_add_success_preserves_unrelated_diagnostics_including_after_retry() {
     for fail_first in [false, true] {
         for diagnostic in [

@@ -81,7 +81,7 @@ If files contain the same list UUID, filenames with a recognized UUID take prece
 
 Every edit writes and flushes a temporary sibling file, then replaces the destination. The app checks disk every five seconds and reloads externally changed list files at the next scan. Reloads wait until task or child editing and dragging finish, while any task context dialog is open, and while unsaved list changes or filename updates need recovery. A sync service controls when a file arrives on another computer.
 
-A failed write leaves its changes in memory, shows a visible warning, and offers **Retry save**. Restore folder access and retry before exiting or switching workspaces. Quick add retains its draft and destination until its own retry succeeds; task context keeps its editor open with the draft and a **Retry save** button. Moving a task writes the destination before removing the source and attempts to roll back both lists if either write fails; the two list files are not a single atomic transaction.
+A failed write leaves its changes in memory, shows a visible warning, and offers **Retry save**. Restore folder access and retry before exiting or switching workspaces. A failed Quick add retains its draft and destination and blocks shutdown or workspace switching until it is retried successfully or explicitly cancelled; task context keeps its editor open with the draft and a **Retry save** button. Moving a task writes the destination before removing the source and attempts to roll back both lists if either write fails; the two list files are not a single atomic transaction.
 
 ## JSON format
 

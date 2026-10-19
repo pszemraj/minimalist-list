@@ -260,11 +260,14 @@ impl MinimalistApp {
         }
     }
 
-    /// Saves inline text and accepted delete/archive actions before native shutdown.
+    /// Finishes accepted changes while retaining failed capture drafts before native shutdown.
     ///
     /// # Returns
-    /// Whether every pending list and preference write succeeded.
+    /// Whether every accepted capture, list, and preference change is saved.
     pub(super) fn finish_pending_changes(&mut self) -> bool {
+        if self.reopen_failed_quick_capture() {
+            return false;
+        }
         if !self.save_task_context() {
             return false;
         }
@@ -288,6 +291,73 @@ mod tests {
     use super::*;
     use crate::app::tests::test_app;
     use crate::model::Task;
+
+    #[test]
+    fn tray_quit_retains_failed_capture_until_its_retry_succeeds() {
+        let (ctx, mut app) = test_app();
+        app.open_quick_capture(None);
+        let draw = |app: &mut MinimalistApp, events| {
+            crate::app::tests::run_frame(
+                &ctx,
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(520.0, 700.0),
+                    )),
+                    time: Some(ctx.input(|input| input.time) + 0.3),
+                    events,
+                    ..Default::default()
+                },
+                |_| app.overlay_ui(&ctx, app.palette()),
+            );
+        };
+        let enter = || {
+            [true, false]
+                .into_iter()
+                .map(|pressed| egui::Event::Key {
+                    key: egui::Key::Enter,
+                    physical_key: None,
+                    pressed,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                })
+                .collect()
+        };
+        draw(&mut app, vec![]);
+        draw(
+            &mut app,
+            vec![egui::Event::Text("Retained tray capture".into())],
+        );
+        std::fs::rename(app.workspace.join("lists"), app.workspace.join("offline")).unwrap();
+        std::fs::write(app.workspace.join("lists"), "unavailable").unwrap();
+        draw(&mut app, enter());
+        assert!(app.quick_capture.is_some() && app.status.is_some());
+        app.window_hidden = true;
+        let output = ctx.run_logic(&Default::default(), |ctx| app.quit(ctx));
+        assert!(!app.quitting && !app.window_hidden);
+        assert!(app.quick_capture.is_some());
+        assert!(
+            output
+                .viewport_commands
+                .values()
+                .flatten()
+                .all(|command| *command != ViewportCommand::Close)
+        );
+        std::fs::remove_file(app.workspace.join("lists")).unwrap();
+        std::fs::rename(app.workspace.join("offline"), app.workspace.join("lists")).unwrap();
+        draw(&mut app, vec![]);
+        draw(&mut app, enter());
+        assert!(app.quick_capture.is_none());
+        let output = ctx.run_logic(&Default::default(), |ctx| app.quit(ctx));
+        assert!(app.quitting);
+        assert!(
+            output.viewport_commands[&egui::ViewportId::ROOT].contains(&ViewportCommand::Close)
+        );
+        let saved = crate::storage::load_workspace(&app.workspace).unwrap();
+        assert_eq!(saved.lists[0].data.tasks.len(), 1);
+        assert_eq!(saved.lists[0].data.tasks[0].text, "Retained tray capture");
+        std::fs::remove_dir_all(app.workspace).unwrap();
+    }
 
     #[test]
     fn duplicate_launch_reveals_despite_stale_minimize_and_close_input() {

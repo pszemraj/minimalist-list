@@ -90,6 +90,22 @@ impl SearchHit {
 }
 
 impl MinimalistApp {
+    /// Reopens an accepted capture that still needs its explicit save retry.
+    ///
+    /// # Returns
+    /// Whether an active or suspended failed capture remains unsaved.
+    pub(super) fn reopen_failed_quick_capture(&mut self) -> bool {
+        let failed = self
+            .quick_capture
+            .as_ref()
+            .or(self.capture_draft.as_ref())
+            .is_some_and(|draft| draft.failure.is_some());
+        if failed {
+            self.open_quick_capture(None);
+        }
+        failed
+    }
+
     /// Opens the keyboard reference without discarding a capture or search draft.
     pub(super) fn open_shortcuts(&mut self) {
         self.cancel_overview_drag();
