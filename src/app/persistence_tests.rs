@@ -179,6 +179,64 @@ fn shutdown_and_workspace_switch_finish_pending_rename() {
 }
 
 #[test]
+fn finishing_changes_preserves_unrelated_diagnostics_without_pending_writes() {
+    for diagnostic in [
+        "Global shortcut unavailable: shortcut is already registered",
+        "Duplicate list files were found",
+        "Could not read an external list file",
+    ] {
+        let (_, mut app) = test_app();
+        app.status = Some(diagnostic.into());
+        assert!(app.retry_dirty_lists());
+        assert_eq!(app.status.as_deref(), Some(diagnostic));
+        assert!(app.finish_pending_changes());
+        assert_eq!(app.status.as_deref(), Some(diagnostic));
+        let original = app.workspace.clone();
+        app.switch_workspace(original.join("next-workspace").to_str().unwrap());
+        assert_ne!(app.workspace, original);
+        assert_eq!(app.status.as_deref(), Some(diagnostic));
+        fs::remove_dir_all(original).unwrap();
+    }
+}
+
+#[test]
+fn successful_retry_clears_its_own_error_but_preserves_a_later_diagnostic() {
+    for later_diagnostic in [None, Some("Global shortcut registration failed")] {
+        let (_, mut app) = test_app();
+        let list = app.lists[0].key;
+        app.lists[0]
+            .data
+            .tasks
+            .push(Task::new("Recover this change"));
+        unavailable_lists(&app);
+        assert!(!app.save_list_index(0));
+        assert!(app.persistence.dirty_lists.contains(&list));
+        assert!(
+            app.status
+                .as_deref()
+                .unwrap()
+                .starts_with("Changes are unsaved:")
+        );
+        if let Some(diagnostic) = later_diagnostic {
+            app.status = Some(diagnostic.into());
+        }
+        restore_lists(&app);
+        assert!(app.retry_dirty_lists());
+        assert_eq!(app.status.as_deref(), later_diagnostic);
+        assert!(app.retry_dirty_lists());
+        assert_eq!(app.status.as_deref(), later_diagnostic);
+        assert_eq!(
+            storage::load_workspace(&app.workspace).unwrap().lists[0]
+                .data
+                .tasks[0]
+                .text,
+            "Recover this change"
+        );
+        fs::remove_dir_all(app.workspace).unwrap();
+    }
+}
+
+#[test]
 fn success_acknowledgement_expires_without_dismissing_save_errors() {
     let (ctx, mut app) = test_app();
     app.acknowledge("Added to Tasks".into());

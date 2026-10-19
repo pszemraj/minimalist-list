@@ -12,6 +12,7 @@ pub(super) struct PersistenceState {
     pub(super) pending_filenames: HashSet<Uuid>,
     pub(super) workspace_failure: Option<String>,
     baseline: Settings,
+    last_retry_error: Option<String>,
     pub(super) settings_dirty: bool,
     pub(super) notice: Option<(String, Instant)>,
 }
@@ -35,6 +36,7 @@ impl PersistenceState {
             pending_filenames: HashSet::new(),
             workspace_failure,
             baseline,
+            last_retry_error: None,
             settings_dirty: false,
             notice: None,
         }
@@ -66,6 +68,7 @@ impl MinimalistApp {
             }
             Err(error) => {
                 self.persistence.settings_dirty = true;
+                self.persistence.last_retry_error = Some(error.clone());
                 self.status = Some(error);
             }
         }
@@ -85,7 +88,9 @@ impl MinimalistApp {
             Ok(()) => self.complete_list_save(index),
             Err(error) => {
                 self.persistence.dirty_lists.insert(id);
-                self.status = Some(format!("Changes are unsaved: {error}"));
+                let error = format!("Changes are unsaved: {error}");
+                self.persistence.last_retry_error = Some(error.clone());
+                self.status = Some(error);
                 false
             }
         };
@@ -118,9 +123,11 @@ impl MinimalistApp {
                 Err(error) => {
                     saved = false;
                     self.persistence.dirty_lists.insert(id);
-                    self.status = Some(format!(
+                    let error = format!(
                         "List name saved; its filename update is pending. Retry save: {error}"
-                    ));
+                    );
+                    self.persistence.last_retry_error = Some(error.clone());
+                    self.status = Some(error);
                 }
             }
         }
@@ -162,7 +169,10 @@ impl MinimalistApp {
         let saved = self.persistence.dirty_lists.is_empty()
             && self.persistence.pending_filenames.is_empty()
             && !self.persistence.settings_dirty;
-        if saved {
+        if saved
+            && let Some(error) = self.persistence.last_retry_error.take()
+            && self.status.as_ref() == Some(&error)
+        {
             self.status = None;
         }
         saved
