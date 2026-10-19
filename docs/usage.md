@@ -34,9 +34,27 @@ Enable **Settings → Appearance → Show subtasks below tasks** to preview ever
 
 Click task or child text to edit it inline; Tab also reaches child text, where Enter or Space starts editing. Enter or leaving the editor saves; Escape cancels. Editing a child preserves its position and completion. Task editors save before navigating, archiving, hiding, or quitting. The checklist and delete controls on the right become prominent on hover and remain keyboard-focusable.
 
-Right-click a task and choose **Add context…** or **Edit context…** for supporting text. The multiline popup uses explicit **Save** and **Cancel**; context is not displayed in ordinary rows. Its presence is indicated beside the task. Archived context can be inspected without restoring the task.
+## Add task context
 
-Use a task's copy icon or `Ctrl+Shift+C` (`Cmd+Shift+C` on macOS) while any part of that task is focused to copy its title, context, and complete checklist with completion markers. This includes active title/child drafts; ordinary `Ctrl+C`/`Cmd+C` retains selected-text copying. Successful copying shows an acknowledgement.
+Use context for notes, links, booking details, or instructions while keeping the task title short. Context is multiline plain text and stays hidden in ordinary rows.
+
+1. Right-click the task's title or row and choose **Add context…**. For a task with saved notes, the action is **Edit context…**.
+2. Enter the details and choose **Save**. **Cancel** or Escape discards your changes; clicking outside the popup leaves it open. Hiding or quitting the app saves an open context draft.
+3. To reopen saved notes, click the small circle with three horizontal lines beside the task's checklist control, or use **Edit context…** again. Clearing the text and saving removes the notes icon.
+
+<img src="../assets/task-context-menu.png" alt="Task menu on Linux with Add context highlighted for Plan a weekend trip" width="360">
+
+*Find Add context in the task's right-click menu.*
+
+<img src="../assets/task-context-editor.png" alt="Task context editor on Linux with multiline trip details, a URL, and Save and Cancel buttons" width="360">
+
+*Keep supporting details in the context editor without adding them to the task title.*
+
+Saved context follows the task through Move, deletion Undo, and History, and syncs with its [list file](storage.md#file-sync-behavior). In History, right-click an archived task and choose **View context…** to read its notes without restoring it.
+
+### Copy the complete task
+
+Use a task's copy icon, its **Copy complete task** menu action, or `Ctrl+Shift+C` (`Cmd+Shift+C` on macOS) while any part of that task is focused. This copies the title, context, and complete checklist as plain text, with `[ ]` and `[x]` completion markers. It includes current title, child, and context drafts; ordinary `Ctrl+C`/`Cmd+C` retains selected-text copying. Successful copying shows an acknowledgement.
 
 ## Complete, reorder, and remove tasks
 

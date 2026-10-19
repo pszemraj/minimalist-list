@@ -64,6 +64,8 @@ Verify the checkout with `cargo test --locked`; `cargo run --locked -- --version
 
 Open a list and type `Buy groceries` into the field at the top. Enter adds the task at the top of the list and returns focus to the field. See [list management](docs/usage.md#manage-lists) to create more lists.
 
+Right-click a task and choose **Add context…** to attach [notes and links](docs/usage.md#add-task-context).
+
 Press Backspace (`Delete` on macOS) when task entry is empty to return to Lists. Use arrows to choose a list and Enter to open it.
 
 Press `Ctrl+/` (`Cmd+/` on macOS) to see the keyboard shortcuts in the app.
