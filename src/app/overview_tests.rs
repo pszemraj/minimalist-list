@@ -25,9 +25,7 @@ fn grid_frame(
         ctx.data(|data| data.get_temp::<f32>(Id::new("native-scale")))
             .unwrap_or(1.0),
     );
-    let mut output = ctx.run_ui(input, |ui| app.overview_ui(ui, app.palette()));
-    output.textures_delta.clear();
-    output
+    crate::app::tests::run_frame(ctx, input, |ui| app.overview_ui(ui, app.palette()))
 }
 
 fn pointer(point: egui::Pos2, pressed: bool) -> Vec<egui::Event> {
@@ -44,7 +42,8 @@ fn pointer(point: egui::Pos2, pressed: bool) -> Vec<egui::Event> {
 
 fn root_frame(ctx: &egui::Context, app: &mut MinimalistApp, events: Vec<egui::Event>) {
     app.update_motion(ctx);
-    let mut output = ctx.run_ui(
+    crate::app::tests::run_frame(
+        ctx,
         egui::RawInput {
             screen_rect: Some(Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -56,7 +55,6 @@ fn root_frame(ctx: &egui::Context, app: &mut MinimalistApp, events: Vec<egui::Ev
         },
         |ui| <MinimalistApp as eframe::App>::ui(app, ui, &mut eframe::Frame::_new_kittest()),
     );
-    output.textures_delta.clear();
 }
 
 #[test]
@@ -558,7 +556,8 @@ fn frame(
     app: &mut MinimalistApp,
     events: Vec<egui::Event>,
 ) -> egui::FullOutput {
-    let mut output = ctx.run_ui(
+    crate::app::tests::run_frame(
+        ctx,
         egui::RawInput {
             screen_rect: Some(Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -569,9 +568,7 @@ fn frame(
             ..Default::default()
         },
         |ui| app.overview_ui(ui, app.palette()),
-    );
-    output.textures_delta.clear();
-    output
+    )
 }
 
 fn click_label(ctx: &egui::Context, app: &mut MinimalistApp, label: &str) {
@@ -617,16 +614,7 @@ fn creation_buttons_create_cancel_and_leave_blank_submission_focused() {
     frame(
         &ctx,
         &mut app,
-        [true, false]
-            .into_iter()
-            .map(|pressed| egui::Event::Key {
-                key: egui::Key::Enter,
-                physical_key: None,
-                pressed,
-                repeat: false,
-                modifiers: egui::Modifiers::NONE,
-            })
-            .collect(),
+        crate::app::tests::chord(egui::Key::Enter, egui::Modifiers::NONE),
     );
     frame(
         &ctx,

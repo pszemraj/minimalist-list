@@ -1,7 +1,10 @@
 //! Context compatibility, clipboard, and recovery regressions.
 
 use super::*;
-use crate::{app::tests::test_app, model::Subtask};
+use crate::{
+    app::tests::{chord, test_app},
+    model::Subtask,
+};
 use std::fs;
 
 #[test]
@@ -120,7 +123,8 @@ fn app_frame(
     events: Vec<egui::Event>,
     time: f64,
 ) -> egui::FullOutput {
-    let mut output = ctx.run_ui(
+    crate::app::tests::run_frame(
+        ctx,
         egui::RawInput {
             time: Some(time),
             screen_rect: Some(egui::Rect::from_min_size(
@@ -133,22 +137,7 @@ fn app_frame(
         |ui| {
             <MinimalistApp as eframe::App>::ui(app, ui, &mut eframe::Frame::_new_kittest());
         },
-    );
-    output.textures_delta.clear();
-    output
-}
-
-fn chord(key: egui::Key, modifiers: egui::Modifiers) -> Vec<egui::Event> {
-    [true, false]
-        .into_iter()
-        .map(|pressed| egui::Event::Key {
-            key,
-            physical_key: None,
-            pressed,
-            repeat: false,
-            modifiers,
-        })
-        .collect()
+    )
 }
 
 fn copied(output: &egui::FullOutput) -> Option<&str> {

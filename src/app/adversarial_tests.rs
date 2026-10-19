@@ -18,11 +18,9 @@ fn ui_frame(
         events,
         ..Default::default()
     };
-    let mut output = ctx.run_ui(input, |ui| {
+    crate::app::tests::run_frame(ctx, input, |ui| {
         <MinimalistApp as eframe::App>::ui(app, ui, &mut eframe::Frame::_new_kittest());
-    });
-    output.textures_delta.clear();
-    output
+    })
 }
 
 fn idle(ctx: &egui::Context, app: &mut MinimalistApp) {
@@ -32,16 +30,7 @@ fn idle(ctx: &egui::Context, app: &mut MinimalistApp) {
 }
 
 fn key_and_text(key: egui::Key, modifiers: egui::Modifiers) -> Vec<egui::Event> {
-    let mut events: Vec<_> = [true, false]
-        .into_iter()
-        .map(|pressed| egui::Event::Key {
-            key,
-            physical_key: None,
-            pressed,
-            repeat: false,
-            modifiers,
-        })
-        .collect();
+    let mut events = tests::chord(key, modifiers);
     events.push(egui::Event::Text("Native".into()));
     events
 }

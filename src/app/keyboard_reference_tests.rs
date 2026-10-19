@@ -337,18 +337,7 @@ fn shortcuts_reference_dismissal_accepts_the_very_next_input() {
     idle(&ctx, &mut app);
     type_text(&ctx, &mut app, "Start");
     key(&ctx, &mut app, Key::Slash, Modifiers::COMMAND);
-    let press = |key| {
-        [true, false]
-            .into_iter()
-            .map(|pressed| Event::Key {
-                key,
-                physical_key: None,
-                pressed,
-                repeat: false,
-                modifiers: Modifiers::NONE,
-            })
-            .collect()
-    };
+    let press = |key| chord(key, Modifiers::NONE);
     frame(&ctx, &mut app, press(Key::Escape), 430.0);
     type_text(&ctx, &mut app, " finish");
     assert_eq!(app.new_task, "Start finish");

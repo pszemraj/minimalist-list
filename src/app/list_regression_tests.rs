@@ -1,7 +1,10 @@
 //! Pointer, focus, and scroll journeys through the real task-list widgets.
 
 use super::*;
-use crate::app::{Screen, tests::test_app};
+use crate::app::{
+    Screen,
+    tests::{chord, test_app},
+};
 use crate::model::Accent;
 use crate::storage;
 use egui::{Event, Key, Modifiers};
@@ -15,10 +18,9 @@ fn frame(ctx: &egui::Context, app: &mut MinimalistApp, events: Vec<Event>) {
         ..Default::default()
     };
     app.update_motion(ctx);
-    let mut output = ctx.run_ui(input, |ui| {
+    crate::app::tests::run_frame(ctx, input, |ui| {
         <MinimalistApp as eframe::App>::ui(app, ui, &mut eframe::Frame::_new_kittest());
     });
-    output.textures_delta.clear();
 }
 
 fn idle(ctx: &egui::Context, app: &mut MinimalistApp) {
@@ -28,20 +30,7 @@ fn idle(ctx: &egui::Context, app: &mut MinimalistApp) {
 }
 
 fn key(ctx: &egui::Context, app: &mut MinimalistApp, key: Key, modifiers: Modifiers) {
-    frame(
-        ctx,
-        app,
-        [true, false]
-            .into_iter()
-            .map(|pressed| Event::Key {
-                key,
-                physical_key: None,
-                pressed,
-                repeat: false,
-                modifiers,
-            })
-            .collect(),
-    );
+    frame(ctx, app, chord(key, modifiers));
 }
 
 fn click(ctx: &egui::Context, app: &mut MinimalistApp, pos: Pos2, split: bool) {

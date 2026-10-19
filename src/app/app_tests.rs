@@ -8,13 +8,40 @@ use super::*;
 /// - `ctx` - Context retaining focus and widget state between frames.
 /// - `input` - Simulated frame input.
 /// - `render` - UI to render during the frame.
+///
+/// # Returns
+/// The frame output without texture updates.
 pub(super) fn run_frame(
     ctx: &egui::Context,
     input: egui::RawInput,
     render: impl FnMut(&mut egui::Ui),
-) {
+) -> egui::FullOutput {
     let mut output = ctx.run_ui(input, render);
     output.textures_delta.clear();
+    output
+}
+
+/// Creates press and release events for a key with the same modifiers.
+///
+/// # Arguments
+///
+/// - `key` - Key to press and release.
+/// - `modifiers` - Modifiers held for both events.
+///
+/// # Returns
+///
+/// The key press followed by its release, without repeat or physical-key data.
+pub(super) fn chord(key: egui::Key, modifiers: egui::Modifiers) -> Vec<egui::Event> {
+    [true, false]
+        .into_iter()
+        .map(|pressed| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers,
+        })
+        .collect()
 }
 
 #[test]
@@ -69,16 +96,7 @@ pub(super) fn test_app() -> (egui::Context, MinimalistApp) {
 }
 
 fn enter_events() -> Vec<egui::Event> {
-    [true, false]
-        .into_iter()
-        .map(|pressed| egui::Event::Key {
-            key: egui::Key::Enter,
-            physical_key: None,
-            pressed,
-            repeat: false,
-            modifiers: egui::Modifiers::default(),
-        })
-        .collect()
+    chord(egui::Key::Enter, egui::Modifiers::default())
 }
 
 #[test]
@@ -145,16 +163,7 @@ fn task_row_focus_survives_insertion_and_reordering() {
         run_frame(
             &ctx,
             egui::RawInput {
-                events: [true, false]
-                    .into_iter()
-                    .map(|pressed| egui::Event::Key {
-                        key: egui::Key::Tab,
-                        physical_key: None,
-                        pressed,
-                        repeat: false,
-                        modifiers: egui::Modifiers::default(),
-                    })
-                    .collect(),
+                events: chord(egui::Key::Tab, egui::Modifiers::default()),
                 ..Default::default()
             },
             |ui| app.list_ui(ui, list_id, palette),

@@ -231,7 +231,8 @@ fn overlay_frame(
     app: &mut MinimalistApp,
     events: Vec<egui::Event>,
 ) -> Vec<String> {
-    let mut output = ctx.run_ui(
+    let output = crate::app::tests::run_frame(
+        ctx,
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -247,7 +248,6 @@ fn overlay_frame(
             app.finish_keyboard_frame(ctx);
         },
     );
-    output.textures_delta.clear();
     output
         .shapes
         .into_iter()
@@ -259,16 +259,7 @@ fn overlay_frame(
 }
 
 fn enter() -> Vec<egui::Event> {
-    [true, false]
-        .into_iter()
-        .map(|pressed| egui::Event::Key {
-            key: Key::Enter,
-            physical_key: None,
-            pressed,
-            repeat: false,
-            modifiers: egui::Modifiers::NONE,
-        })
-        .collect()
+    crate::app::tests::chord(Key::Enter, egui::Modifiers::NONE)
 }
 
 #[test]

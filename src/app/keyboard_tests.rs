@@ -1,7 +1,7 @@
 //! Headless keyboard journeys using real egui widgets and persisted task files.
 
 use super::*;
-use crate::app::tests::test_app;
+use crate::app::tests::{chord, test_app};
 use crate::model::{Accent, ArchivedTask, Task};
 use crate::storage;
 
@@ -21,13 +21,11 @@ fn frame(
         ..Default::default()
     };
     app.update_motion(ctx);
-    let mut output = ctx.run_ui(input, |ui| {
+    crate::app::tests::run_frame(ctx, input, |ui| {
         // eframe provides this hidden constructor for headless App tests.
         // Review its compatibility when upgrading the locked eframe version.
         <MinimalistApp as eframe::App>::ui(app, ui, &mut eframe::Frame::_new_kittest());
-    });
-    output.textures_delta.clear();
-    output
+    })
 }
 
 fn idle(ctx: &egui::Context, app: &mut MinimalistApp) {
@@ -37,17 +35,7 @@ fn idle(ctx: &egui::Context, app: &mut MinimalistApp) {
 }
 
 fn key(ctx: &egui::Context, app: &mut MinimalistApp, key: Key, modifiers: Modifiers) {
-    let events = [true, false]
-        .into_iter()
-        .map(|pressed| Event::Key {
-            key,
-            physical_key: None,
-            pressed,
-            repeat: false,
-            modifiers,
-        })
-        .collect();
-    frame(ctx, app, events, 430.0);
+    frame(ctx, app, chord(key, modifiers), 430.0);
     idle(ctx, app);
 }
 

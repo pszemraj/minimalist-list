@@ -23,7 +23,8 @@ fn children_frame(
     list: Uuid,
     tasks: &[Task],
 ) -> egui::FullOutput {
-    let mut output = ctx.run_ui(
+    crate::app::tests::run_frame(
+        ctx,
         egui::RawInput {
             screen_rect: Some(Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -37,9 +38,7 @@ fn children_frame(
                 app.task_children_below(ui, list, task, palette);
             }
         },
-    );
-    output.textures_delta.clear();
-    output
+    )
 }
 
 fn text_count(output: &egui::FullOutput, expected: &str) -> usize {
