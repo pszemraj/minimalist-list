@@ -330,7 +330,17 @@ pub fn load_workspace(root: &Path) -> Result<WorkspaceSnapshot, String> {
 
     for path in paths {
         match read_list(&path) {
-            Ok((stored, canonical_name)) => candidates.push((stored, canonical_name)),
+            Ok((stored, canonical_name)) => {
+                // A blocked rename saves newer content at its original UUID-bearing path.
+                let modified = if canonical_name != 0 {
+                    fs::metadata(&path)
+                        .map(|metadata| stamp_from_metadata(&metadata).modified_ns)
+                        .unwrap_or_default()
+                } else {
+                    0
+                };
+                candidates.push((stored, (canonical_name != 0, modified, canonical_name)));
+            }
             Err(error) => {
                 warnings.push(error);
                 failed_paths.push(path);
@@ -338,9 +348,9 @@ pub fn load_workspace(root: &Path) -> Result<WorkspaceSnapshot, String> {
         }
     }
 
-    candidates.sort_by(|(left, left_canonical), (right, right_canonical)| {
-        right_canonical
-            .cmp(left_canonical)
+    candidates.sort_by(|(left, left_priority), (right, right_priority)| {
+        right_priority
+            .cmp(left_priority)
             .then_with(|| left.path.cmp(&right.path))
     });
 

@@ -77,7 +77,7 @@ Edits to different lists write different files, so file-sync services can transf
 > [!IMPORTANT]
 > Minimalist List does not merge simultaneous changes to the same list. Let one device finish syncing before editing that list on another device.
 
-If files contain the same list UUID, a descriptive filename matching the current title wins. Next come other filenames with a recognized UUID, including legacy UUID-only names, then arbitrary conflict-copy names. Ties use filename order. Unselected copies remain untouched and the application reports them.
+If files contain the same list UUID, filenames with a recognized UUID take precedence over arbitrary conflict-copy names. Among recognized filenames, the most recently modified file wins, so a blocked rename retains the contents saved at its original path after restart. Timestamp ties prefer a descriptive filename matching its title, then filename order. Unselected copies remain untouched and the application reports them. This selection does not merge conflicting edits.
 
 Every edit writes and flushes a temporary sibling file, then replaces the destination. The app checks disk every five seconds and reloads externally changed list files at the next scan. Reloads wait until task or child editing and dragging finish, while any task context dialog is open, and while unsaved list changes or filename updates need recovery. A sync service controls when a file arrives on another computer.
 

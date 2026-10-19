@@ -71,6 +71,12 @@ fn descriptive_filename_identity_wins_over_json_and_sync_conflict_copies() {
     copy.path = root.join("lists").join(format!("{}.json", list.key));
     save_list(&copy).unwrap();
     let legacy = copy.path.clone();
+    File::options()
+        .write(true)
+        .open(&legacy)
+        .unwrap()
+        .set_modified(UNIX_EPOCH + std::time::Duration::from_secs(1_000))
+        .unwrap();
     copy.data.title = "Conflicted title".into();
     copy.path = list.path.with_file_name(format!(
         "current-title--{} (conflicted copy).json",
@@ -137,6 +143,61 @@ fn renaming_refuses_an_existing_destination_without_overwriting_either_file() {
     );
     assert_eq!(read_list(&original).unwrap().0.data.title, "Renamed");
     fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn rename_collision_reloads_the_latest_saved_contents_without_replacing_copies() {
+    for legacy in [false, true] {
+        let root = root();
+        let mut list = create_list(&root, "Original", Accent::Mint).unwrap();
+        if legacy {
+            let path = list.path.with_file_name(format!("{}.json", list.key));
+            fs::rename(&list.path, &path).unwrap();
+            list.path = path;
+        }
+        let source = list.path.clone();
+        list.data.title = "Renamed".into();
+        let mut stale = list.clone();
+        stale.path = source.with_file_name(list_file_name(&list.data.title, list.key));
+        save_list(&stale).unwrap();
+        File::options()
+            .write(true)
+            .open(&stale.path)
+            .unwrap()
+            .set_modified(UNIX_EPOCH + std::time::Duration::from_secs(1_000))
+            .unwrap();
+        let stale_bytes = fs::read(&stale.path).unwrap();
+        list.data.tasks.push(Task::new("Latest saved task"));
+        list.data.tasks[0]
+            .subtasks
+            .push(Subtask::new("Latest child"));
+        save_list(&list).unwrap();
+        assert!(rename_list_file(&mut list).is_err());
+        let loaded = load_workspace(&root).unwrap();
+        assert_eq!(loaded.lists.len(), 1);
+        assert_eq!(loaded.lists[0].path, source);
+        assert_eq!(
+            serde_json::to_value(&loaded.lists[0].data).unwrap(),
+            serde_json::to_value(&list.data).unwrap()
+        );
+        assert_eq!(loaded.warnings.len(), 1);
+        assert_eq!(fs::read(&stale.path).unwrap(), stale_bytes);
+
+        // A subsequent real edit to the destination must beat the older source.
+        File::options()
+            .write(true)
+            .open(&source)
+            .unwrap()
+            .set_modified(UNIX_EPOCH + std::time::Duration::from_secs(2_000))
+            .unwrap();
+        stale.data.tasks.push(Task::new("New destination edit"));
+        save_list(&stale).unwrap();
+        let loaded = load_workspace(&root).unwrap();
+        assert_eq!(loaded.lists[0].path, stale.path);
+        assert_eq!(loaded.lists[0].data.tasks[0].text, "New destination edit");
+        assert!(source.exists());
+        fs::remove_dir_all(root).unwrap();
+    }
 }
 
 #[test]
