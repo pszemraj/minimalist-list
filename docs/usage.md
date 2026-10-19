@@ -88,7 +88,7 @@ Escape dismisses one layer per press: an open dropdown, the shortcut reference, 
 
 ## Window and appearance settings
 
-`Ctrl+,` opens global **Settings**, including layouts that require Shift to type a comma. Workspace, window, and appearance preferences apply to every list. **Current list options** opens the selected list's [List options](#manage-lists); **App settings** returns to global preferences.
+`Ctrl+,` opens global **Settings**, including layouts that require Shift to type a comma. The running application version appears beneath **App settings**. Workspace, window, and appearance preferences apply to every list. **Current list options** opens the selected list's [List options](#manage-lists); **App settings** returns to global preferences.
 
 Applied preferences remain saved when leaving Settings. Leaving a list-name field, quitting, or switching workspaces applies its rename; an unchanged field preserves external renames.
 

@@ -121,6 +121,11 @@ impl MinimalistApp {
     fn app_settings_contents(&mut self, ui: &mut egui::Ui, palette: Palette) {
         Self::readable_region(ui, palette, self.settings.background_opacity < 1.0, |ui| {
             ui.label(self.rich("App settings", 20.0, palette.text));
+            ui.label(self.rich(
+                concat!("Version ", env!("CARGO_PKG_VERSION")),
+                12.0,
+                palette.muted,
+            ));
             ui.add(
                 Label::new(self.rich(
                     "Workspace, window, appearance, and shortcuts apply to every list.",
@@ -669,6 +674,7 @@ mod tests {
             "Up/Down: rows · Left/Right: choose or adjust",
             "Current list options",
             "App settings",
+            concat!("Version ", env!("CARGO_PKG_VERSION")),
             "Workspace, window, appearance, and shortcuts apply to every list.",
         ] {
             let (index, text_rect) = output
