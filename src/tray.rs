@@ -117,7 +117,19 @@ impl Tray {
             .host
             .get_property::<bool>("IsStatusNotifierHostRegistered")
             .unwrap_or(false);
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(target_os = "windows")]
+        {
+            #[link(name = "user32")]
+            unsafe extern "system" {
+                fn FindWindowA(
+                    class_name: *const std::ffi::c_char,
+                    window_name: *const std::ffi::c_char,
+                ) -> *mut std::ffi::c_void;
+            }
+            // A live icon object can outlast Explorer or precede its startup.
+            !unsafe { FindWindowA(c"Shell_TrayWnd".as_ptr(), std::ptr::null()) }.is_null()
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "windows")))]
         true
     }
 }
