@@ -210,6 +210,49 @@ fn show_subtasks_defaults_off_and_merges_as_a_global_preference() {
 }
 
 #[test]
+fn invalid_settings_json_recovers_on_preference_save() {
+    for invalid in ["{", r#"{"font_size":"large"}"#] {
+        let root = root();
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("settings.json");
+        fs::write(&path, invalid).unwrap();
+        assert!(
+            load_settings_from(&path)
+                .unwrap_err()
+                .contains("could not parse")
+        );
+        let baseline = Settings::default();
+        let mut desired = baseline.clone();
+        desired.font_size = 28.0;
+        desired.global_shortcut.clear();
+        desired.workspace_path = root.join("selected").to_string_lossy().into_owned();
+        let merged = save_settings_changes_at(&path, &desired, &baseline).unwrap();
+        let saved = load_settings_from(&path).unwrap();
+        for recovered in [merged, saved] {
+            assert_eq!(
+                serde_json::to_value(recovered).unwrap(),
+                serde_json::to_value(&desired).unwrap()
+            );
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[test]
+fn settings_read_io_errors_are_not_treated_as_invalid_json() {
+    let root = root();
+    let path = root.join("settings.json");
+    fs::create_dir_all(&path).unwrap();
+    let baseline = Settings::default();
+    let mut desired = baseline.clone();
+    desired.font_size = 28.0;
+    let error = save_settings_changes_at(&path, &desired, &baseline).unwrap_err();
+    assert!(error.contains("could not read"), "{error}");
+    assert!(path.is_dir());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn settings_merge_waits_for_lock_before_reading_newer_preferences() {
     use std::sync::mpsc;
     use std::time::Duration;

@@ -126,6 +126,7 @@ pub fn save_settings(settings: &Settings) -> Result<(), String> {
 }
 
 /// Saves only preferences changed since this instance last loaded or saved them.
+/// Malformed stored settings are replaced with the current preferences.
 ///
 /// # Arguments
 /// - `desired` - Current preferences, including local edits.
@@ -163,8 +164,16 @@ fn save_settings_changes_at(
         write_json_atomic(path, desired)?;
         return Ok(desired.clone());
     }
-    let mut current =
-        serde_json::to_value(load_settings_from(path)?).map_err(|error| error.to_string())?;
+    let bytes =
+        fs::read(path).map_err(|error| format!("could not read {}: {error}", path.display()))?;
+    let current: Settings = match serde_json::from_slice(&bytes) {
+        Ok(settings) => settings,
+        Err(_) => {
+            write_json_atomic(path, desired)?;
+            return Ok(desired.clone());
+        }
+    };
+    let mut current = serde_json::to_value(current).map_err(|error| error.to_string())?;
     let current_map = current
         .as_object_mut()
         .ok_or("invalid stored preferences")?;

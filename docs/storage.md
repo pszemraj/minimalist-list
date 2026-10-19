@@ -53,6 +53,8 @@ If the native defaults do not exist on macOS or Windows, the app uses an existin
 
 `settings.lock` serializes local preference merges across running instances, preserving unrelated changes made by different workspaces.
 
+Malformed settings show a startup warning and use defaults. The next successful preference save replaces the malformed file with the current preferences; file read errors remain save errors.
+
 ## File layout
 
 The workspace contains one JSON file per list and no shared index:
