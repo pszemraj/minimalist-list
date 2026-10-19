@@ -212,7 +212,7 @@ impl MinimalistApp {
             !dirty && failed_workspace.is_none() && self.status.is_none() && notice.is_some();
         let message = failed_workspace
             .as_ref()
-            .map(|path| format!("Workspace unavailable: {path}. Using a temporary fallback."))
+            .map(|path| format!("Workspace unavailable: {path}. Retry or choose another folder."))
             .or_else(|| self.status.clone())
             .or(notice)
             .unwrap_or_else(|| "Changes are unsaved.".into());

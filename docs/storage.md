@@ -33,7 +33,7 @@ Workspace selection follows this order:
 
 The flag and environment variable do not replace the saved setting. Choosing a folder in the application does. Run `cargo run --locked -- --help` for the command summary.
 
-If the selected workspace is temporarily unavailable at startup, its saved path is retained. The visible warning offers **Retry workspace** or **Choose workspace…**. Restore the original folder and retry to reopen it; navigating a temporary fallback does not replace the selection.
+If the selected workspace is temporarily unavailable at startup, its saved path is retained. The recovery screen offers **Retry workspace** or **Choose workspace…** without opening another workspace's lists. Restore the original folder and retry to reopen it, or choose another folder.
 
 ## Default directories
 

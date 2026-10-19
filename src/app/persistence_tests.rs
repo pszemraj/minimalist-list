@@ -103,6 +103,114 @@ fn drafts_return_to_original_list_workspace_and_collapsed_checklist() {
 }
 
 #[test]
+fn failed_startup_does_not_load_another_instances_default_workspace() {
+    let root = std::env::temp_dir().join(format!("startup-recovery-{}", Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    let selected = root.join("selected");
+    fs::write(&selected, "temporary obstruction").unwrap();
+    let default_workspace = storage::default_workspace_dir();
+    let default_list =
+        storage::create_list(&default_workspace, "Already owned", Accent::Mint).unwrap();
+    let default_bytes = fs::read(&default_list.path).unwrap();
+    let state = storage::window_state_path();
+    let state_dir = state.parent().unwrap();
+    let crate::instance::LaunchOutcome::Primary(default_owner) =
+        crate::instance::claim(&default_workspace, state_dir, false).unwrap()
+    else {
+        panic!("expected a default workspace owner");
+    };
+    let settings = Settings {
+        workspace_path: selected.to_string_lossy().into_owned(),
+        ..Default::default()
+    };
+    let ctx = egui::Context::default();
+    let mut app = MinimalistApp::new(&ctx, settings, None, None);
+    let crate::instance::LaunchOutcome::Primary(recovery_owner) =
+        crate::claim_launch_instance(selected.to_str().unwrap(), state_dir, false).unwrap()
+    else {
+        panic!("expected a recovery workspace owner");
+    };
+    app.set_instance_guard(recovery_owner, &ctx);
+    let recovery_empty = app.lists.is_empty();
+    let recovery_workspace = app.workspace.clone();
+    let recovery_failure = app.persistence.workspace_failure.is_some();
+    let default_revealed_at_startup = default_owner.take_show_request();
+    let after_startup = fs::read(&default_list.path).unwrap();
+    app.switch_workspace(default_workspace.to_str().unwrap());
+    let default_revealed_by_choice = default_owner.take_show_request();
+    let choice_workspace = app.workspace.clone();
+    let choice_empty = app.lists.is_empty();
+
+    fs::remove_file(&selected).unwrap();
+    let recovered = storage::create_list(&selected, "Recovered selection", Accent::Sky).unwrap();
+    app.switch_workspace(selected.to_str().unwrap());
+    let recovered_list = app.lists.first().map(|list| list.key);
+    let recovered_failure = app.persistence.workspace_failure.is_some();
+    fs::remove_file(default_list.path).unwrap();
+    app.instance = None;
+    drop(default_owner);
+    fs::remove_dir_all(root).unwrap();
+    assert!(
+        recovery_empty,
+        "recovery must not load unclaimed default lists"
+    );
+    assert_eq!(recovery_workspace, selected);
+    assert!(recovery_failure);
+    assert!(!default_revealed_at_startup);
+    assert_eq!(after_startup, default_bytes);
+    assert!(default_revealed_by_choice);
+    assert_eq!(choice_workspace, selected);
+    assert!(choice_empty);
+    assert_eq!(recovered_list, Some(recovered.key));
+    assert!(!recovered_failure);
+}
+
+#[test]
+fn failed_startup_leaves_absent_default_workspace_uncreated() {
+    const CHILD_ROOT: &str = "MINIMALIST_RECOVERY_TEST_ROOT";
+    if let Some(root) = std::env::var_os(CHILD_ROOT) {
+        let root = std::path::PathBuf::from(root);
+        let selected = root.join("selected");
+        let default_workspace = storage::default_workspace_dir();
+        assert!(!default_workspace.exists());
+        let settings = Settings {
+            workspace_path: selected.to_string_lossy().into_owned(),
+            ..Default::default()
+        };
+        let ctx = egui::Context::default();
+        let app = MinimalistApp::new(&ctx, settings, None, None);
+        assert!(
+            !default_workspace.exists(),
+            "recovery created a default fallback"
+        );
+        assert!(app.lists.is_empty());
+        assert_eq!(app.workspace, selected);
+        return;
+    }
+    let root = std::env::temp_dir().join(format!("empty-recovery-{}", Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("selected"), "temporary obstruction").unwrap();
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "app::persistence_tests::failed_startup_leaves_absent_default_workspace_uncreated",
+            "--nocapture",
+        ])
+        .env(CHILD_ROOT, &root)
+        .env("XDG_CONFIG_HOME", root.join("config"))
+        .env("XDG_DATA_HOME", root.join("data"))
+        .output()
+        .unwrap();
+    fs::remove_dir_all(root).unwrap();
+    assert!(
+        output.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn temporary_startup_failure_preserves_selected_path_and_retry_recovers_it() {
     let root = std::env::temp_dir().join(format!("unavailable-workspace-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();

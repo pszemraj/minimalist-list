@@ -188,25 +188,28 @@ impl MinimalistApp {
                     settings.workspace_path
                 ));
                 workspace_failure = Some(settings.workspace_path.clone());
-                let fallback = storage::default_workspace_dir();
-                storage::normalize_workspace_path(&fallback.to_string_lossy()).unwrap_or(fallback)
+                PathBuf::from(&settings.workspace_path)
             }
         };
         settings.workspace_path = workspace.to_string_lossy().into_owned();
         if workspace_override.is_none() && workspace_failure.is_none() {
             persisted_workspace_path.clone_from(&settings.workspace_path);
         }
-        let (lists, fingerprint) = match storage::load_workspace(&workspace) {
-            Ok(snapshot) => {
-                if !snapshot.warnings.is_empty() {
-                    status = Some(snapshot.warnings.join("\n"));
+        let (lists, fingerprint) = if workspace_failure.is_some() {
+            (Vec::new(), WorkspaceFingerprint::default())
+        } else {
+            match storage::load_workspace(&workspace) {
+                Ok(snapshot) => {
+                    if !snapshot.warnings.is_empty() {
+                        status = Some(snapshot.warnings.join("\n"));
+                    }
+                    (snapshot.lists, snapshot.fingerprint)
                 }
-                (snapshot.lists, snapshot.fingerprint)
-            }
-            Err(error) => {
-                workspace_failure = Some(settings.workspace_path.clone());
-                status = Some(error);
-                (Vec::new(), WorkspaceFingerprint::default())
+                Err(error) => {
+                    workspace_failure = Some(settings.workspace_path.clone());
+                    status = Some(error);
+                    (Vec::new(), WorkspaceFingerprint::default())
+                }
             }
         };
         let initial = settings
@@ -817,10 +820,12 @@ impl eframe::App for MinimalistApp {
             content_ui.disable();
         }
         let screen = self.screen.clone();
-        match screen {
-            Screen::Overview => self.overview_ui(&mut content_ui, palette),
-            Screen::List(id) => self.list_ui(&mut content_ui, id, palette),
-            Screen::Settings => self.settings_ui(&mut content_ui, palette),
+        if self.persistence.workspace_failure.is_none() || matches!(screen, Screen::Settings) {
+            match screen {
+                Screen::Overview => self.overview_ui(&mut content_ui, palette),
+                Screen::List(id) => self.list_ui(&mut content_ui, id, palette),
+                Screen::Settings => self.settings_ui(&mut content_ui, palette),
+            }
         }
 
         self.keyboard_focus_ui(&mut content_ui, palette);

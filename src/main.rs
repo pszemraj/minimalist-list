@@ -105,7 +105,7 @@ fn claim_launch_instance(
     state_dir: &std::path::Path,
     start_hidden: bool,
 ) -> Result<instance::LaunchOutcome, String> {
-    // The recovery window belongs to the failed request, not its temporary fallback.
+    // Keep failed requests separate so they can display their recovery window.
     let workspace = storage::normalize_workspace_path(requested_workspace)
         .unwrap_or_else(|_| requested_workspace.into());
     instance::claim(&workspace, state_dir, start_hidden)
