@@ -100,7 +100,7 @@ impl MinimalistApp {
             create_response.request_focus();
         }
 
-        let top_drag = ui.allocate_response(Vec2::new(ui.available_width(), 14.0), Sense::drag());
+        let top_drag = ui.allocate_response(Vec2::new(ui.available_width(), 14.0), Sense::DRAG);
         if top_drag.dragged() && top_drag.drag_delta().y > 0.0 {
             self.request_task_focus = true;
         }

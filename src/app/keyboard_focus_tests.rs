@@ -3,6 +3,54 @@
 use super::*;
 
 #[test]
+fn task_entry_tab_skips_drag_strip_but_downward_pointer_drag_refocuses_entry() {
+    let (ctx, mut app) = test_app();
+    let list = app.lists[0].key;
+    let task = Task::new("Named task");
+    let task_focus = FocusItem::Task(list, task.id).id();
+    app.lists[0].data.tasks.push(task);
+    let entry = Id::new(("new-task", list));
+    focus(&ctx, &mut app, entry);
+    let entry_rect = ctx.read_response(entry).unwrap().rect;
+    // The strip sits below the entry frame's bottom margin and widget spacing.
+    let start = entry_rect.center_bottom() + egui::vec2(0.0, 24.0);
+    key(&ctx, &mut app, Key::Tab, Modifiers::NONE);
+    assert_eq!(ctx.memory(|memory| memory.focused()), Some(task_focus));
+    frame(
+        &ctx,
+        &mut app,
+        vec![
+            Event::PointerMoved(start),
+            Event::PointerButton {
+                pos: start,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: Modifiers::NONE,
+            },
+        ],
+        430.0,
+    );
+    let end = start + egui::vec2(0.0, 30.0);
+    frame(&ctx, &mut app, vec![Event::PointerMoved(end)], 430.0);
+    assert!(app.request_task_focus);
+    frame(
+        &ctx,
+        &mut app,
+        vec![Event::PointerButton {
+            pos: end,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: Modifiers::NONE,
+        }],
+        430.0,
+    );
+    idle(&ctx, &mut app);
+    assert_eq!(ctx.memory(|memory| memory.focused()), Some(entry));
+    assert_eq!(app.lists[0].data.tasks[0].text, "Named task");
+    cleanup(&app);
+}
+
+#[test]
 fn held_control_activation_waits_across_completion_and_subtask_removal() {
     for action in [Key::Enter, Key::Space] {
         for control in 0..3 {
