@@ -416,10 +416,11 @@ impl MinimalistApp {
                     label
                 })
                 .inner;
+            let mut opacity_percent = self.settings.background_opacity * 100.0;
             let opacity = ui
                 .add(
-                    egui::Slider::new(&mut self.settings.background_opacity, 0.2..=1.0)
-                        .step_by(0.01)
+                    egui::Slider::new(&mut opacity_percent, 20.0..=100.0)
+                        .step_by(1.0)
                         .clamping(egui::SliderClamping::Edits)
                         .show_value(false)
                         .trailing_fill(true),
@@ -429,10 +430,13 @@ impl MinimalistApp {
             opacity.widget_info(|| {
                 egui::WidgetInfo::slider(
                     ui.is_enabled(),
-                    self.settings.background_opacity as f64,
+                    opacity_percent as f64,
                     "Background opacity",
                 )
             });
+            if opacity.changed() {
+                self.settings.background_opacity = opacity_percent / 100.0;
+            }
             appearance_changed |= opacity.changed();
             ui.add_space(10.0);
             let preview_font = self.font_id(15.0);
@@ -814,6 +818,41 @@ mod tests {
         );
         assert!(text.iter().any(|(text, _)| text == "1 active tasks, 1 completed tasks, 1 archived tasks, and 2 subtasks will be removed."));
         assert!(text.iter().any(|(text, _)| text == "Cancel deletion"));
+        std::fs::remove_dir_all(&app.workspace).unwrap();
+    }
+
+    #[test]
+    fn opacity_slider_exposes_percentage_values_and_steps() {
+        let (ctx, mut app) = super::super::tests::test_app();
+        ctx.enable_accesskit();
+        for (stored, percent) in [(0.2, 20.0), (0.85, 85.0), (1.0, 100.0)] {
+            app.settings.background_opacity = stored;
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(520.0, 1600.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| app.settings_contents(ui, app.palette()),
+            );
+            output.textures_delta.clear();
+            let tree = output.platform_output.accesskit_update.as_ref().unwrap();
+            let (_, slider) = tree
+                .nodes
+                .iter()
+                .find(|(_, node)| {
+                    node.role() == egui::accesskit::Role::Slider
+                        && node.label() == Some("Background opacity")
+                })
+                .unwrap();
+            assert_eq!(slider.numeric_value(), Some(percent));
+            assert_eq!(slider.min_numeric_value(), Some(20.0));
+            assert_eq!(slider.max_numeric_value(), Some(100.0));
+            assert_eq!(slider.numeric_value_step(), Some(1.0));
+            assert_eq!(app.settings.background_opacity, stored);
+        }
         std::fs::remove_dir_all(&app.workspace).unwrap();
     }
 
