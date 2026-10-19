@@ -3,6 +3,47 @@
 use super::*;
 
 #[test]
+fn shortcut_reference_displays_configured_and_disabled_global_shortcuts() {
+    for width in [320.0, 520.0] {
+        let (ctx, mut app) = test_app();
+        let default = crate::hotkey::label(&app.settings.global_shortcut);
+        app.open_shortcuts();
+        for (configured, expected) in [
+            (
+                "CommandOrControl+Alt+KeyK",
+                if cfg!(target_os = "macos") {
+                    "Cmd+Option+K"
+                } else {
+                    "Ctrl+Alt+K"
+                },
+            ),
+            ("", "Disabled"),
+        ] {
+            app.settings.global_shortcut = configured.into();
+            for _ in 0..3 {
+                frame(&ctx, &mut app, Vec::new(), width);
+            }
+            let output = frame(&ctx, &mut app, Vec::new(), width);
+            let text: Vec<_> = output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::epaint::Shape::Text(text) => Some(text.galley.text()),
+                    _ => None,
+                })
+                .collect();
+            assert!(text.contains(&"Show window (global)"), "{text:?}");
+            assert!(
+                text.contains(&expected),
+                "Missing {expected} at width {width}"
+            );
+            assert!(!text.contains(&default.as_str()));
+        }
+        cleanup(&app);
+    }
+}
+
+#[test]
 fn held_enter_stays_with_the_layer_that_received_the_first_press() {
     let (ctx, mut app) = test_app();
     idle(&ctx, &mut app);
