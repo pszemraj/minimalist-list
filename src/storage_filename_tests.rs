@@ -210,6 +210,63 @@ fn show_subtasks_defaults_off_and_merges_as_a_global_preference() {
 }
 
 #[test]
+fn settings_merge_waits_for_lock_before_reading_newer_preferences() {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    let root = root();
+    fs::create_dir_all(&root).unwrap();
+    let path = root.join("settings.json");
+    let baseline = Settings::default();
+    write_json_atomic(&path, &baseline).unwrap();
+    let lock = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(path.with_extension("lock"))
+        .unwrap();
+    lock.lock().unwrap();
+    let mut desired = baseline.clone();
+    desired.font_size = 28.0;
+    let worker_path = path.clone();
+    let worker_baseline = baseline.clone();
+    let (started, ready) = mpsc::channel();
+    let (finished, result) = mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        started.send(()).unwrap();
+        finished
+            .send(save_settings_changes_at(
+                &worker_path,
+                &desired,
+                &worker_baseline,
+            ))
+            .unwrap();
+    });
+    ready.recv().unwrap();
+    let early = result.recv_timeout(Duration::from_millis(200));
+    let waited = matches!(early, Err(mpsc::RecvTimeoutError::Timeout));
+    let mut newer = baseline;
+    newer.show_subtasks = true;
+    let manual = vec![Uuid::new_v4(), Uuid::new_v4()];
+    newer
+        .list_order
+        .insert("other workspace".into(), manual.clone());
+    write_json_atomic(&path, &newer).unwrap();
+    drop(lock);
+    let merged = early.unwrap_or_else(|_| result.recv().unwrap()).unwrap();
+    worker.join().unwrap();
+    let saved = load_settings_from(&path).unwrap();
+    fs::remove_dir_all(root).unwrap();
+    assert!(waited, "settings merge ignored another writer's lock");
+    for settings in [merged, saved] {
+        assert_eq!(settings.font_size, 28.0);
+        assert!(settings.show_subtasks);
+        assert_eq!(settings.list_order["other workspace"], manual);
+    }
+}
+
+#[test]
 fn settings_merge_preserves_other_workspaces_list_order() {
     let baseline = Settings::default();
     save_settings(&baseline).unwrap();

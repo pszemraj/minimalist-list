@@ -98,12 +98,15 @@ pub struct WorkspaceSnapshot {
 ///
 /// Returns an error when the settings file cannot be read or parsed.
 pub fn load_settings() -> Result<Settings, String> {
-    let path = settings_path();
+    load_settings_from(&settings_path())
+}
+
+fn load_settings_from(path: &Path) -> Result<Settings, String> {
     if !path.exists() {
         return Ok(Settings::default());
     }
     let bytes =
-        fs::read(&path).map_err(|error| format!("could not read {}: {error}", path.display()))?;
+        fs::read(path).map_err(|error| format!("could not read {}: {error}", path.display()))?;
     serde_json::from_slice(&bytes)
         .map_err(|error| format!("could not parse {}: {error}", path.display()))
 }
@@ -117,6 +120,7 @@ pub fn load_settings() -> Result<Settings, String> {
 /// # Errors
 ///
 /// Returns an error when settings cannot be serialized, written, or replaced.
+#[cfg(test)]
 pub fn save_settings(settings: &Settings) -> Result<(), String> {
     write_json_atomic(&settings_path(), settings)
 }
@@ -133,11 +137,34 @@ pub fn save_settings(settings: &Settings) -> Result<(), String> {
 /// # Errors
 /// Returns an error if existing preferences cannot be read or the result cannot be saved.
 pub fn save_settings_changes(desired: &Settings, baseline: &Settings) -> Result<Settings, String> {
-    if !settings_path().exists() {
-        save_settings(desired)?;
+    save_settings_changes_at(&settings_path(), desired, baseline)
+}
+
+fn save_settings_changes_at(
+    path: &Path,
+    desired: &Settings,
+    baseline: &Settings,
+) -> Result<Settings, String> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("could not create {}: {error}", parent.display()))?;
+    }
+    // Lock a stable sibling: replacing settings.json also replaces its file identity.
+    let lock = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(path.with_extension("lock"))
+        .map_err(|error| format!("could not open preferences lock: {error}"))?;
+    lock.lock()
+        .map_err(|error| format!("could not lock preferences: {error}"))?;
+    if !path.exists() {
+        write_json_atomic(path, desired)?;
         return Ok(desired.clone());
     }
-    let mut current = serde_json::to_value(load_settings()?).map_err(|error| error.to_string())?;
+    let mut current =
+        serde_json::to_value(load_settings_from(path)?).map_err(|error| error.to_string())?;
     let current_map = current
         .as_object_mut()
         .ok_or("invalid stored preferences")?;
@@ -175,7 +202,7 @@ pub fn save_settings_changes(desired: &Settings, baseline: &Settings) -> Result<
         }
     }
     let merged: Settings = serde_json::from_value(current).map_err(|error| error.to_string())?;
-    save_settings(&merged)?;
+    write_json_atomic(path, &merged)?;
     Ok(merged)
 }
 

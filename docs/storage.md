@@ -51,6 +51,8 @@ If the native defaults do not exist on macOS or Windows, the app uses an existin
 
 `window.ron`, beside `settings.json`, stores native window geometry and framework state. Local `instances/` files coordinate [repeated launches](usage.md#startup-and-system-tray) for each workspace; they do not belong in a synced list folder.
 
+`settings.lock` serializes local preference merges across running instances, preserving unrelated changes made by different workspaces.
+
 ## File layout
 
 The workspace contains one JSON file per list and no shared index:
