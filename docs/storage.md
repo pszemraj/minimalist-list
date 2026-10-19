@@ -2,7 +2,7 @@
 
 ## Workspace location
 
-Select a folder through **Settings -> Workspace -> Choose folder**, or enter a path and press Enter or **Use typed path**. The active folder is shown above the field. Any writable folder works, including a temporary directory. Selecting a folder opens its lists without moving the previous workspace's files. A blank typed path does nothing; an unchanged path preserves the current list. Pending task edits and list renames save before switching; a failed save keeps the original workspace open for recovery.
+Select a folder through **Settings -> Workspace -> Choose folder**, or enter a path and press Enter or **Use typed path**. The active folder is shown above the field. Any writable folder works, including a temporary directory. Selecting a folder opens its lists without moving the previous workspace's files. A blank typed path does nothing. Pressing Enter without changing the path leaves the current list open; explicitly applying the folder reloads it. Pending edits follow [save recovery](#save-recovery).
 
 **Workspace -> Open workspace folder** opens the active folder in Finder, Explorer, or the system file manager.
 
@@ -33,7 +33,7 @@ Workspace selection follows this order:
 
 The flag and environment variable do not replace the saved setting. Choosing a folder in the application does. Run `cargo run --locked -- --help` for the command summary.
 
-If the selected workspace is temporarily unavailable at startup, its saved path is retained. The recovery screen offers **Retry workspace** or **Choose workspace…** without opening another workspace's lists. Restore the original folder and retry to reopen it, or choose another folder.
+If the selected workspace is temporarily unavailable at startup, its saved path is retained. The recovery screen offers **Retry workspace** or **Choose workspace…** without opening another workspace's lists. Restore access and retry to reopen it. Retrying a launch-only override does not replace the saved selection; choosing another folder does.
 
 ## Default directories
 
@@ -41,7 +41,7 @@ Appearance, pinning, and workspace preferences are stored in the local settings 
 
 | Platform | Default workspace | Local settings file |
 | --- | --- | --- |
-| Linux | `${XDG_DATA_HOME:-$HOME/.local/share}/minimalist-list/` | `${XDG_CONFIG_HOME:-$HOME/.config}/minimalist-list/settings.json` |
+| Linux | `~/.local/share/minimalist-list/` | `~/.config/minimalist-list/settings.json` |
 | macOS | `~/Library/Application Support/minimalist-list/` | `~/Library/Application Support/minimalist-list/settings.json` |
 | Windows | `%LOCALAPPDATA%\minimalist-list\` | `%APPDATA%\minimalist-list\settings.json` |
 
@@ -66,7 +66,7 @@ minimalist-list/
     +-- projects--70d0f50d-8d45-4d24-88ce-bf82cbfab48a.json
 ```
 
-New filenames combine a safe, bounded list title with its stable UUID. Renaming a list updates its filename after saving its contents; name collisions never replace another file. Existing UUID-only filenames remain readable and ordinary saves keep their paths. The filename UUID is authoritative.
+New filenames combine a safe, bounded list title with its stable UUID. Renaming a list saves its contents before updating its filename; name collisions never replace another file. If the filename update fails, the contents stay saved at the old path and **Retry save** retries the rename. Existing UUID-only filenames remain readable and ordinary saves keep their paths. The filename UUID is authoritative.
 
 Default list order comes from `created_at_unix`, with the UUID as a stable tie-breaker. Manual tile order and temporary list/task sort modes are local workspace-scoped settings. Task JSON always retains manual task order, including while a sorted view is active.
 
@@ -77,11 +77,15 @@ Edits to different lists write different files, so file-sync services can transf
 > [!IMPORTANT]
 > Minimalist List does not merge simultaneous changes to the same list. Let one device finish syncing before editing that list on another device.
 
-If files contain the same list UUID, filenames with a recognized UUID take precedence over arbitrary conflict-copy names. Among recognized filenames, the most recently modified file wins, so a blocked rename retains the contents saved at its original path after restart. Timestamp ties prefer a descriptive filename matching its title, then filename order. Unselected copies remain untouched and the application reports them. This selection does not merge conflicting edits.
-
 Every edit writes and flushes a temporary sibling file, then replaces the destination. The app checks disk every five seconds and reloads externally changed list files at the next scan. Reloads wait until task or child editing and dragging finish, while any task context dialog is open, and while unsaved list changes or filename updates need recovery. A sync service controls when a file arrives on another computer.
 
-A failed write leaves its changes in memory, shows a visible warning, and offers **Retry save**. Restore folder access and retry before exiting or switching workspaces. A failed Quick add retains its draft and destination and blocks shutdown or workspace switching until it is retried successfully or explicitly cancelled; task context keeps its editor open with the draft and a **Retry save** button. Moving a task writes the destination before removing the source and attempts to roll back both lists if either write fails; the two list files are not a single atomic transaction.
+### Duplicate list files
+
+If files contain the same list UUID, filenames with a recognized UUID take precedence over arbitrary conflict-copy names. Among recognized filenames, the most recently modified file wins. Timestamp ties prefer a descriptive filename matching its title, then filename order. Unselected copies remain untouched and the application reports them. This selection does not merge conflicting edits. If another readable file has the same list identity, resolve the duplicate files before deleting the list.
+
+### Save recovery
+
+A failed write leaves its changes in memory, shows a visible warning, and offers **Retry save**. Pending task edits and list renames must save before exiting or switching workspaces; a failed save keeps the original workspace open for recovery. Restore folder access and retry. A failed Quick add retains its draft and destination and blocks shutdown or workspace switching until it is retried successfully or explicitly cancelled; task context keeps its editor open with the draft and a **Retry save** button. Moving a task writes the destination before removing the source and attempts to roll back both lists if either write fails; the two list files are not a single atomic transaction.
 
 ## JSON format
 
@@ -96,4 +100,4 @@ List files are pretty-printed and hand-editable. `format_version` is currently `
 
 Timestamps are Unix seconds. `accent` is one of `Mint`, `Charcoal`, `Crimson`, `Sand`, `Sky`, or `Lavender`.
 
-Missing `context` loads as empty; an empty context is omitted when writing. Older application versions do not preserve this field when rewriting a task. See [task context](usage.md#add-task-context) for editing and copying notes.
+Missing `context` loads as empty; an empty context is omitted when writing. Older versions without task-context support discard this field when rewriting a list. See [task context](usage.md#add-task-context) for editing and copying notes.

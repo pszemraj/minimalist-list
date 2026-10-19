@@ -56,15 +56,13 @@ Verify the checkout with `cargo test --locked`; `cargo run --locked -- --version
 
 ## Start using it
 
-Open a list and type `Buy groceries` into the field at the top. Enter saves the task and returns focus to the field. In Manual order, new tasks appear at the top. See [list management](docs/usage.md#manage-lists) to create more lists.
-
-Right-click a task and choose **Add context…** to attach [notes and links](docs/usage.md#add-task-context).
+Open a list, type `Buy groceries` into the [task entry](docs/usage.md#capture-and-edit-tasks), and press Enter. See [list management](docs/usage.md#manage-lists) to create more lists.
 
 Use [keyboard navigation](docs/usage.md#keyboard-shortcuts) to work without a mouse, or the [global reveal shortcut](docs/usage.md#global-reveal-shortcut) to show the running app from another application.
 
 ## Documentation
 
-- [Tasks, subtasks, search, history, and appearance](docs/usage.md)
+- [Tasks, subtasks, context, search, history, and appearance](docs/usage.md)
 - [Workspace folders, settings paths, and file sync](docs/storage.md)
 - [Source layout, checks, and GUI inspection](docs/dev.md)
 
