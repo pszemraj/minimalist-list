@@ -3,6 +3,35 @@
 use super::*;
 
 #[test]
+fn settings_mode_switches_are_keyboard_navigable_sections() {
+    for list_options in [false, true] {
+        let (ctx, mut app) = test_app();
+        let list = app.lists[0].key;
+        app.open_settings(list_options.then_some(list));
+        idle(&ctx, &mut app);
+        let switch = app.keyboard.settings_rows[0][0];
+        let next = app.keyboard.settings_rows[1][0];
+        focus(&ctx, &mut app, switch);
+        for action in [Key::ArrowUp, Key::PageUp] {
+            key(&ctx, &mut app, action, Modifiers::NONE);
+            assert_eq!(ctx.memory(|memory| memory.focused()), Some(switch));
+        }
+        key(&ctx, &mut app, Key::ArrowDown, Modifiers::NONE);
+        assert_eq!(ctx.memory(|memory| memory.focused()), Some(next));
+        key(&ctx, &mut app, Key::ArrowUp, Modifiers::NONE);
+        assert_eq!(ctx.memory(|memory| memory.focused()), Some(switch));
+        key(&ctx, &mut app, Key::PageDown, Modifiers::NONE);
+        assert_eq!(ctx.memory(|memory| memory.focused()), Some(next));
+        key(&ctx, &mut app, Key::PageUp, Modifiers::NONE);
+        assert_eq!(ctx.memory(|memory| memory.focused()), Some(switch));
+        assert_eq!(app.settings_list_id, list_options.then_some(list));
+        key(&ctx, &mut app, Key::Enter, Modifiers::NONE);
+        assert_eq!(app.settings_list_id, (!list_options).then_some(list));
+        cleanup(&app);
+    }
+}
+
+#[test]
 fn opening_settings_preserves_fractional_preferences_until_a_slider_is_edited() {
     let (ctx, mut app) = test_app();
     app.settings.font_size = 19.4;

@@ -82,6 +82,9 @@ impl MinimalistApp {
         });
         let list_mode = self.settings_list_id.is_some();
         if let Some(list) = target {
+            self.keyboard
+                .settings_sections
+                .push(self.keyboard.settings_rows.len());
             let label = if list_mode {
                 "App settings"
             } else {
