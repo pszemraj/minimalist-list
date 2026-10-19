@@ -100,6 +100,17 @@ fn select_workspace_override(
     })
 }
 
+fn claim_launch_instance(
+    requested_workspace: &str,
+    state_dir: &std::path::Path,
+    start_hidden: bool,
+) -> Result<instance::LaunchOutcome, String> {
+    // The recovery window belongs to the failed request, not its temporary fallback.
+    let workspace = storage::normalize_workspace_path(requested_workspace)
+        .unwrap_or_else(|_| requested_workspace.into());
+    instance::claim(&workspace, state_dir, start_hidden)
+}
+
 fn main() -> eframe::Result {
     let (data_dir, start_hidden) = match parse_launch_args(env::args_os().skip(1)) {
         Ok(LaunchAction::Run {
@@ -129,16 +140,11 @@ fn main() -> eframe::Result {
     let requested_workspace = workspace_override
         .as_deref()
         .unwrap_or(&settings.workspace_path);
-    let requested_workspace = storage::normalize_workspace_path(requested_workspace)
-        .unwrap_or_else(|_| {
-            let fallback = storage::default_workspace_dir();
-            storage::normalize_workspace_path(&fallback.to_string_lossy()).unwrap_or(fallback)
-        });
     let state_path = storage::window_state_path();
     let state_dir = state_path
         .parent()
         .unwrap_or_else(|| std::path::Path::new("."));
-    let instance = match instance::claim(&requested_workspace, state_dir, start_hidden) {
+    let instance = match claim_launch_instance(requested_workspace, state_dir, start_hidden) {
         Ok(instance::LaunchOutcome::Existing) => return Ok(()),
         Ok(instance::LaunchOutcome::Primary(instance)) => instance,
         Err(error) => return Err(eframe::Error::AppCreation(error.into())),
@@ -220,6 +226,43 @@ fn main() -> eframe::Result {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unavailable_requested_workspace_keeps_its_own_launch_identity() {
+        let root = std::env::temp_dir().join(format!("startup-claim-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let blocked = root.join("requested-workspace");
+        std::fs::write(&blocked, "temporarily unavailable").unwrap();
+        let default_workspace = storage::default_workspace_dir();
+        let instance::LaunchOutcome::Primary(default_owner) =
+            claim_launch_instance(default_workspace.to_str().unwrap(), &root, false).unwrap()
+        else {
+            panic!("expected a default workspace owner");
+        };
+
+        let instance::LaunchOutcome::Primary(recovery_owner) =
+            claim_launch_instance(blocked.to_str().unwrap(), &root, false).unwrap()
+        else {
+            panic!("the failed request must reach its recovery UI");
+        };
+        assert!(!default_owner.take_show_request());
+        assert!(matches!(
+            claim_launch_instance(blocked.to_str().unwrap(), &root, false).unwrap(),
+            instance::LaunchOutcome::Existing
+        ));
+        assert!(recovery_owner.take_show_request());
+        assert!(!default_owner.take_show_request());
+
+        assert!(matches!(
+            claim_launch_instance(default_workspace.to_str().unwrap(), &root, false).unwrap(),
+            instance::LaunchOutcome::Existing
+        ));
+        assert!(default_owner.take_show_request());
+        assert!(!recovery_owner.take_show_request());
+        drop(recovery_owner);
+        drop(default_owner);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn parses_data_dir_argument() {
