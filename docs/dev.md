@@ -37,8 +37,6 @@ src/tray.rs                Native tray icon and menu actions
 
 Neighboring `*_tests.rs` files cover storage, real-widget keyboard and pointer journeys, failure recovery, launch coordination, and layout regressions.
 
-Keep source files below 1,000 lines and split by actual responsibilities rather than generic layers or arbitrary line counts.
-
 ## Verification
 
 Isolate settings and temporary fixtures before running checks. These explicit XDG overrides apply on every platform:
@@ -50,7 +48,7 @@ export XDG_CONFIG_HOME="$PWD/target/agent-checks/config"
 export XDG_DATA_HOME="$PWD/target/agent-checks/data"
 ```
 
-Run the checks before committing:
+For runtime changes, run the checks before committing:
 
 ```bash
 cargo check --locked --workspace --all-targets --all-features
@@ -60,7 +58,10 @@ cargo test --locked --features eframe/inspection
 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 cargo build --locked --workspace --all-targets --all-features
 rustdoc-checker src --strict
+git diff --check
 ```
+
+For documentation-only changes, check Markdown links and whitespace.
 
 ## GUI inspection
 
@@ -92,16 +93,18 @@ Finish every GUI check, including a user-assisted keyboard check, by **quitting 
 
 ### Interaction checks
 
-Exercise the [task interactions](usage.md), both title modes, 320- and 520-point windows, maximum text size in both fonts and weights, pinned mode, and opacity over bright and dark backgrounds. Use long text, explicit newlines, and many History rows; every completion, Delete, Add, and Restore control must remain reachable. Inspect saved JSON after edits, Undo, archive, and Move; restart to check persistence and window placement. Repeat the [shared-folder flows](storage.md#file-sync-behavior) with two instances. Check paths, shortcuts, accessibility, and transparency on each native platform.
+Check paths, shortcuts, accessibility, and transparency on each native platform; cross-compilation and plist parsing do not validate native behavior.
 
-Close and minimize the test window where supported: it should disappear from the taskbar while its tray icon remains. Repeat with decorations disabled and while editing a task; hiding should save the edit and allow external-file reloads while hidden. Restore it through the icon's Show action, then Quit while hidden and verify that the process and icon disappear and pending clear/delete actions are saved.
-
-Run the installed binary with `--start-hidden`: it should remain in the tray without a taskbar window, then restore through **Show Minimalist List**. An ordinary launch should open the window; repeating it for the same workspace and local settings should reveal the existing instance. A repeated hidden launch should remain quiet. Test both shortcuts with an installation path containing spaces. On Windows, use the release build to verify that no console window is created. Inspect the generated startup entry; checking execution at sign-in requires a real desktop login.
-
-On Windows and X11, the visible window should also stay out of the taskbar while the tray works. Repeat hide/reveal and global shortcut activation; X11 managers can discard window-state hints on unmap, so each reveal reapplies them. Remove the tray host and verify the taskbar entry returns, then restore the host and check it disappears again. Check pinning and maximization while toggling tray availability; unrelated X11 window-state flags must remain intact. Native Wayland taskbar behavior is compositor-controlled.
-
-Repeat without a tray host: the normal backend and close/minimize behavior should remain, with no startup warning. Close during an inline edit or pending clear/delete and inspect the saved JSON after restart. If the tray host disappears while hidden, the window should restore at the next scan.
-
-For macOS installation checks, run `bash scripts/install-macos.sh`, then check both generated plists with `plutil -lint`. Open `~/Applications/Minimalist List.app`: the window and menu-bar icon should appear without a Dock icon or Terminal window. Close the window and confirm that minimize is disabled, then use **Show Minimalist List** to restore and focus it. Hide it again and reopen the running bundle through Finder or `open`; the same window and process should return. **Quit** should remove the icon and leave the app stopped. Sign out and back in: the icon should appear without opening a window or stealing focus. Repeat with decorations disabled, a workspace path containing spaces, and an inline edit before hiding; restart and inspect the saved task and workspace selection. Verify both light and dark menu-bar appearances and Command shortcuts. These behaviors require a native Mac; checking the Apple Silicon and Intel targets or parsing plist files on another OS does not validate them.
-
-For failure recovery, temporarily obstruct an isolated fixture's list directory, then add or edit a task and try Quick add. Verify the visible error, retained content, successful retry, and exactly one saved copy after restart. Repeat with startup workspace access, a pending list rename before shutdown or switching folders, and Move failures at both destination and source writes. Check that deleting a dirty list clears its retry state.
+| Area | Actions and checks |
+| --- | --- |
+| [Tasks and navigation](usage.md#capture-and-edit-tasks) | Exercise pointer and keyboard flows. Inspect saved JSON after edits, Undo, archive, and Move, then restart. |
+| [Lists](usage.md#manage-lists) and [task sorting](usage.md#complete-reorder-and-remove-tasks) | Drag unequal-height tiles and rows in Manual order, try every sort, then return to Manual. Add, edit, complete, move, delete, undo, and restore tasks while sorted; check stored order and restart persistence. Rename a list and inspect its [filename](storage.md#file-layout). |
+| [Context and copy](usage.md#add-task-context) | Save and cancel multiline notes, inspect archived context, and copy from rows and editors. Compare clipboard text with current title, context, and child edits. Repeat in a narrow window and through save failure/retry. |
+| [Subtask previews](usage.md#capture-and-edit-tasks) | Enable previews, collapse separate parents, and open the full checklist. Toggle completion and check saved state. |
+| [Layout and appearance](usage.md#window-and-appearance-settings) | Test both title modes, 320- and 520-point windows, maximum text size in both fonts and weights, pinning, and opacity over bright and dark backgrounds. Use long text, explicit newlines, and many History rows; completion, Delete, Add, and Restore must remain reachable. Restart to check window placement. |
+| [Shared folders](storage.md#file-sync-behavior) | Use two isolated instances against one workspace. Edit and externally replace list files, including while inline editing, dragging, viewing context, and hidden. Switch workspace folders, use Open workspace folder, then restart to check the selection. |
+| [Tray and shutdown](usage.md#startup-and-system-tray) | Close and minimize where supported, with decorations on and off. Hide during an inline edit, restore through the tray, then Quit while hidden. Confirm pending clear/delete actions saved and the process and icon exited. Repeat without a tray host and with the host disappearing while hidden. |
+| Launch coordination | Test ordinary and `--start-hidden` launches, then repeat each with the same workspace and settings. Test app-menu and sign-in entries with installation paths containing spaces; inspect the startup entry and verify sign-in through a real desktop login. Windows release builds must open without a console. |
+| Taskbar and window state | On Windows and X11, check visible and hidden windows, repeated reveal and global shortcut activation, and tray-host removal and restoration. Test both pinned and unpinned states after every reveal, including while another application has focus; check maximization and preserve unrelated X11 state flags. |
+| macOS bundle | Follow the [installation commands](../README.md#install-and-run), then run `plutil -lint` on both generated plists. Test close, disabled minimize, menu-bar Show and Quit, Finder or `open` reopening, and hidden sign-in without focus theft. Repeat with decorations disabled, a workspace path containing spaces, and an inline edit before hiding. Restart to check the task and workspace selection. Verify light/dark menu bars and Command shortcuts on Apple Silicon and Intel Macs. |
+| [Save recovery](storage.md#file-sync-behavior) | Obstruct an isolated list directory, then add/edit a task and try Quick add. Check retained content, retry, and exactly one saved copy after restart. Repeat with unavailable startup storage, a pending rename before shutdown or workspace switching, and Move failures at destination and source writes. Deleting a dirty list must clear its retry state. |

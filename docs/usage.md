@@ -1,8 +1,8 @@
 # Using Minimalist List
 
-The global reveal shortcut works while another application has focus: `Ctrl+Alt+Shift+L`, or `Cmd+Option+Shift+L` on macOS. It shows the existing window and keeps it visible on repeated presses. Change or disable it in **Settings → Global shortcut**; registration conflicts are reported without replacing the previous shortcut. The app must be running. Native Wayland requires a desktop shortcut that launches the app; its built-in registration uses X11.
+## Keyboard shortcuts
 
-Other shortcuts work while the application has keyboard focus. On macOS, use Command in place of Ctrl, except list switching uses Control on every platform. Home and End are Fn+Left and Fn+Right on MacBook keyboards; Page Up and Page Down are Fn+Up and Fn+Down.
+Application shortcuts require keyboard focus in the app. On macOS, use Command in place of Ctrl, except list switching uses Control on every platform. Home and End are Fn+Left and Fn+Right on MacBook keyboards; Page Up and Page Down are Fn+Up and Fn+Down.
 
 Press `Ctrl+/` (`Cmd+/` on macOS) to show the in-app keyboard shortcut reference. Keyboard layouts that require Shift to type `/` are supported. Use Up/Down, Page Up/Page Down, or Home/End to scroll it. Escape or **Close** returns focus to the control you left. Quick add drafts and Find queries remain available underneath the reference.
 
@@ -24,15 +24,15 @@ In **Manual** order, drag overview tiles to rearrange them; the order is remembe
 
 Add tasks through the [list entry field](../README.md#start-using-it). Task and subtask entry keep focus after Enter, including an empty submission. Unfinished task and checklist entries stay with their originating workspace and list or task during the session, including after navigation or closing a checklist.
 
-Down from task entry focuses the first task. Up and Down move between task rows, including from their secondary controls; Home and End focus the first and last task. Up from the first task returns to entry. Enter on a task row edits its title; Enter saves and returns focus to that row, while Escape cancels the edit.
+Down from task entry focuses the first task. Up and Down move between task rows, including from their secondary controls; Home and End focus the first and last task. Up from the first task returns to entry.
 
 Right opens a task's checklist and focuses its first child, or its add field when empty. Up/Down moves through children and the add field; Down from an expanded parent enters its checklist. Up from the first child returns to its parent. Home selects the first child and End reaches the add field when a child control is focused. Enter or Space on a child's completion control toggles it. Left outside text, or Escape, closes the checklist and returns to its parent. Moving through an open checklist preserves its unfinished entry; Left/Right/Home/End inside the entry keep editing text.
 
-Enable **Settings → Appearance → Show subtasks below tasks** to preview every task's children. Each task's chevron collapses or expands its preview independently; **Edit subtasks** opens the full checklist editor. With this preference off, the checklist opens only when requested. The larger plus, copy, and delete controls remain available beside each task.
+Enable **Settings → Appearance → Show subtasks below tasks** to preview every task's children. Each task's chevron collapses or expands its preview independently; **Edit subtasks** opens the full checklist editor. With this preference off, the checklist opens only when requested. Plus, copy, and delete controls are available beside each task.
 
 `Ctrl+N` or the header's `add` action opens Quick add. A new capture from an open list defaults to that list; Lists and Settings use the last successful destination. Choose a list and press Enter or **Add**; a successful capture names its destination. Switching between Quick add and Find preserves their drafts and destination. An existing capture draft keeps its chosen destination; Escape cancels that capture.
 
-Click task or child text to edit it inline; Tab also reaches child text, where Enter or Space starts editing. Enter or leaving the editor saves; Escape cancels. Editing a child preserves its position and completion. Task editors save before navigating, archiving, hiding, or quitting. The checklist and delete controls on the right become prominent on hover and remain keyboard-focusable.
+Click task or child text to edit it inline, or press Enter on a focused task row. Tab also reaches child text, where Enter or Space starts editing. Enter or leaving the editor saves; Escape cancels. Saving a task title returns focus to its row; editing a child preserves its position and completion. Task editors save before navigating, archiving, hiding, or quitting. The checklist and delete controls on the right become prominent on hover and remain keyboard-focusable.
 
 ## Add task context
 
@@ -44,17 +44,13 @@ Use context for notes, links, booking details, or instructions while keeping the
 
 <img src="../assets/task-context-menu.png" alt="Task menu on Linux with Add context highlighted for Plan a weekend trip" width="360">
 
-*Find Add context in the task's right-click menu.*
-
 <img src="../assets/task-context-editor.png" alt="Task context editor on Linux with multiline trip details, a URL, and Save and Cancel buttons" width="360">
-
-*Keep supporting details in the context editor without adding them to the task title.*
 
 Saved context follows the task through Move, deletion Undo, and History, and syncs with its [list file](storage.md#file-sync-behavior). In History, right-click an archived task and choose **View context…** to read its notes without restoring it.
 
 ### Copy the complete task
 
-Use a task's copy icon, its **Copy complete task** menu action, or `Ctrl+Shift+C` (`Cmd+Shift+C` on macOS) while any part of that task is focused. This copies the title, context, and complete checklist as plain text, with `[ ]` and `[x]` completion markers. It includes current title, child, and context drafts; ordinary `Ctrl+C`/`Cmd+C` retains selected-text copying. Successful copying shows an acknowledgement.
+Use a task's copy icon, its **Copy complete task** menu action, or `Ctrl+Shift+C` (`Cmd+Shift+C` on macOS) while any part of that task is focused. This copies the title, context, and complete checklist as plain text, with `[ ]` and `[x]` completion markers. It includes unsaved edits to the title, existing children, and context; submit a new child before copying to include it. Ordinary `Ctrl+C`/`Cmd+C` copies selected text. Successful copying shows an acknowledgement.
 
 ## Complete, reorder, and remove tasks
 
@@ -64,7 +60,7 @@ Space on a focused task row toggles completion. `Alt+Up` and `Alt+Down` move tha
 
 Drag a task vertically to reorder it. Drag right past the threshold to complete or reactivate it. Drag left to reveal Edit and Delete, then drag right to close those actions. Opening Quick add, Find, or the shortcut reference cancels an unfinished drag.
 
-**List options → Sort** selects Manual, Title, Newest, Oldest, or Incomplete first. Sorting changes the view while the JSON keeps manual order. New tasks, edits, completion, Undo, and external reloads preserve that arrangement. Switch to Manual before dragging or using the reorder shortcuts.
+**List options → Sort** selects Manual, Title, Newest, Oldest, or Incomplete first. Return to Manual to recover your arrangement and use dragging or reorder shortcuts. See [stored order](storage.md#file-layout) for how sorting affects list files.
 
 `Ctrl+Shift+Backspace` (`Shift+Cmd+Delete` on macOS) or **Archive completed** moves completed tasks into restorable History. With no completed tasks, it leaves the list file untouched.
 
@@ -72,7 +68,7 @@ Deleting a task or child shows **Undo**. Select it, or press `Ctrl+Z` (`Cmd+Z` o
 
 Right-click a task to choose **Move to list**. Select a destination and **Move**; its identity, completion, checklist, and unfinished checklist draft follow it. A successful move names the destination.
 
-Select **Show history** and activate an archived title to inspect its children without changing their state. **Restore** is separate: it returns the parent to the bottom of the list as incomplete, with child completion unchanged.
+Select **Show history** and activate an archived title to inspect its children without changing their state. **Restore** returns the parent as incomplete, with child completion unchanged. It appears at the bottom in Manual order; other sort modes determine its visible position.
 
 Down from the last task reaches **Show history**, or Down from task entry when no tasks remain. Down, Right, or Enter on the History control opens it and focuses the first Restore action. Up/Down selects archived tasks; Enter or Space restores the focused task and focuses its active row. Up from the first archived task returns to the History control. Left or Escape closes History and returns to that control. Escape closes the focused History region first when a checklist is also open.
 
@@ -88,15 +84,13 @@ Tab and Shift+Tab reach individual controls, including list-card settings, task 
 
 Enter and Space activate controls once per press, including across focus changes and overlay dismissal. Typing spaces and holding editing or navigation keys retain their normal repeat behavior.
 
-Escape dismisses one layer per press: an open dropdown, the shortcut reference, Quick add or Find, Settings, an inline edit, list creation, subtasks, revealed task actions, or History. Holding it does not dismiss further layers. It leaves Lists and the task-list screen open. Closing an overlay restores its opening control; opening a search result focuses the matching task, subtask, or History restore action. Screen navigation saves an active inline task edit, like leaving its field.
+Escape dismisses one layer per press: an open dropdown, the shortcut reference, Quick add or Find, Settings, an inline edit, list creation, subtasks, revealed task actions, or History. Holding it does not dismiss further layers. It leaves Lists and the task-list screen open. Closing an overlay restores its opening control; opening a search result focuses the matching task, subtask, or History restore action.
 
 ## Window and appearance settings
 
-`Ctrl+,` opens global **Settings**, including layouts that require Shift to type a comma. Workspace, window, and appearance preferences apply to every list. **Current list options** opens the selected list's rename, accent, and deletion controls; **App settings** returns to global preferences. The list header and card open **List options** directly.
+`Ctrl+,` opens global **Settings**, including layouts that require Shift to type a comma. Workspace, window, and appearance preferences apply to every list. **Current list options** opens the selected list's [List options](#manage-lists); **App settings** returns to global preferences.
 
-**Workspace → Open workspace folder** opens the active folder in Finder, Explorer, or the system file manager.
-
-Escape returns to the previous screen and restores focus. Applied preferences remain saved. Leaving a list-name field, quitting, or switching workspaces applies its rename; an unchanged field preserves external renames. A typed workspace path requires Enter or **Use typed path**; a blank path does nothing, and an unchanged path preserves the current list.
+Escape returns to the previous screen and restores focus. Applied preferences remain saved. Leaving a list-name field, quitting, or switching workspaces applies its rename; an unchanged field preserves external renames.
 
 In Settings, use Up/Down to move between rows and Left/Right to move within a row of choices. Enter or Space activates the focused control. Left/Right adjust a focused slider or move the cursor in a text field. Slider steps are 1 for text size and row spacing, and 1% for opacity. Page Up/Page Down jump between the current screen's sections, scrolling the focused control into view.
 
@@ -110,20 +104,24 @@ Typography settings control proportional or monospace text, real regular or bold
 
 Choose folders and launch-time overrides through [workspace settings](storage.md#workspace-location). Appearance preferences save automatically at the [local settings path](storage.md#default-directories).
 
-A visible save error keeps unsaved task changes in memory and offers **Retry save**. Restore access to the workspace and retry; the same changes are saved without resubmitting them. A failed Quick add keeps its text and destination with its own **Retry save** action.
+For save errors and recovery, see [file-sync behavior](storage.md#file-sync-behavior).
 
 ## Startup and system tray
 
-The [installation scripts](../README.md#install-and-run) enable startup for the current user at sign-in. The startup entry passes `--start-hidden`; an ordinary launch opens the window. The flag can also be used with `--data-dir`. If a usable tray is unavailable at startup, the window opens so the app remains accessible.
+The sign-in entry created by the [installers](../README.md#install-and-run) passes `--start-hidden`; an ordinary launch opens the window. The flag can also be used with `--data-dir`. If a usable tray is unavailable at startup, the window opens so the app remains accessible.
 
 Closing or minimizing the window saves any inline edit and hides it in the system tray (the menu bar on macOS), removing its taskbar entry where applicable. Open the tray icon's menu and choose **Show Minimalist List** to restore it or **Quit** to exit. Activating the icon also restores the window on desktops that support it. Shared-folder polling continues while hidden. Launching the executable again for the same workspace and local settings asks the existing instance to show its window; duplicate `--start-hidden` launches stay quiet. Different workspaces can run separately.
 
-With a usable tray, Windows keeps the app out of the taskbar even while its window is open. X11 requests the same behavior through the desktop's skip-taskbar hint; window managers may ignore it. If the tray is unavailable or disappears, Windows and X11 restore the taskbar entry. The global reveal shortcut and ordinary app launch also restore the window. Native Wayland leaves taskbar placement to the compositor.
+With a usable tray, Windows keeps the app out of the taskbar even while its window is open. X11 requests the same behavior through the desktop's skip-taskbar hint; window managers may ignore it. If the tray is unavailable or disappears, Windows and X11 restore the taskbar entry. Native Wayland leaves taskbar placement to the compositor.
 
-Linux uses X11 or XWayland for hiding and restoration when a desktop tray host is available, such as GNOME's AppIndicator extension or KDE's system tray. Without a usable tray, the app keeps the normal window backend and close/minimize behavior without a startup warning. If the tray host disappears while hidden, the window returns. Exiting saves inline edits and accepted archive/delete actions. If task changes cannot be saved, the window stays available with **Retry save**; recover the folder and retry before quitting.
+Linux uses X11 or XWayland for hiding and restoration when a desktop tray host is available, such as GNOME's AppIndicator extension or KDE's system tray. Without a usable tray, the app keeps the normal window backend and close/minimize behavior without a startup warning. If the tray host disappears while hidden, the window returns. Exiting saves accepted archive/delete actions; [save failures](storage.md#file-sync-behavior) keep the window available for recovery.
 
 On X11, cursor theme and size follow the desktop's XSettings, including its display scale. Explicit `XCURSOR_THEME` and `XCURSOR_SIZE` overrides take precedence. Restart the app after changing these desktop settings; native Wayland uses its existing cursor backend.
 
-On macOS, reopening the running app bundle through Finder or `open` restores its existing window. The app uses the menu bar without a Dock icon, including while its window is open. The minimize button is disabled because a hidden minimized window would remain in the Dock; close hides the window instead. The installer places the app in `~/Applications` and a launch agent in `~/Library/LaunchAgents`. Hidden startup avoids requesting activation over another app. **Quit** exits for the remainder of the session; the launch agent does not keep restarting it.
+On macOS, reopening the running app bundle through Finder or `open` restores its existing window. The app uses the menu bar without a Dock icon, including while its window is open. The minimize button is disabled because a hidden minimized window would remain in the Dock; close hides the window instead. Hidden startup avoids requesting activation over another app. **Quit** exits for the remainder of the session; the launch agent does not keep restarting it.
 
 To disable startup on Windows, remove **Minimalist List** from the Startup folder (`shell:startup` in Run). On Linux, remove `${XDG_CONFIG_HOME:-$HOME/.config}/autostart/minimalist-list.desktop`. On macOS, quit the app and remove `~/Library/LaunchAgents/io.github.pszemraj.minimalist-list.plist`. Reinstalling enables startup again.
+
+### Global reveal shortcut
+
+The global reveal shortcut works while another application has focus: `Ctrl+Alt+Shift+L`, or `Cmd+Option+Shift+L` on macOS. It shows the existing window and keeps it visible on repeated presses. Change or disable it in **Settings → Global shortcut**; registration conflicts are reported without replacing the previous shortcut. The app must be running. Native Wayland requires a desktop shortcut that launches the app; its built-in registration uses X11.

@@ -2,7 +2,9 @@
 
 ## Workspace location
 
-Select a folder through **Settings -> Workspace -> Choose folder**, or enter a path and press Enter or **Use typed path**. The active folder is shown above the field. Any writable folder works, including a temporary directory. Selecting a folder opens its lists without moving the previous workspace's files. A blank typed path does nothing. Pending task edits and list renames save before switching; a failed save keeps the original workspace open for recovery.
+Select a folder through **Settings -> Workspace -> Choose folder**, or enter a path and press Enter or **Use typed path**. The active folder is shown above the field. Any writable folder works, including a temporary directory. Selecting a folder opens its lists without moving the previous workspace's files. A blank typed path does nothing; an unchanged path preserves the current list. Pending task edits and list renames save before switching; a failed save keeps the original workspace open for recovery.
+
+**Workspace -> Open workspace folder** opens the active folder in Finder, Explorer, or the system file manager.
 
 Paths beginning with `~/` are expanded. Relative paths are resolved from the process working directory and stored as absolute runtime paths. Without a saved selection, the app uses its [platform default](#default-directories).
 
@@ -10,16 +12,16 @@ The Settings field accepts paths with spaces, including paths surrounded by matc
 
 For multiple computers, select the same shared subfolder once on each computer. Each installation remembers its own local path, even when the sync root is different. Dropbox and other file-sync services work with these ordinary files; no provider integration is needed.
 
-Use `--data-dir` to select a workspace for one launch:
+From the checkout, use `--data-dir` to select a workspace for one launch:
 
 ```bash
-minimalist-list --data-dir "$HOME/Sync/minimalist-list"
+cargo run --locked -- --data-dir "$HOME/Sync/minimalist-list"
 ```
 
 `MINIMALIST_LIST_WORKSPACE` provides the same launch-only behavior through the environment:
 
 ```bash
-MINIMALIST_LIST_WORKSPACE="$HOME/Sync/minimalist-list" cargo run
+MINIMALIST_LIST_WORKSPACE="$HOME/Sync/minimalist-list" cargo run --locked
 ```
 
 Workspace selection follows this order:
@@ -29,7 +31,7 @@ Workspace selection follows this order:
 3. The path saved through Settings
 4. The platform default
 
-The flag and environment variable do not replace the saved setting. Choosing a folder in the application does. Run `minimalist-list --help` for the command summary.
+The flag and environment variable do not replace the saved setting. Choosing a folder in the application does. Run `cargo run --locked -- --help` for the command summary.
 
 If the selected workspace is temporarily unavailable at startup, its saved path is retained. The visible warning offers **Retry workspace** or **Choose workspace…**. Restore the original folder and retry to reopen it; navigating a temporary fallback does not replace the selection.
 
@@ -45,17 +47,9 @@ Appearance, pinning, and workspace preferences are stored in the local settings 
 
 When the Windows environment variables are absent or empty, paths fall back to `AppData\Local` and `AppData\Roaming` beneath the home directory. An absent or empty `USERPROFILE` falls back to `HOME`.
 
-Earlier versions used the Linux-style XDG paths on macOS and Windows too. If the
-native default workspace directory does not exist, an existing
-`${XDG_DATA_HOME:-$HOME/.local/share}/minimalist-list/` is used. Independently, if
-the native settings file does not exist, an existing
-`${XDG_CONFIG_HOME:-$HOME/.config}/minimalist-list/settings.json` remains the
-settings file for both loading and saving. Legacy lookup uses `HOME`, including
-on Windows, as earlier versions did. No files are copied or moved. Fresh installs
-use the native defaults, and launch overrides and saved workspace selections
-keep the precedence shown above.
+If the native defaults do not exist on macOS or Windows, the app uses an existing `~/.local/share/minimalist-list/` workspace or `~/.config/minimalist-list/settings.json` settings file. Each fallback is independent; the settings file is used for both loading and saving. These legacy paths use `HOME`, including on Windows. No files are copied or moved. Launch overrides and saved workspace selections keep the precedence shown above.
 
-`window.ron`, beside `settings.json`, stores native window geometry and framework state. Local `instances/` files coordinate launches for each workspace; they do not belong in a synced list folder. Unfinished entry drafts and deletion Undo are session-only and are not written into list JSON.
+`window.ron`, beside `settings.json`, stores native window geometry and framework state. Local `instances/` files coordinate [repeated launches](usage.md#startup-and-system-tray) for each workspace; they do not belong in a synced list folder.
 
 ## File layout
 
@@ -79,11 +73,11 @@ Edits to different lists write different files, so file-sync services can transf
 > [!IMPORTANT]
 > Minimalist List does not merge simultaneous changes to the same list. Let one device finish syncing before editing that list on another device.
 
-If files contain the same list UUID, a canonical descriptive filename wins over a legacy UUID-only filename, which wins over arbitrary conflict-copy names. Unselected copies remain untouched and the application reports them.
+If files contain the same list UUID, a descriptive filename matching the current title wins. Next come other filenames with a recognized UUID, including legacy UUID-only names, then arbitrary conflict-copy names. Ties use filename order. Unselected copies remain untouched and the application reports them.
 
-Every edit writes and flushes a temporary sibling file, then replaces the destination. The app checks disk every five seconds and reloads externally changed list files at the next scan. Reloads wait until task or child editing and dragging finish, and while unsaved list changes need recovery. A sync service controls when a file arrives on another computer.
+Every edit writes and flushes a temporary sibling file, then replaces the destination. The app checks disk every five seconds and reloads externally changed list files at the next scan. Reloads wait until task or child editing and dragging finish, while any task context dialog is open, and while unsaved list changes or filename updates need recovery. A sync service controls when a file arrives on another computer.
 
-A failed write leaves its changes in memory, shows a visible warning, and offers **Retry save**. Restore folder access and retry before exiting or switching workspaces. Quick add instead retains its draft and destination until its own retry succeeds. Moving a task writes the destination before removing the source and attempts to roll back both lists if either write fails; the two list files are not a single atomic transaction.
+A failed write leaves its changes in memory, shows a visible warning, and offers **Retry save**. Restore folder access and retry before exiting or switching workspaces. Quick add retains its draft and destination until its own retry succeeds; task context keeps its editor open with the draft and a **Retry save** button. Moving a task writes the destination before removing the source and attempts to roll back both lists if either write fails; the two list files are not a single atomic transaction.
 
 ## JSON format
 
@@ -98,4 +92,4 @@ List files are pretty-printed and hand-editable. `format_version` is currently `
 
 Timestamps are Unix seconds. `accent` is one of `Mint`, `Charcoal`, `Crimson`, `Sand`, `Sky`, or `Lavender`.
 
-Missing `context` loads as empty; an empty context is omitted when writing. Context follows a task through Move, Undo, and History. Older application versions do not preserve this new field when rewriting a task.
+Missing `context` loads as empty; an empty context is omitted when writing. Older application versions do not preserve this field when rewriting a task. See [task context](usage.md#add-task-context) for editing and copying notes.
