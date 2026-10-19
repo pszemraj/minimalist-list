@@ -440,6 +440,10 @@ impl MinimalistApp {
                         if !self.persistence.settings_dirty
                             && self.persistence.dirty_lists.is_empty()
                             && self.persistence.pending_filenames.is_empty()
+                            && state
+                                .failure
+                                .as_ref()
+                                .is_some_and(|error| self.status.as_ref() == Some(error))
                         {
                             self.status = None;
                         }
@@ -449,7 +453,7 @@ impl MinimalistApp {
                     }
                     Err(error) => {
                         self.status = Some(error.clone());
-                        state.failure = Some(format!("Not saved. {error}"));
+                        state.failure = Some(error);
                     }
                 }
             }

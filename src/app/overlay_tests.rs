@@ -319,6 +319,47 @@ fn failed_quick_add_keeps_text_and_retry_saves_exactly_one_task() {
 }
 
 #[test]
+fn quick_add_success_preserves_unrelated_diagnostics_including_after_retry() {
+    for fail_first in [false, true] {
+        for diagnostic in [
+            "Global shortcut registration failed",
+            "Duplicate list files were found",
+            "Could not read an external list file",
+        ] {
+            let (ctx, mut app) = super::super::tests::test_app();
+            let list = app.lists[0].key;
+            app.open_quick_capture(Some(list));
+            app.quick_capture.as_mut().unwrap().text = "Preserve this capture".into();
+            overlay_frame(&ctx, &mut app, vec![]);
+            if fail_first {
+                std::fs::rename(app.workspace.join("lists"), app.workspace.join("offline"))
+                    .unwrap();
+                std::fs::write(app.workspace.join("lists"), "unavailable").unwrap();
+                overlay_frame(&ctx, &mut app, enter());
+                assert!(app.quick_capture.as_ref().unwrap().failure.is_some());
+                assert!(app.lists[0].data.tasks.is_empty());
+                std::fs::remove_file(app.workspace.join("lists")).unwrap();
+                std::fs::rename(app.workspace.join("offline"), app.workspace.join("lists"))
+                    .unwrap();
+            }
+            app.status = Some(diagnostic.into());
+            overlay_frame(&ctx, &mut app, enter());
+            assert!(app.quick_capture.is_none());
+            assert_eq!(
+                app.status.as_deref(),
+                Some(diagnostic),
+                "retry={fail_first}"
+            );
+            let saved = crate::storage::load_workspace(&app.workspace).unwrap();
+            assert_eq!(saved.lists[0].data.tasks.len(), 1);
+            assert_eq!(saved.lists[0].data.tasks[0].text, "Preserve this capture");
+            assert_eq!(app.persistence.notice.as_ref().unwrap().0, "Added to Tasks");
+            std::fs::remove_dir_all(app.workspace).unwrap();
+        }
+    }
+}
+
+#[test]
 fn empty_overlay_enter_keeps_focus_for_immediate_typing() {
     for find in [false, true] {
         let (ctx, mut app) = super::super::tests::test_app();
