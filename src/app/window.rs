@@ -146,6 +146,7 @@ impl MinimalistApp {
     /// Reveals and focuses the existing native window.
     pub(super) fn show_window(&mut self, ctx: &egui::Context) {
         self.window_hidden = false;
+        self.last_pin_state = None;
         // X11 window managers may remove state hints when a window is unmapped.
         // Reapply before the queued reveal, including repeated launch/hotkey requests.
         #[cfg(any(target_os = "windows", target_os = "linux", test))]
@@ -272,6 +273,38 @@ mod tests {
     use super::*;
     use crate::app::tests::test_app;
     use crate::model::Task;
+
+    #[test]
+    fn revealing_reapplies_the_saved_window_level_after_mapping() {
+        for pinned in [false, true] {
+            let (ctx, mut app) = test_app();
+            app.settings.always_on_top = pinned;
+            app.last_pin_state = Some(pinned);
+            app.last_decorations_state = Some(app.settings.window_decorations);
+            app.window_hidden = true;
+
+            let output = ctx.run_logic(&Default::default(), |ctx| {
+                app.show_window(ctx);
+                app.apply_window_preferences(ctx);
+            });
+            let commands = &output.viewport_commands[&egui::ViewportId::ROOT];
+            let mapped = commands
+                .iter()
+                .position(|command| *command == ViewportCommand::Visible(true))
+                .unwrap();
+            let level = if pinned {
+                egui::viewport::WindowLevel::AlwaysOnTop
+            } else {
+                egui::viewport::WindowLevel::Normal
+            };
+            let restored = commands
+                .iter()
+                .position(|command| *command == ViewportCommand::WindowLevel(level))
+                .unwrap();
+            assert!(mapped < restored);
+            std::fs::remove_dir_all(&app.workspace).unwrap();
+        }
+    }
 
     #[test]
     fn window_events_save_hide_restore_and_reload() {
