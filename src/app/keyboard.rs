@@ -22,6 +22,8 @@ pub(super) const OPEN_SETTINGS: KeyboardShortcut =
 pub(super) const QUICK_ADD: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::N);
 /// Opens Find.
 pub(super) const FIND: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::F);
+/// Closes the window like its close button, hiding it to the tray when available.
+pub(super) const CLOSE_WINDOW: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::W);
 /// Opens list creation, applying Settings edits first.
 pub(super) const NEW_LIST: KeyboardShortcut = KeyboardShortcut::new(
     Modifiers {
@@ -206,6 +208,7 @@ pub(super) fn shortcut_groups() -> Vec<ShortcutGroup> {
                         Key::L,
                     )),
                 ),
+                ("Close window", shortcut(CLOSE_WINDOW)),
             ],
         ),
         (
@@ -341,6 +344,11 @@ impl MinimalistApp {
         self.keyboard.requested = self.keyboard.pending;
         if let Some(id) = self.keyboard.requested {
             ctx.memory_mut(|memory| memory.request_focus(id));
+        }
+        // Closing saves pending edits, so it works above every overlay.
+        if take_shortcut(ctx, CLOSE_WINDOW) {
+            self.close_window(ctx);
+            return;
         }
         let copy_target = (self.shortcuts.is_none()
             && self.quick_capture.is_none()

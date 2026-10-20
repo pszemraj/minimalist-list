@@ -415,6 +415,7 @@ fn reference_uses_shared_bindings_and_native_key_names() {
         ("Quick add", QUICK_ADD),
         ("Find tasks and History", FIND),
         ("New list (Lists, list, Settings)", NEW_LIST),
+        ("Close window", CLOSE_WINDOW),
         ("Back to Lists", BACK_TO_LISTS),
         ("Move completed tasks to History", CLEAR_COMPLETED),
     ] {

@@ -23,6 +23,7 @@ fn needs_current_editor_input(event: &Event) -> bool {
             OPEN_SETTINGS,
             QUICK_ADD,
             FIND,
+            CLOSE_WINDOW,
             NEW_LIST,
             NEXT_LIST,
             PREVIOUS_LIST,

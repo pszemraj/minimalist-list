@@ -591,4 +591,41 @@ mod tests {
             std::fs::remove_dir_all(&app.workspace).unwrap();
         }
     }
+
+    #[test]
+    fn command_w_closes_window_above_overlays_after_saving_edits() {
+        for overlay in [false, true] {
+            let (ctx, mut app) = test_app();
+            let list_id = app.lists[0].key;
+            let edited = Task::new("Before editing");
+            app.editing = Some((list_id, edited.id));
+            app.edit_text = "After editing".into();
+            app.lists[0].data.tasks = vec![edited];
+            if overlay {
+                app.open_quick_capture(None);
+            }
+            let output = crate::app::tests::run_frame(
+                &ctx,
+                egui::RawInput {
+                    events: crate::app::tests::chord(egui::Key::W, egui::Modifiers::COMMAND),
+                    ..Default::default()
+                },
+                |ui| {
+                    <MinimalistApp as eframe::App>::ui(
+                        &mut app,
+                        ui,
+                        &mut eframe::Frame::_new_kittest(),
+                    );
+                },
+            );
+            assert!(
+                output.viewport_output[&egui::ViewportId::ROOT]
+                    .commands
+                    .contains(&ViewportCommand::Close)
+            );
+            let saved = crate::storage::load_workspace(&app.workspace).unwrap();
+            assert_eq!(saved.lists[0].data.tasks[0].text, "After editing");
+            std::fs::remove_dir_all(&app.workspace).unwrap();
+        }
+    }
 }
