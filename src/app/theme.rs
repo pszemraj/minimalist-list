@@ -85,8 +85,8 @@ impl Palette {
     ) -> Self {
         Self {
             background: Color32::from_rgb(background.0, background.1, background.2),
-            surface: Color32::from_rgb(surface.0, surface.1, surface.2),
-            raised: Color32::from_rgb(raised.0, raised.1, raised.2),
+            surface: Color32::from_rgb(surface.0, surface.1, surface.2).linear_multiply(0.12),
+            raised: Color32::from_rgb(raised.0, raised.1, raised.2).linear_multiply(0.18),
             accent: Color32::from_rgb(accent.0, accent.1, accent.2),
             text: Color32::from_rgb(242, 244, 243),
             muted: Color32::from_rgb(158, 171, 166),
@@ -387,39 +387,6 @@ impl MinimalistApp {
             })
     }
 
-    /// Backs a measured text/control group while leaving surrounding gutters transparent.
-    ///
-    /// # Arguments
-    ///
-    /// - `ui` - Destination UI for the group.
-    /// - `palette` - Opaque backing surface color.
-    /// - `needs_backing` - Whether the window background can show the desktop.
-    /// - `add_contents` - Closure rendering the grouped content.
-    ///
-    /// # Returns
-    ///
-    /// The group's measured response and the closure's result.
-    pub(super) fn readable_region<R>(
-        ui: &mut egui::Ui,
-        palette: Palette,
-        needs_backing: bool,
-        add_contents: impl FnOnce(&mut egui::Ui) -> R,
-    ) -> egui::InnerResponse<R> {
-        let background = ui.painter().add(egui::Shape::Noop);
-        let shown = ui.scope(add_contents);
-        if needs_backing {
-            ui.painter().set(
-                background,
-                egui::Shape::rect_filled(
-                    shown.response.rect.expand2(Vec2::new(4.0, 3.0)),
-                    8.0,
-                    palette.surface,
-                ),
-            );
-        }
-        shown
-    }
-
     /// Paints the animated task-completion control over an allocated response.
     ///
     /// # Arguments
@@ -515,7 +482,7 @@ impl MinimalistApp {
         title: &str,
         list_id: Option<Uuid>,
     ) {
-        Self::readable_region(ui, palette, self.settings.background_opacity < 1.0, |ui| {
+        ui.scope(|ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().button_padding = Vec2::new(4.0, 4.0);
                 ui.spacing_mut().item_spacing.x = 6.0;
@@ -620,7 +587,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn translucent_header_text_has_opaque_measured_backing_and_clear_gutters() {
+    fn translucent_surfaces_leave_header_text_unbacked() {
+        for accent in Accent::ALL {
+            let palette = Palette::from_accent(accent);
+            assert!((1..64).contains(&palette.surface.a()));
+            assert!((palette.surface.a() + 1..64).contains(&palette.raised.a()));
+            assert_eq!(palette.text.a(), 255);
+            assert_eq!(palette.muted.a(), 255);
+        }
         let (ctx, mut app) = super::super::tests::test_app();
         app.settings.background_opacity = 0.2;
         let viewport = Rect::from_min_size(Pos2::ZERO, egui::vec2(320.0, 520.0));
@@ -636,12 +610,15 @@ mod tests {
             },
         );
         output.textures_delta.clear();
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::epaint::Shape::Text(text) if text.galley.text() == "Lists"
+        )));
         for (index, shape) in output.shapes.iter().enumerate() {
             if let egui::epaint::Shape::Text(text) = &shape.shape {
                 let text_rect = Rect::from_min_size(text.pos, text.galley.size());
-                assert!(output.shapes[..index].iter().any(|shape| matches!(&shape.shape,
-                    egui::epaint::Shape::Rect(rect) if rect.fill.a() == 255 && rect.rect.contains_rect(text_rect)
-                )), "No opaque backing under {}", text.galley.text());
+                assert!(!output.shapes[..index].iter().any(|shape| matches!(&shape.shape,
+                    egui::epaint::Shape::Rect(rect) if rect.fill.a() > 0 && rect.rect.contains_rect(text_rect)
+                )), "Unexpected backing under {}", text.galley.text());
             }
         }
         assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape,

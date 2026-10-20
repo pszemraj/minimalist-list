@@ -153,28 +153,16 @@ impl MinimalistApp {
                 if tasks.is_empty() {
                     ui.vertical_centered(|ui| {
                         ui.add_space(42.0);
-                        Self::readable_region(
-                            ui,
-                            palette,
-                            self.settings.background_opacity < 1.0,
-                            |ui| {
-                                ui.label(self.rich("Nothing here.", 20.0, palette.muted));
-                                ui.label(self.rich(
-                                    "Type above and press Enter.",
-                                    14.0,
-                                    palette.muted,
-                                ));
-                            },
-                        );
+                        ui.scope(|ui| {
+                            ui.label(self.rich("Nothing here.", 20.0, palette.muted));
+                            ui.label(self.rich("Type above and press Enter.", 14.0, palette.muted));
+                        });
                     });
                 }
                 ui.add_space(24.0);
                 if completed_count > 0 {
-                    let archive = Self::readable_region(
-                        ui,
-                        palette,
-                        self.settings.background_opacity < 1.0,
-                        |ui| {
+                    let archive = ui
+                        .scope(|ui| {
                             ui.add(
                                 Button::new(self.rich(
                                     format!("Archive {completed_count} completed"),
@@ -183,19 +171,15 @@ impl MinimalistApp {
                                 ))
                                 .frame(false),
                             )
-                        },
-                    )
-                    .inner;
+                        })
+                        .inner;
                     if archive.clicked() {
                         self.begin_clear_completed(list_id);
                     }
                 }
                 if archive_count > 0 {
-                    let history = Self::readable_region(
-                        ui,
-                        palette,
-                        self.settings.background_opacity < 1.0,
-                        |ui| {
+                    let history = ui
+                        .scope(|ui| {
                             ui.push_id(("history-toggle", list_id), |ui| {
                                 ui.add(
                                     Button::new(self.rich(
@@ -210,9 +194,8 @@ impl MinimalistApp {
                                 )
                             })
                             .inner
-                        },
-                    )
-                    .inner;
+                        })
+                        .inner;
                     self.keyboard.history_toggle = Some(history.id);
                     if history.clicked() {
                         self.history_open = !self.history_open;

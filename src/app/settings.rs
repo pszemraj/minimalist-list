@@ -18,7 +18,7 @@ impl MinimalistApp {
     pub(super) fn settings_ui(&mut self, ui: &mut egui::Ui, palette: Palette) {
         self.keyboard.settings_rows.clear();
         self.keyboard.settings_sections.clear();
-        Self::readable_region(ui, palette, self.settings.background_opacity < 1.0, |ui| {
+        ui.scope(|ui| {
             ui.horizontal(|ui| {
                 if ui
                     .add(Button::new(self.rich("<", 24.0, palette.text)).frame(false))
@@ -90,8 +90,8 @@ impl MinimalistApp {
             } else {
                 "Current list options"
             };
-            let switch =
-                Self::readable_region(ui, palette, self.settings.background_opacity < 1.0, |ui| {
+            let switch = ui
+                .scope(|ui| {
                     ui.add(Button::new(self.rich(label, 14.0, palette.accent)).frame(false))
                 })
                 .inner;
@@ -119,7 +119,7 @@ impl MinimalistApp {
     }
 
     fn app_settings_contents(&mut self, ui: &mut egui::Ui, palette: Palette) {
-        Self::readable_region(ui, palette, self.settings.background_opacity < 1.0, |ui| {
+        ui.scope(|ui| {
             ui.label(self.rich("App settings", 20.0, palette.text));
             ui.label(self.rich(
                 concat!("Version ", env!("CARGO_PKG_VERSION")),
@@ -653,7 +653,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn translucent_settings_header_hints_and_lead_in_have_opaque_backing() {
+    fn translucent_settings_header_hints_and_version_have_no_backing() {
         let (ctx, mut app) = super::super::tests::test_app();
         app.settings.background_opacity = 0.2;
         app.settings.font = FontChoice::Mono;
@@ -694,9 +694,9 @@ mod tests {
                     }
                 })
                 .unwrap_or_else(|| panic!("Missing {label}"));
-            assert!(output.shapes[..index].iter().any(|shape| matches!(&shape.shape,
-                egui::epaint::Shape::Rect(rect) if rect.fill.a() == 255 && rect.rect.contains_rect(text_rect)
-            )), "No opaque backing under {label}");
+            assert!(!output.shapes[..index].iter().any(|shape| matches!(&shape.shape,
+                egui::epaint::Shape::Rect(rect) if rect.fill.a() > 0 && rect.rect.contains_rect(text_rect)
+            )), "Unexpected backing under {label}");
         }
         std::fs::remove_dir_all(app.workspace).unwrap();
     }

@@ -32,7 +32,7 @@ impl MinimalistApp {
     /// Panics if the fixed card-column count is zero.
     pub(super) fn overview_ui(&mut self, ui: &mut egui::Ui, palette: Palette) {
         self.header(ui, palette, "Lists", None);
-        Self::readable_region(ui, palette, self.settings.background_opacity < 1.0, |ui| {
+        ui.scope(|ui| {
             ui.menu_button(
                 self.rich(
                     format!("Sort lists · {}", self.list_sort().label()),
@@ -240,17 +240,12 @@ impl MinimalistApp {
                         });
                 } else if ui
                     .push_id("new-list", |ui| {
-                        Self::readable_region(
-                            ui,
-                            palette,
-                            self.settings.background_opacity < 1.0,
-                            |ui| {
-                                ui.add(
-                                    Button::new(self.rich("+ New list", 18.0, palette.accent))
-                                        .frame(false),
-                                )
-                            },
-                        )
+                        ui.scope(|ui| {
+                            ui.add(
+                                Button::new(self.rich("+ New list", 18.0, palette.accent))
+                                    .frame(false),
+                            )
+                        })
                         .inner
                     })
                     .inner
