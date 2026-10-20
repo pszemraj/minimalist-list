@@ -405,6 +405,16 @@ fn vanished_workspace_shows_recovery_without_recreating_the_folder() {
         "retrying must not recreate a missing lists folder"
     );
     assert!(app.persistence.workspace_failure.is_some());
+    // A sync service can recreate the folder before its files return.
+    fs::create_dir(&lists).unwrap();
+    app.open_workspace(&workspace.to_string_lossy(), false);
+    assert_eq!(
+        fs::read_dir(&lists).unwrap().count(),
+        0,
+        "retrying must not add a default list to a folder that is still syncing"
+    );
+    assert!(app.persistence.workspace_failure.is_some());
+    fs::remove_dir(&lists).unwrap();
     fs::rename(&moved_lists, &lists).unwrap();
     app.open_workspace(&workspace.to_string_lossy(), false);
     assert!(app.persistence.workspace_failure.is_none());
@@ -413,7 +423,7 @@ fn vanished_workspace_shows_recovery_without_recreating_the_folder() {
 }
 
 #[test]
-fn missing_saved_workspace_starts_in_recovery_but_explicit_launches_create_it() {
+fn missing_or_empty_saved_workspace_starts_in_recovery_but_explicit_launches_create_it() {
     let root = std::env::temp_dir().join(format!("missing-saved-{}", Uuid::new_v4()));
     let selected = root.join("synced");
     let settings = Settings {
@@ -427,6 +437,14 @@ fn missing_saved_workspace_starts_in_recovery_but_explicit_launches_create_it() 
         !selected.exists(),
         "a saved selection must not become a new workspace"
     );
+    fs::create_dir_all(selected.join("lists")).unwrap();
+    let syncing = MinimalistApp::new(&egui::Context::default(), settings.clone(), None, None);
+    assert!(syncing.persistence.workspace_failure.is_some());
+    assert_eq!(
+        fs::read_dir(selected.join("lists")).unwrap().count(),
+        0,
+        "a saved selection without list files must not gain a default list"
+    );
 
     let launched = MinimalistApp::new(
         &egui::Context::default(),
@@ -435,7 +453,7 @@ fn missing_saved_workspace_starts_in_recovery_but_explicit_launches_create_it() 
         None,
     );
     assert!(launched.persistence.workspace_failure.is_none());
-    assert!(selected.join("lists").is_dir());
+    assert_eq!(fs::read_dir(selected.join("lists")).unwrap().count(), 1);
     fs::remove_dir_all(&root).unwrap();
 }
 
@@ -454,4 +472,29 @@ fn retrying_a_launch_override_never_saves_it_as_the_selection() {
     assert_eq!(written.workspace_path, saved);
     fs::remove_dir_all(&launch).unwrap();
     fs::remove_dir_all(&saved).unwrap();
+}
+
+#[test]
+fn scan_shows_recovery_when_synced_list_files_vanish() {
+    let (_ctx, mut app) = test_app();
+    let path = app.workspace.to_string_lossy().into_owned();
+    let lists = app.workspace.join("lists");
+    let offline = app.workspace.join("lists-offline");
+    fs::rename(&lists, &offline).unwrap();
+    // A sync service can recreate the folder before its files return.
+    fs::create_dir(&lists).unwrap();
+    app.next_scan = std::time::Instant::now();
+    app.scan_external_changes();
+    assert!(app.persistence.workspace_failure.is_some());
+    assert_eq!(
+        fs::read_dir(&lists).unwrap().count(),
+        0,
+        "a scan must not add a default list while files are syncing"
+    );
+    fs::remove_dir(&lists).unwrap();
+    fs::rename(&offline, &lists).unwrap();
+    app.open_workspace(&path, false);
+    assert!(app.persistence.workspace_failure.is_none());
+    assert_eq!(app.lists.len(), 1);
+    fs::remove_dir_all(&app.workspace).unwrap();
 }

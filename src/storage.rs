@@ -306,8 +306,9 @@ pub fn normalize_workspace_path(raw: &str) -> Result<PathBuf, String> {
 
 /// Resolves a launch workspace, creating only an explicit or default folder.
 ///
-/// A saved selection that has disappeared, such as an unmounted sync folder,
-/// stays unavailable instead of becoming a new empty workspace.
+/// A saved selection that has disappeared or lost its list files, such as an
+/// unmounted or still-syncing folder, stays unavailable instead of becoming a new
+/// workspace.
 ///
 /// # Arguments
 ///
@@ -321,13 +322,14 @@ pub fn normalize_workspace_path(raw: &str) -> Result<PathBuf, String> {
 /// # Errors
 ///
 /// Returns an error when a saved non-default folder or its list directory is
-/// missing, or when the path cannot be resolved or its list directory cannot be created.
+/// missing or has no list files, or when the path cannot be resolved or its list
+/// directory cannot be created.
 pub fn resolve_launch_workspace(raw: &str, explicit: bool) -> Result<PathBuf, String> {
     let create = explicit || expand_tilde(raw.trim()) == default_workspace_dir();
     resolve_workspace_path(raw, create)
 }
 
-/// Resolves a workspace folder whose list directory must already exist.
+/// Resolves a workspace folder whose list directory must already hold list files.
 ///
 /// # Returns
 ///
@@ -335,8 +337,8 @@ pub fn resolve_launch_workspace(raw: &str, explicit: bool) -> Result<PathBuf, St
 ///
 /// # Errors
 ///
-/// Returns an error when the folder or its list directory is missing, or the path
-/// cannot be resolved.
+/// Returns an error when the folder or its list directory is missing, the list
+/// directory has no list files, or the path cannot be resolved.
 pub fn existing_workspace_path(raw: &str) -> Result<PathBuf, String> {
     resolve_workspace_path(raw, false)
 }
@@ -353,17 +355,53 @@ fn resolve_workspace_path(raw: &str, create_missing: bool) -> Result<PathBuf, St
             .map_err(|error| format!("could not resolve current directory: {error}"))?
             .join(path)
     };
-    let lists = absolute.join("lists");
-    if !create_missing && !lists.is_dir() {
-        // A synced lists folder can vanish while its parent remains.
-        let missing = if absolute.is_dir() { &lists } else { &absolute };
-        return Err(format!("{} is missing", missing.display()));
+    if !create_missing {
+        require_list_files(&absolute)?;
     }
+    let lists = absolute.join("lists");
     fs::create_dir_all(&lists)
         .map_err(|error| format!("could not create {}: {error}", absolute.display()))?;
     absolute
         .canonicalize()
         .map_err(|error| format!("could not resolve {}: {error}", absolute.display()))
+}
+
+/// Checks that an existing workspace still holds list files.
+///
+/// A synced list folder can vanish, or return before its files, while its parent
+/// remains; neither may become a new workspace with a default list.
+///
+/// # Arguments
+///
+/// - `root` - Workspace folder containing `lists`.
+///
+/// # Returns
+///
+/// `Ok(())` when the list directory holds at least one list file.
+///
+/// # Errors
+///
+/// Returns an error when the folder or its list directory is missing or unreadable,
+/// or the list directory has no list files.
+pub fn require_list_files(root: &Path) -> Result<(), String> {
+    let lists = root.join("lists");
+    if !lists.is_dir() {
+        let missing = if root.is_dir() { &lists } else { root };
+        return Err(format!("{} is missing", missing.display()));
+    }
+    let has_lists = fs::read_dir(&lists)
+        .map_err(|error| format!("could not read {}: {error}", lists.display()))?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .any(|path| {
+            path.is_file()
+                && path.extension().and_then(|extension| extension.to_str()) == Some("json")
+        });
+    if has_lists {
+        Ok(())
+    } else {
+        Err(format!("{} has no list files", lists.display()))
+    }
 }
 
 /// Loads all readable list files and a fingerprint from a workspace.

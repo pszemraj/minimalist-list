@@ -562,6 +562,10 @@ impl MinimalistApp {
         if current == self.fingerprint {
             return;
         }
+        if let Err(error) = storage::require_list_files(&self.workspace) {
+            self.mark_workspace_unavailable(error);
+            return;
+        }
 
         match storage::load_workspace(&self.workspace) {
             Ok(snapshot) => {
@@ -612,7 +616,8 @@ impl MinimalistApp {
         }
     }
 
-    /// Shows workspace recovery after the open folder disappears or becomes unreadable.
+    /// Shows workspace recovery after the open folder disappears, becomes unreadable,
+    /// or loses all of its list files.
     fn mark_workspace_unavailable(&mut self, error: String) {
         self.status = Some(format!(
             "Workspace {} unavailable: {error}",

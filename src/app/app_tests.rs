@@ -126,11 +126,13 @@ fn focused_enter_submits_without_nested_context_input() {
 ///
 /// # Panics
 ///
-/// Panics if the temporary workspace folder cannot be created.
+/// Panics if the temporary workspace folder or its first list cannot be created.
 pub(super) fn test_app() -> (egui::Context, MinimalistApp) {
     let ctx = egui::Context::default();
     let workspace = std::env::temp_dir().join(format!("minimalist-list-ui-{}", Uuid::new_v4()));
+    // A saved workspace opens only once it holds a list file.
     std::fs::create_dir_all(workspace.join("lists")).unwrap();
+    storage::create_list(&workspace, "Tasks", crate::model::Accent::default()).unwrap();
     let settings = Settings {
         workspace_path: workspace.to_string_lossy().into_owned(),
         ..Settings::default()
