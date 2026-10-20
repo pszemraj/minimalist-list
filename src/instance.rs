@@ -23,6 +23,7 @@ pub(crate) struct InstanceGuard {
     workspace: PathBuf,
     lock: File,
     endpoint: PathBuf,
+    address: SocketAddr,
     stopping: Arc<AtomicBool>,
     show_requested: Arc<AtomicBool>,
     repaint: Arc<Mutex<Option<eframe::egui::Context>>>,
@@ -80,6 +81,8 @@ impl InstanceGuard {
 impl Drop for InstanceGuard {
     fn drop(&mut self) {
         self.stopping.store(true, Ordering::Release);
+        // Wake the blocking accept without a periodically polling listener.
+        let _ = TcpStream::connect_timeout(&self.address, Duration::from_millis(150));
         if let Some(worker) = self.worker.take() {
             let _ = worker.join();
         }
@@ -149,9 +152,6 @@ pub(crate) fn claim(
 
     let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
         .map_err(|error| format!("could not listen for window requests: {error}"))?;
-    listener
-        .set_nonblocking(true)
-        .map_err(|error| format!("could not configure window listener: {error}"))?;
     let address = listener
         .local_addr()
         .map_err(|error| format!("could not read window listener address: {error}"))?;
@@ -170,6 +170,9 @@ pub(crate) fn claim(
             while !thread_stop.load(Ordering::Acquire) {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
+                        if thread_stop.load(Ordering::Acquire) {
+                            break;
+                        }
                         let _ = stream.set_read_timeout(Some(Duration::from_millis(150)));
                         let _ = stream.set_write_timeout(Some(Duration::from_millis(150)));
                         let expected = format!("SHOW {token}\n");
@@ -185,10 +188,12 @@ pub(crate) fn claim(
                             let _ = stream.write_all(b"OK\n");
                         }
                     }
-                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                        thread::sleep(Duration::from_millis(30));
+                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                    Err(_) => {
+                        // Resource exhaustion and transient socket failures must
+                        // not permanently disable repeated-launch window reveal.
+                        thread::sleep(Duration::from_millis(250));
                     }
-                    Err(_) => break,
                 }
             }
         })
@@ -200,6 +205,7 @@ pub(crate) fn claim(
         workspace,
         lock,
         endpoint,
+        address,
         stopping,
         show_requested,
         repaint,
