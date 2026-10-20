@@ -139,24 +139,6 @@ pub(super) fn test_app() -> (egui::Context, MinimalistApp) {
     (ctx, app)
 }
 
-#[test]
-fn cursor_blink_follows_window_focus_without_losing_the_capture_field() {
-    let (ctx, mut app) = test_app();
-    let field = egui::Id::new(("new-task", app.lists[0].key));
-    for (step, focused) in [true, false, false, true].into_iter().enumerate() {
-        let mut input = frame_input(egui::vec2(520.0, 760.0), step as f64, vec![]);
-        input.focused = focused;
-        run_frame(&ctx, input, |ui| {
-            let mut frame = eframe::Frame::_new_kittest();
-            <MinimalistApp as eframe::App>::logic(&mut app, ui.ctx(), &mut frame);
-            <MinimalistApp as eframe::App>::ui(&mut app, ui, &mut frame);
-        });
-        assert_eq!(ctx.global_style().visuals.text_cursor.blink, focused);
-        assert!(ctx.memory(|memory| memory.has_focus(field)));
-    }
-    std::fs::remove_dir_all(&app.workspace).unwrap();
-}
-
 fn enter_events() -> Vec<egui::Event> {
     chord(egui::Key::Enter, egui::Modifiers::default())
 }
