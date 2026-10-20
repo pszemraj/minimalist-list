@@ -126,7 +126,7 @@ fn failed_startup_does_not_load_another_instances_default_workspace() {
     let ctx = egui::Context::default();
     let mut app = MinimalistApp::new(&ctx, settings, None, None);
     let crate::instance::LaunchOutcome::Primary(recovery_owner) =
-        crate::claim_launch_instance(selected.to_str().unwrap(), state_dir, false).unwrap()
+        crate::claim_launch_instance(selected.to_str().unwrap(), false, state_dir, false).unwrap()
     else {
         panic!("expected a recovery workspace owner");
     };
@@ -355,4 +355,69 @@ fn success_acknowledgement_expires_without_dismissing_save_errors() {
     assert!(app.persistence.notice.is_none());
     assert_eq!(app.status.as_deref(), Some("Changes are unsaved"));
     fs::remove_dir_all(app.workspace).unwrap();
+}
+
+#[test]
+fn vanished_workspace_shows_recovery_without_recreating_the_folder() {
+    let (_ctx, mut app) = test_app();
+    let workspace = app.workspace.clone();
+    let moved = workspace.with_extension("moved");
+    fs::rename(&workspace, &moved).unwrap();
+    app.next_scan = std::time::Instant::now();
+    app.scan_external_changes();
+    assert!(
+        !workspace.exists(),
+        "a scan must not recreate a vanished workspace"
+    );
+    assert!(app.persistence.workspace_failure.is_some());
+    assert_eq!(
+        app.lists.len(),
+        1,
+        "loaded lists stay in memory for recovery"
+    );
+
+    app.open_workspace(&workspace.to_string_lossy(), false);
+    assert!(
+        !workspace.exists(),
+        "retrying a missing folder must not create it"
+    );
+    assert!(app.persistence.workspace_failure.is_some());
+
+    fs::rename(&moved, &workspace).unwrap();
+    app.open_workspace(&workspace.to_string_lossy(), false);
+    assert!(app.persistence.workspace_failure.is_none());
+    assert!(
+        app.status.is_none(),
+        "a successful retry clears stale failure messages"
+    );
+    assert_eq!(app.lists.len(), 1);
+    assert_eq!(fs::read_dir(workspace.join("lists")).unwrap().count(), 1);
+    fs::remove_dir_all(&workspace).unwrap();
+}
+
+#[test]
+fn missing_saved_workspace_starts_in_recovery_but_explicit_launches_create_it() {
+    let root = std::env::temp_dir().join(format!("missing-saved-{}", Uuid::new_v4()));
+    let selected = root.join("synced");
+    let settings = Settings {
+        workspace_path: selected.to_string_lossy().into_owned(),
+        ..Default::default()
+    };
+    let app = MinimalistApp::new(&egui::Context::default(), settings.clone(), None, None);
+    assert!(app.persistence.workspace_failure.is_some());
+    assert!(app.lists.is_empty());
+    assert!(
+        !selected.exists(),
+        "a saved selection must not become a new workspace"
+    );
+
+    let launched = MinimalistApp::new(
+        &egui::Context::default(),
+        settings,
+        Some(selected.to_string_lossy().into_owned()),
+        None,
+    );
+    assert!(launched.persistence.workspace_failure.is_none());
+    assert!(selected.join("lists").is_dir());
+    fs::remove_dir_all(&root).unwrap();
 }

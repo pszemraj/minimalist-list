@@ -271,6 +271,47 @@ fn parse_workspace_input_from(raw: &str, windows: bool) -> String {
 ///
 /// Returns an error when the path cannot be resolved or its list directory cannot be created.
 pub fn normalize_workspace_path(raw: &str) -> Result<PathBuf, String> {
+    resolve_workspace_path(raw, true)
+}
+
+/// Resolves a launch workspace, creating only an explicit or default folder.
+///
+/// A saved selection that has disappeared, such as an unmounted sync folder,
+/// stays unavailable instead of becoming a new empty workspace.
+///
+/// # Arguments
+///
+/// - `raw` - Requested workspace path.
+/// - `explicit` - Whether this launch supplied the path directly.
+///
+/// # Returns
+///
+/// The canonical absolute workspace path.
+///
+/// # Errors
+///
+/// Returns an error when a saved non-default folder is missing, or when the path
+/// cannot be resolved or its list directory cannot be created.
+pub fn resolve_launch_workspace(raw: &str, explicit: bool) -> Result<PathBuf, String> {
+    let create = explicit || expand_tilde(raw.trim()) == default_workspace_dir();
+    resolve_workspace_path(raw, create)
+}
+
+/// Resolves a workspace folder that must already exist.
+///
+/// # Returns
+///
+/// The canonical absolute workspace path.
+///
+/// # Errors
+///
+/// Returns an error when the folder is missing, cannot be resolved, or its list
+/// directory cannot be created.
+pub fn existing_workspace_path(raw: &str) -> Result<PathBuf, String> {
+    resolve_workspace_path(raw, false)
+}
+
+fn resolve_workspace_path(raw: &str, create_missing: bool) -> Result<PathBuf, String> {
     if raw.trim().is_empty() {
         return Err("workspace path is empty".into());
     }
@@ -282,6 +323,9 @@ pub fn normalize_workspace_path(raw: &str) -> Result<PathBuf, String> {
             .map_err(|error| format!("could not resolve current directory: {error}"))?
             .join(path)
     };
+    if !create_missing && !absolute.is_dir() {
+        return Err(format!("{} is missing", absolute.display()));
+    }
     fs::create_dir_all(absolute.join("lists"))
         .map_err(|error| format!("could not create {}: {error}", absolute.display()))?;
     absolute
@@ -568,12 +612,11 @@ pub fn delete_list(list: &StoredList) -> Result<(), String> {
 ///
 /// # Errors
 ///
-/// Returns an error when the list directory cannot be created or read.
+/// Returns an error when the list directory is missing or cannot be read. Scans
+/// never recreate it, so a vanished sync folder is reported instead of replaced.
 pub fn workspace_fingerprint(root: &Path) -> Result<WorkspaceFingerprint, String> {
     let mut map = BTreeMap::new();
     let lists_dir = root.join("lists");
-    fs::create_dir_all(&lists_dir)
-        .map_err(|error| format!("could not create {}: {error}", lists_dir.display()))?;
     for entry in fs::read_dir(&lists_dir)
         .map_err(|error| format!("could not read {}: {error}", lists_dir.display()))?
         .flatten()

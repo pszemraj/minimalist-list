@@ -102,11 +102,12 @@ fn select_workspace_override(
 
 fn claim_launch_instance(
     requested_workspace: &str,
+    explicit: bool,
     state_dir: &std::path::Path,
     start_hidden: bool,
 ) -> Result<instance::LaunchOutcome, String> {
     // Keep failed requests separate so they can display their recovery window.
-    let workspace = storage::normalize_workspace_path(requested_workspace)
+    let workspace = storage::resolve_launch_workspace(requested_workspace, explicit)
         .unwrap_or_else(|_| requested_workspace.into());
     instance::claim(&workspace, state_dir, start_hidden)
 }
@@ -144,7 +145,12 @@ fn main() -> eframe::Result {
     let state_dir = state_path
         .parent()
         .unwrap_or_else(|| std::path::Path::new("."));
-    let instance = match claim_launch_instance(requested_workspace, state_dir, start_hidden) {
+    let instance = match claim_launch_instance(
+        requested_workspace,
+        workspace_override.is_some(),
+        state_dir,
+        start_hidden,
+    ) {
         Ok(instance::LaunchOutcome::Existing) => return Ok(()),
         Ok(instance::LaunchOutcome::Primary(instance)) => instance,
         Err(error) => return Err(eframe::Error::AppCreation(error.into())),
@@ -235,26 +241,26 @@ mod tests {
         std::fs::write(&blocked, "temporarily unavailable").unwrap();
         let default_workspace = storage::default_workspace_dir();
         let instance::LaunchOutcome::Primary(default_owner) =
-            claim_launch_instance(default_workspace.to_str().unwrap(), &root, false).unwrap()
+            claim_launch_instance(default_workspace.to_str().unwrap(), true, &root, false).unwrap()
         else {
             panic!("expected a default workspace owner");
         };
 
         let instance::LaunchOutcome::Primary(recovery_owner) =
-            claim_launch_instance(blocked.to_str().unwrap(), &root, false).unwrap()
+            claim_launch_instance(blocked.to_str().unwrap(), true, &root, false).unwrap()
         else {
             panic!("the failed request must reach its recovery UI");
         };
         assert!(!default_owner.take_show_request());
         assert!(matches!(
-            claim_launch_instance(blocked.to_str().unwrap(), &root, false).unwrap(),
+            claim_launch_instance(blocked.to_str().unwrap(), true, &root, false).unwrap(),
             instance::LaunchOutcome::Existing
         ));
         assert!(recovery_owner.take_show_request());
         assert!(!default_owner.take_show_request());
 
         assert!(matches!(
-            claim_launch_instance(default_workspace.to_str().unwrap(), &root, false).unwrap(),
+            claim_launch_instance(default_workspace.to_str().unwrap(), true, &root, false).unwrap(),
             instance::LaunchOutcome::Existing
         ));
         assert!(default_owner.take_show_request());

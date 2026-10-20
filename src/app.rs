@@ -180,7 +180,10 @@ impl MinimalistApp {
             settings.workspace_path.clone_from(path);
         }
         let mut status = startup_warning;
-        let workspace = match storage::normalize_workspace_path(&settings.workspace_path) {
+        let workspace = match storage::resolve_launch_workspace(
+            &settings.workspace_path,
+            workspace_override.is_some(),
+        ) {
             Ok(path) => path,
             Err(error) => {
                 status = Some(format!(
@@ -545,8 +548,12 @@ impl MinimalistApp {
             return;
         }
         self.next_scan = Instant::now() + SCAN_INTERVAL;
-        let Ok(current) = storage::workspace_fingerprint(&self.workspace) else {
-            return;
+        let current = match storage::workspace_fingerprint(&self.workspace) {
+            Ok(current) => current,
+            Err(error) => {
+                self.mark_workspace_unavailable(error);
+                return;
+            }
         };
         if current == self.fingerprint {
             return;
@@ -596,18 +603,41 @@ impl MinimalistApp {
                 }
                 self.repair_focus(&focus_neighbors);
             }
-            Err(error) => self.status = Some(error),
+            Err(error) => self.mark_workspace_unavailable(error),
         }
     }
 
+    /// Shows workspace recovery after the open folder disappears or becomes unreadable.
+    fn mark_workspace_unavailable(&mut self, error: String) {
+        self.status = Some(format!(
+            "Workspace {} unavailable: {error}",
+            self.settings.workspace_path
+        ));
+        self.persistence.workspace_failure = Some(self.settings.workspace_path.clone());
+    }
+
     fn switch_workspace(&mut self, raw: &str) {
+        self.open_workspace(raw, true);
+    }
+
+    /// Opens a workspace, creating a missing folder only for an explicit choice.
+    ///
+    /// # Arguments
+    /// - `raw` - Requested workspace path.
+    /// - `create_missing` - Whether a missing folder may become a new workspace.
+    fn open_workspace(&mut self, raw: &str, create_missing: bool) {
         if raw.trim().is_empty() {
             return;
         }
         if !self.finish_pending_changes() {
             return;
         }
-        let path = match storage::normalize_workspace_path(raw) {
+        let resolved = if create_missing {
+            storage::normalize_workspace_path(raw)
+        } else {
+            storage::existing_workspace_path(raw)
+        };
+        let path = match resolved {
             Ok(path) => path,
             Err(error) => {
                 self.status = Some(error);
@@ -651,7 +681,7 @@ impl MinimalistApp {
                 self.stash_overlay_drafts();
                 self.workspace = path;
                 self.restore_overlay_drafts();
-                self.persistence.workspace_failure = None;
+                let recovered = self.persistence.workspace_failure.take().is_some();
                 self.details = task_details::TaskDetailsState::default();
                 self.subtasks_for = None;
                 self.editing = None;
@@ -667,6 +697,8 @@ impl MinimalistApp {
                 self.fingerprint = snapshot.fingerprint;
                 if !snapshot.warnings.is_empty() {
                     self.status = Some(snapshot.warnings.join("\n"));
+                } else if recovered {
+                    self.status = None;
                 }
                 self.settings.last_list_id = self.lists.first().map(|item| item.key);
                 self.save_settings();

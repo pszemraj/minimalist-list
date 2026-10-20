@@ -33,7 +33,7 @@ Workspace selection follows this order:
 
 The flag and environment variable do not replace the saved setting. Choosing a folder in the application does. Run `cargo run --locked -- --help` for the command summary.
 
-If the selected workspace is temporarily unavailable at startup, its saved path is retained. The recovery screen offers **Retry workspace** or **Choose workspace…** without opening another workspace's lists. Restore access and retry to reopen it. Retrying a launch-only override does not replace the saved selection; choosing another folder does.
+If the selected workspace is temporarily unavailable at startup, its saved path is retained. A missing saved folder, such as an unmounted sync folder, is not recreated; only the platform default, `--data-dir`, `MINIMALIST_LIST_WORKSPACE`, and folders chosen in Settings are created when absent. If the open workspace's `lists` folder disappears or becomes unreadable while the app runs, the next scan shows the same recovery screen instead of creating an empty workspace. The recovery screen offers **Retry workspace** or **Choose workspace…** without opening another workspace's lists. Restore access and retry to reopen it. Retrying a launch-only override does not replace the saved selection; choosing another folder does.
 
 ## Default directories
 

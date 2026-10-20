@@ -84,9 +84,14 @@ fn focused_enter_submits_without_nested_context_input() {
 /// # Returns
 ///
 /// A context and application ready for isolated UI tests.
+///
+/// # Panics
+///
+/// Panics if the temporary workspace folder cannot be created.
 pub(super) fn test_app() -> (egui::Context, MinimalistApp) {
     let ctx = egui::Context::default();
     let workspace = std::env::temp_dir().join(format!("minimalist-list-ui-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&workspace).unwrap();
     let settings = Settings {
         workspace_path: workspace.to_string_lossy().into_owned(),
         ..Settings::default()
