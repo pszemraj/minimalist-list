@@ -33,7 +33,7 @@ Workspace selection follows this order:
 
 The flag and environment variable do not replace the saved setting. Choosing a folder in the application does. Run `cargo run --locked -- --help` for the command summary.
 
-If the selected workspace is temporarily unavailable at startup, its saved path is retained. A missing saved folder, such as an unmounted sync folder, is not recreated; only the platform default, `--data-dir`, `MINIMALIST_LIST_WORKSPACE`, and folders chosen in Settings are created when absent. If the open workspace's `lists` folder disappears or becomes unreadable while the app runs, the next scan shows the same recovery screen instead of creating an empty workspace. The recovery screen offers **Retry workspace** or **Choose workspace…** without opening another workspace's lists. Restore access and retry to reopen it. Retrying a launch-only override does not replace the saved selection; choosing another folder does.
+If the selected workspace is temporarily unavailable at startup, its saved path is retained. A missing saved folder, such as an unmounted sync folder, is not recreated; only the platform default, `--data-dir`, `MINIMALIST_LIST_WORKSPACE`, and folders chosen in Settings are created when absent. If the open workspace's `lists` folder disappears or becomes unreadable while the app runs, the next scan shows the same recovery screen instead of creating an empty workspace. The recovery screen offers **Retry workspace** or **Choose workspace...** without opening another workspace's lists. Restore access and retry to reopen it. Retrying a launch-only override does not replace the saved selection; choosing another folder does.
 
 ## Default directories
 
@@ -66,18 +66,18 @@ minimalist-list/
     +-- projects--70d0f50d-8d45-4d24-88ce-bf82cbfab48a.json
 ```
 
-New filenames combine a safe, bounded list title with its stable UUID. Renaming a list saves its contents before updating its filename; name collisions never replace another file. If the filename update fails, a warning identifies the saved old path. This does not block quitting, switching workspaces, or reloads; rename the list again to retry. Existing UUID-only filenames remain readable and ordinary saves keep their paths. The filename UUID is authoritative.
+New filenames combine a safe, bounded list title with its stable UUID. Renaming a list saves its contents before updating its filename; name collisions never replace another file. If the filename update fails, the contents remain at the previous path with a warning. Quitting, switching workspaces, and reloads remain available. After resolving the filename problem, change the title again to retry; submitting an unchanged title does nothing. Existing UUID-only filenames remain readable and ordinary saves keep their paths. The filename UUID is authoritative.
 
-Default list order comes from `created_at_unix`, with the UUID as a stable tie-breaker. Manual tile order and temporary list/task sort modes are local workspace-scoped settings. Task JSON retains manual task order, including while a sorted view is active; task IDs are not duplicated in local settings. Preferences for deleted lists are removed when that workspace is loaded.
+Default list order comes from `created_at_unix`, with the UUID as a stable tie-breaker. Manual tile order and temporary list/task sort modes are local workspace-scoped settings. Task JSON retains manual task order for [every sort mode](usage.md#complete-reorder-and-remove-tasks); task IDs are not duplicated in local settings. Preferences for deleted lists are removed when that workspace is loaded.
 
 ## File-sync behavior
 
-Edits to different lists write different files, so file-sync services can transfer them independently.
+Sync services transfer the [per-list files](#file-layout) independently.
 
 > [!IMPORTANT]
 > Minimalist List does not merge simultaneous changes to the same list. Let one device finish syncing before editing that list on another device.
 
-Every edit writes and flushes a temporary sibling file, then replaces the destination. Saves compare the destination's timestamp and size with the last loaded or saved version, including immediately before replacement. A mismatch preserves the external file and retains local changes for recovery. This check cannot make a file-sync service provide a transaction across devices. On startup and workspace loading, recognized unlocked temporary files older than a day are removed; recent or active writes are retained.
+Every edit writes and flushes a temporary sibling file, then replaces the destination. Saves compare the destination's timestamp and size with the last loaded or saved version, including immediately before replacement. A mismatch preserves the external file and retains local changes for [recovery](#save-recovery). A change between the final check and replacement is still possible. On startup and workspace loading, recognized unlocked temporary files older than a day are removed; recent or active writes are retained.
 
 The app checks disk every five seconds and reloads externally changed list files at the next scan. Reloads wait until task or child editing and dragging finish, while any task context dialog is open, and while unsaved list changes need recovery. A sync service controls when a file arrives on another computer.
 
@@ -87,9 +87,13 @@ If files contain the same list UUID, filenames with a recognized UUID take prece
 
 ### Save recovery
 
-A failed write leaves its changes in memory, shows a visible warning, and offers **Retry save**. Pending task edits and list renames must save before exiting or switching workspaces; a failed save keeps the original workspace open for recovery. Restore folder access and retry. A failed Quick add retains its draft and destination and blocks shutdown or workspace switching until it is retried successfully or explicitly cancelled; task context keeps its editor open with the draft and a **Retry save** button. Moving a task writes the destination before removing the source and attempts to roll back both lists if either write fails; the two list files are not a single atomic transaction.
+Before quitting or switching workspaces, the app saves inline edits, list title changes, open context drafts, and accepted archive/delete actions. Hiding also saves open editors and list names. A failed write retains changes in memory and keeps the window and workspace available. Restore folder access and choose **Retry save**.
 
-If another device changed a list before a local save, **Keep local copy and reload** saves your current local contents in a separate **(local copy)** list, then reloads the original. Both versions remain ordinary JSON files. The action also preserves the latest draft from a failed task-context or Quick add submission. Resolve each conflicting list before quitting or switching workspaces.
+A failed Quick add keeps its draft and destination until retried or explicitly cancelled, including when Find hides it. Task context keeps its editor open with the draft and a **Retry save** button. These failures block shutdown and workspace switching until saved or cancelled.
+
+If another device changed the list, choose **Keep local copy and reload** in the save warning or failed editor. It saves the local contents in a separate **(local copy)** list with new list, task, and child IDs, then reloads the original. The copy includes current inline edits, editable context, active or suspended Quick add drafts, and an unfinished list-name change for that list. Both versions remain ordinary JSON files. Resolve each conflicting list before quitting or switching workspaces.
+
+Moving a task writes the destination before removing the source and attempts to roll back both lists if either write fails; the two list files are not a single atomic transaction.
 
 ## JSON format
 

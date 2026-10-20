@@ -5,7 +5,7 @@ Minimalist List is a native desktop task list built with `egui` and `eframe`, in
 <p align="center">
   <img src="assets/ui.png" alt="Minimalist List on Windows in the default Charcoal palette, showing tasks, subtasks, and completion" width="360">
   <br>
-  <sub>Charcoal theme on Windows · Tasks and subtasks</sub>
+  <sub>Charcoal theme on Windows: tasks and subtasks</sub>
 </p>
 
 ## Install and run
@@ -30,7 +30,7 @@ cd minimalist-list
 cargo run
 ```
 
-For desktop installation and startup at sign-in, run the installer for your platform.
+For desktop installation, run the installer for your platform.
 
 Windows (PowerShell):
 
