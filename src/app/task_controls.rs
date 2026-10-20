@@ -134,9 +134,17 @@ impl MinimalistApp {
     /// # Returns
     /// Reserved width for the completion control and all right-side actions.
     pub(in crate::app) fn task_controls_width(&self, ui: &egui::Ui, task: &Task) -> f32 {
-        114.0
+        (114.0 - self.narrow_row_savings(ui.available_width()))
             + self.checklist_control_width(ui, task)
             + if task.context.is_empty() { 0.0 } else { 24.0 }
+    }
+
+    /// Frees the copy button's space in narrow rows; the menu and shortcut remain available.
+    ///
+    /// # Returns
+    /// Width reclaimed from the action area at this row width.
+    pub(in crate::app) fn narrow_row_savings(&self, width: f32) -> f32 {
+        if width < 360.0 { 31.0 } else { 0.0 }
     }
 
     fn preview_is_visible(&self, list: Uuid, task: &Task) -> bool {
@@ -195,7 +203,10 @@ impl MinimalistApp {
     ) -> bool {
         let width = self.checklist_control_width(ui, task);
         let rect = Rect::from_center_size(
-            egui::pos2(row.right() - 64.0 - width * 0.5, row.center().y),
+            egui::pos2(
+                row.right() - 64.0 + self.narrow_row_savings(row.width()) - width * 0.5,
+                row.center().y,
+            ),
             Vec2::new(width, 32.0),
         );
         let expanded =

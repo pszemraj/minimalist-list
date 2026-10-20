@@ -819,12 +819,16 @@ fn context_presence_control_is_distinct_and_opens_exact_task_at_narrow_width() {
         .unwrap()
         .rect;
     let title = ctx.read_response(Id::new(("task-text", id))).unwrap().rect;
-    let copy = ctx
-        .read_response(Id::new(("copy-task", list, id, false)))
+    let checklist = ctx
+        .read_response(Id::new(("task-checklist", list, id)))
         .unwrap()
         .rect;
     assert!(presence.left() >= title.right());
-    assert!(presence.right() <= copy.left());
+    assert!(presence.right() <= checklist.left());
+    assert!(
+        ctx.read_response(Id::new(("copy-task", list, id, false)))
+            .is_none()
+    );
     let position = presence.center();
     draw(vec![
         egui::Event::PointerMoved(position),

@@ -9,12 +9,8 @@ use std::time::{Duration, Instant};
 
 const HOVER_DELAY: f32 = 0.6;
 const SCROLL_SPEED: f32 = 30.0;
-const END_PAUSE: f32 = 1.2;
-
 fn scroll_offset(elapsed: f32, overflow: f32) -> f32 {
-    let travel = overflow / SCROLL_SPEED;
-    let phase = elapsed % (HOVER_DELAY + travel + END_PAUSE);
-    ((phase - HOVER_DELAY) * SCROLL_SPEED).clamp(0.0, overflow)
+    ((elapsed - HOVER_DELAY) * SCROLL_SPEED).clamp(0.0, overflow)
 }
 
 impl MinimalistApp {
@@ -108,11 +104,12 @@ impl MinimalistApp {
             let elapsed = started.elapsed().as_secs_f32();
             truncate = elapsed < HOVER_DELAY;
             offset = scroll_offset(elapsed, overflow);
-            ui.ctx().request_repaint_after(if elapsed < HOVER_DELAY {
-                Duration::from_secs_f32(HOVER_DELAY - elapsed)
-            } else {
-                Duration::from_millis(16)
-            });
+            if elapsed < HOVER_DELAY {
+                ui.ctx()
+                    .request_repaint_after(Duration::from_secs_f32(HOVER_DELAY - elapsed));
+            } else if offset < overflow {
+                ui.ctx().request_repaint_after(Duration::from_millis(16));
+            }
         } else if self.hovered_title.is_some_and(|(id, _)| id == task.id) {
             self.hovered_title = None;
         }
@@ -172,11 +169,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn scrolling_delays_pauses_and_restarts() {
+    fn scrolling_delays_then_stops_at_the_end() {
         assert_eq!(scroll_offset(0.5, 60.0), 0.0);
         assert!((scroll_offset(1.6, 60.0) - 30.0).abs() < 0.001);
         assert_eq!(scroll_offset(3.0, 60.0), 60.0);
-        assert!(scroll_offset(3.9, 60.0) < 0.001);
+        assert_eq!(scroll_offset(3.9, 60.0), 60.0);
+        assert_eq!(scroll_offset(600.0, 60.0), 60.0);
     }
 
     #[test]

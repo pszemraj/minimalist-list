@@ -12,8 +12,14 @@ use egui::{
     Align, Align2, Button, Color32, CornerRadius, CursorIcon, Frame, Id, Margin, Pos2, Rect,
     ScrollArea, Sense, Stroke, TextEdit, Vec2,
 };
+use std::sync::Arc;
 use std::time::Instant;
 use uuid::Uuid;
+
+struct TaskRowLayout {
+    reserved: f32,
+    galley: Arc<egui::Galley>,
+}
 
 /// Finds the closest task center, accounting for rows of different heights.
 ///
@@ -106,7 +112,7 @@ impl MinimalistApp {
         }
 
         ui.add_space(4.0);
-        let tasks = self.lists[index].data.tasks.clone();
+        let task_count = self.lists[index].data.tasks.len();
         let archive_count = self.lists[index].data.archive.len();
         let completed_count = self.lists[index].data.completed_count();
         let mut actions = Vec::new();
@@ -114,7 +120,12 @@ impl MinimalistApp {
         let mut row_heights = Vec::new();
         if self.drag.as_ref().is_some_and(|drag| {
             drag.list_id != list_id
-                || tasks.get(drag.source).map(|task| task.id) != Some(drag.task_id)
+                || self.lists[index]
+                    .data
+                    .tasks
+                    .get(drag.source)
+                    .map(|task| task.id)
+                    != Some(drag.task_id)
         }) {
             self.drag = None;
         }
@@ -123,20 +134,24 @@ impl MinimalistApp {
             .id_salt(("task-list-scroll", &self.workspace, list_id))
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                for (task_index, task) in tasks.iter().enumerate() {
+                for task_index in 0..task_count {
+                    let task = &self.lists[index].data.tasks[task_index];
+                    let task_id = task.id;
+                    let completed = task.completed;
                     let row_top = ui.next_widget_position().y;
                     let reserved = self.task_controls_width(ui, task);
                     let galley = self.task_galley(ui, &task.text, ui.available_width() - reserved);
                     let row_height = self.task_row_height(&galley);
                     row_centers.push(row_top + row_height * 0.5);
-                    let entry_progress = self.task_entry_progress(task.id);
+                    let layout = TaskRowLayout { reserved, galley };
+                    let entry_progress = self.task_entry_progress(task_id);
                     let removal_progress = self
-                        .clear_progress(list_id, task.completed)
-                        .max(self.delete_progress(list_id, task.id));
+                        .clear_progress(list_id, completed)
+                        .max(self.delete_progress(list_id, task_id));
                     let row_action = ui
                         .scope_builder(
-                            egui::UiBuilder::new().id(Id::new(("task-row", list_id, task.id))),
-                            |ui| self.task_row(ui, list_id, task_index, task, palette),
+                            egui::UiBuilder::new().id(Id::new(("task-row", list_id, task_id))),
+                            |ui| self.task_row(ui, list_id, task_index, layout, palette),
                         )
                         .inner;
                     row_heights.push(ui.next_widget_position().y - row_top);
@@ -150,7 +165,7 @@ impl MinimalistApp {
                         ui.add_space(-row_height * removal_progress);
                     }
                 }
-                if tasks.is_empty() {
+                if task_count == 0 {
                     ui.vertical_centered(|ui| {
                         ui.add_space(42.0);
                         ui.scope(|ui| {
@@ -309,28 +324,42 @@ impl MinimalistApp {
         parent_ui: &mut egui::Ui,
         list_id: Uuid,
         task_index: usize,
-        task: &Task,
+        layout: TaskRowLayout,
         palette: Palette,
     ) -> Option<RowAction> {
-        let manual_sort = self.task_sort_mode(list_id) == TaskSort::Manual;
-        let entry_progress = self.task_entry_progress(task.id);
-        let clear_progress = self.clear_progress(list_id, task.completed);
-        let delete_progress = self.delete_progress(list_id, task.id);
-        let removal_progress = clear_progress.max(delete_progress);
-        let reserved = self.task_controls_width(parent_ui, task);
-        let galley = self.task_galley(
-            parent_ui,
-            &task.text,
-            parent_ui.available_width() - reserved,
-        );
+        let index = self.list_index(list_id)?;
+        let task = &self.lists[index].data.tasks[task_index];
+        let task_id = task.id;
+        let removal_progress = self
+            .clear_progress(list_id, task.completed)
+            .max(self.delete_progress(list_id, task_id));
+        let TaskRowLayout { reserved, galley } = layout;
         let desired = Vec2::new(parent_ui.available_width(), self.task_row_height(&galley));
+        let (rect, _) = parent_ui.allocate_exact_size(desired, Sense::hover());
+        // Keep the lightweight primary response for keyboard navigation and
+        // scroll targets; only build offscreen contents when their state needs it.
         let sense = if removal_progress > 0.0 {
             Sense::hover()
         } else {
             Sense::click_and_drag()
         };
-        let (rect, _) = parent_ui.allocate_exact_size(desired, Sense::hover());
-        let response = parent_ui.interact(rect, FocusItem::Task(list_id, task.id).id(), sense);
+        let response = parent_ui.interact(rect, FocusItem::Task(list_id, task_id).id(), sense);
+        let needs_contents = parent_ui.is_rect_visible(rect)
+            || self.drag.is_some()
+            || self.editing == Some((list_id, task_id))
+            || self.subtasks_for == Some((list_id, task_id))
+            || !task.subtasks.is_empty()
+            || self.spotlight.as_ref().is_some_and(|spotlight| {
+                spotlight.list_id == list_id && spotlight.task_id == task_id
+            });
+        if !needs_contents {
+            self.track_focus(&response, FocusItem::Task(list_id, task_id));
+            return None;
+        }
+        let task = task.clone();
+        let task = &task;
+        let manual_sort = self.task_sort_mode(list_id) == TaskSort::Manual;
+        let entry_progress = self.task_entry_progress(task.id);
         response.widget_info(|| {
             egui::WidgetInfo::labeled(
                 egui::WidgetType::Button,
@@ -359,6 +388,9 @@ impl MinimalistApp {
                 )
             })
             .flatten();
+        if native_drag.is_some() || response.drag_started() {
+            response.request_focus();
+        }
         let hover_progress = ui.ctx().animate_bool_with_time_and_easing(
             Id::new(("task-hover", list_id, task.id)),
             response.hovered(),
@@ -621,11 +653,13 @@ impl MinimalistApp {
                 return Some(RowAction::Subtasks(list_id, task.id));
             }
 
-            let copy_rect = Rect::from_center_size(
-                Pos2::new(row_rect.right() - 48.0, row_rect.center().y),
-                Vec2::new(26.0, 30.0),
-            );
-            self.task_copy_control(ui, copy_rect, (list_id, task.id, false), paint_palette);
+            if self.narrow_row_savings(row_rect.width()) == 0.0 {
+                let copy_rect = Rect::from_center_size(
+                    Pos2::new(row_rect.right() - 48.0, row_rect.center().y),
+                    Vec2::new(26.0, 30.0),
+                );
+                self.task_copy_control(ui, copy_rect, (list_id, task.id, false), paint_palette);
+            }
 
             let delete_rect = Rect::from_center_size(
                 Pos2::new(row_rect.right() - 17.0, row_rect.center().y),
@@ -870,6 +904,10 @@ pub(super) enum RowAction {
     Reorder(Uuid, Uuid, usize),
     Subtasks(Uuid, Uuid),
 }
+
+#[cfg(test)]
+#[path = "list_performance_tests.rs"]
+mod performance_tests;
 
 #[cfg(test)]
 mod tests {
