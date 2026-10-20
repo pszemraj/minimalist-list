@@ -106,6 +106,33 @@ fn undo_keeps_a_deleted_task_whose_identity_reappears_elsewhere() {
 }
 
 #[test]
+fn undo_keeps_a_deleted_subtask_whose_identity_reappears() {
+    let (_ctx, mut app) = test_app();
+    let list = app.lists[0].key;
+    let mut task = Task::new("Parent");
+    task.subtasks = vec![Subtask::new("Deleted version")];
+    let (parent, child) = (task.id, task.subtasks[0].id);
+    let mut stale = task.subtasks[0].clone();
+    stale.text = "Stale version".into();
+    app.lists[0].data.tasks.push(task);
+    app.delete_subtask(list, parent, child);
+    // A sync reload can bring back an older copy of the same child.
+    app.lists[0].data.tasks[0].subtasks.push(stale);
+    app.undo_delete();
+    assert_eq!(
+        app.status.as_deref(),
+        Some("The deleted subtask already exists in its task.")
+    );
+    assert!(app.details.deleted.is_some(), "Undo must remain available");
+    assert_eq!(app.lists[0].data.tasks[0].subtasks[0].text, "Stale version");
+    app.lists[0].data.tasks[0].subtasks.clear();
+    app.undo_delete();
+    assert!(app.details.deleted.is_none());
+    assert_eq!(saved(&app, 0).tasks[0].subtasks[0].text, "Deleted version");
+    fs::remove_dir_all(&app.workspace).unwrap();
+}
+
+#[test]
 fn editing_completed_middle_child_preserves_identity_state_and_neighbors() {
     let (_ctx, mut app) = test_app();
     let list = app.lists[0].key;

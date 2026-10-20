@@ -339,11 +339,20 @@ impl MinimalistApp {
                 } else {
                     FocusItem::Subtask(list, task, subtask.id)
                 };
-                if !parent.subtasks.iter().any(|item| item.id == subtask.id) {
-                    parent
-                        .subtasks
-                        .insert(position.min(parent.subtasks.len()), subtask);
+                if parent.subtasks.iter().any(|item| item.id == subtask.id) {
+                    // Keep Undo available so a stale or different duplicate can be resolved.
+                    self.details.deleted = Some(DeletedItem::Subtask {
+                        list,
+                        task,
+                        position,
+                        subtask,
+                    });
+                    self.status = Some("The deleted subtask already exists in its task.".into());
+                    return;
                 }
+                parent
+                    .subtasks
+                    .insert(position.min(parent.subtasks.len()), subtask);
                 if matches!(self.screen, crate::app::Screen::List(active) if active == list) {
                     if archived {
                         self.history_open = true;
