@@ -198,6 +198,33 @@ fn metadata_only_changes_keep_the_loaded_byte_baseline_through_local_edits() {
 }
 
 #[test]
+fn matching_metadata_still_compares_contents_before_saving() {
+    let root = root();
+    let mut local = create_list(&root, "Local", Accent::Mint).unwrap();
+    let observed = fs::metadata(&local.path).unwrap().modified().unwrap();
+    let mut remote = local.data.clone();
+    remote.title = "Other".into();
+    let bytes = serde_json::to_vec_pretty(&remote).unwrap();
+    fs::write(&local.path, &bytes).unwrap();
+    // Coarse timestamps or a sync client that preserves them leave the metadata unchanged.
+    File::options()
+        .write(true)
+        .open(&local.path)
+        .unwrap()
+        .set_modified(observed)
+        .unwrap();
+    assert_eq!(
+        Some(stamp_from_metadata(&fs::metadata(&local.path).unwrap())),
+        local.stamp.get()
+    );
+    local.data.title = "Local edit".into();
+    assert!(list_changed_on_disk(&local).unwrap());
+    assert!(save_list(&local).unwrap_err().contains("changed on disk"));
+    assert_eq!(fs::read(&local.path).unwrap(), bytes);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn metadata_mismatch_compares_original_bytes_and_rejects_changed_content_of_any_length() {
     for replacement in ["Other", "Remote title with a different length"] {
         let root = root();

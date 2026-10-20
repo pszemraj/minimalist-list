@@ -147,7 +147,11 @@ pub fn save_list(list: &StoredList) -> Result<(), String> {
     Ok(())
 }
 
-/// Compares the file with its last loaded or saved bytes on a metadata mismatch.
+/// Compares the file with its last loaded or saved bytes, or with its metadata
+/// when those bytes are unknown.
+///
+/// Matching metadata does not prove matching contents: coarse timestamps and sync
+/// clients that preserve them can hide a same-length replacement.
 ///
 /// # Returns
 /// Whether its contents differ from the observed version, or its presence changed.
@@ -165,9 +169,6 @@ pub fn list_changed_on_disk(list: &StoredList) -> Result<bool, String> {
             ));
         }
     };
-    if current == list.stamp.get() {
-        return Ok(false);
-    }
     if current.is_some()
         && list.stamp.get().is_some()
         && let Some(original) = list.source_bytes.borrow().as_ref()
@@ -176,5 +177,5 @@ pub fn list_changed_on_disk(list: &StoredList) -> Result<bool, String> {
             .map_err(|error| format!("could not read {}: {error}", list.path.display()))?;
         return Ok(bytes.as_slice() != original.as_ref());
     }
-    Ok(true)
+    Ok(current != list.stamp.get())
 }
