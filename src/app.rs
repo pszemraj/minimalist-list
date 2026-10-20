@@ -625,19 +625,21 @@ impl MinimalistApp {
         self.open_workspace(raw, true);
     }
 
-    /// Opens a workspace, creating a missing folder only for an explicit choice.
+    /// Opens a workspace; only an explicit choice may create a missing folder or
+    /// replace the saved selection.
     ///
     /// # Arguments
     /// - `raw` - Requested workspace path.
-    /// - `create_missing` - Whether a missing folder may become a new workspace.
-    fn open_workspace(&mut self, raw: &str, create_missing: bool) {
+    /// - `explicit` - Whether this is a user's folder choice rather than a retry of
+    ///   the current selection, which may be a launch-only override.
+    fn open_workspace(&mut self, raw: &str, explicit: bool) {
         if raw.trim().is_empty() {
             return;
         }
         if !self.finish_pending_changes() {
             return;
         }
-        let resolved = if create_missing {
+        let resolved = if explicit {
             storage::normalize_workspace_path(raw)
         } else {
             storage::existing_workspace_path(raw)
@@ -694,7 +696,9 @@ impl MinimalistApp {
                 self.revealed = None;
                 self.history_open = false;
                 self.settings.workspace_path = self.workspace.to_string_lossy().into_owned();
-                self.persisted_workspace_path = self.settings.workspace_path.clone();
+                if explicit {
+                    self.persisted_workspace_path = self.settings.workspace_path.clone();
+                }
                 self.workspace_input = self.settings.workspace_path.clone();
                 self.lists = snapshot.lists;
                 self.apply_list_order();

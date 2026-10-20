@@ -438,3 +438,20 @@ fn missing_saved_workspace_starts_in_recovery_but_explicit_launches_create_it() 
     assert!(selected.join("lists").is_dir());
     fs::remove_dir_all(&root).unwrap();
 }
+
+#[test]
+fn retrying_a_launch_override_never_saves_it_as_the_selection() {
+    let (_ctx, mut app) = test_app();
+    let saved = app.persisted_workspace_path.clone();
+    let launch = std::env::temp_dir().join(format!("launch-override-{}", Uuid::new_v4()));
+    fs::create_dir_all(launch.join("lists")).unwrap();
+    storage::create_list(&launch, "Launch", Accent::Sky).unwrap();
+    app.open_workspace(&launch.to_string_lossy(), false);
+    assert_eq!(app.workspace, launch.canonicalize().unwrap());
+    assert_eq!(app.persisted_workspace_path, saved);
+    let written: Settings =
+        serde_json::from_slice(&fs::read(storage::settings_path()).unwrap()).unwrap();
+    assert_eq!(written.workspace_path, saved);
+    fs::remove_dir_all(&launch).unwrap();
+    fs::remove_dir_all(&saved).unwrap();
+}

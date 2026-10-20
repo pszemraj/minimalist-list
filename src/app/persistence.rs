@@ -247,11 +247,8 @@ impl MinimalistApp {
             return;
         }
         // Retry is recovery of the original selection, including a launch override;
-        // unlike explicitly choosing a folder it does not rewrite that preference.
-        let persisted = self.persisted_workspace_path.clone();
+        // unlike explicitly choosing a folder it never writes that path as a preference.
         self.open_workspace(&selected, false);
-        self.persisted_workspace_path = persisted;
-        self.save_settings();
     }
 
     /// Renders visible save and workspace recovery actions above the content.
