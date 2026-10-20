@@ -1,4 +1,4 @@
-//! Editor focus, destructive shortcuts, text-field focus rendering, and recovery focus.
+//! Editor focus, destructive shortcuts, focus-ring rendering, and recovery focus.
 
 use super::*;
 
@@ -346,5 +346,78 @@ fn clicking_retry_workspace_returns_typing_to_the_task_entry() {
     );
     type_text(&ctx, &mut app, "Typed after recovery");
     assert_eq!(app.new_task, "Typed after recovery");
+    cleanup(&app);
+}
+
+#[test]
+fn scrolled_settings_focus_outline_stays_in_the_visible_region() {
+    let (ctx, mut app) = test_app();
+    key(&ctx, &mut app, Key::Comma, Modifiers::COMMAND);
+    idle(&ctx, &mut app);
+    // The workspace field draws its own glow, so use the frameless button below it.
+    let control = tab_to_label(&ctx, &mut app, "Choose folder");
+    let output = frame(&ctx, &mut app, Vec::new(), 430.0);
+    let response = ctx.read_response(control).unwrap();
+    assert!(output.shapes.iter().any(|clipped| {
+        matches!(&clipped.shape, egui::epaint::Shape::Rect(rect)
+            if rect.rect == response.rect.expand(1.0)
+                && rect.stroke.width == 1.5
+                && clipped.clip_rect.contains_rect(rect.rect))
+    }));
+    // Scroll until the control is hidden, back by points until it reappears, then one
+    // point away, so it ends just past the clip edge where its outline could linger.
+    let pos = response.rect.center();
+    let steps = [-24.0, 1.0, -1.0];
+    let mut phase = 0;
+    for _ in 0..60 {
+        let visible = ctx
+            .read_response(control)
+            .unwrap()
+            .interact_rect
+            .is_positive();
+        if visible == (phase == 1) {
+            phase += 1;
+            if phase == steps.len() {
+                break;
+            }
+        }
+        frame(
+            &ctx,
+            &mut app,
+            vec![
+                Event::PointerMoved(pos),
+                Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    delta: egui::vec2(0.0, steps[phase]),
+                    phase: egui::TouchPhase::Move,
+                    modifiers: Modifiers::NONE,
+                },
+            ],
+            430.0,
+        );
+        idle(&ctx, &mut app);
+    }
+    assert_eq!(
+        phase,
+        steps.len(),
+        "the control must end just past the clip edge"
+    );
+    let output = frame(&ctx, &mut app, Vec::new(), 430.0);
+    let response = ctx.read_response(control).unwrap();
+    assert_eq!(ctx.memory(|m| m.focused()), Some(control));
+    assert!(response.rect.intersects(ctx.content_rect()));
+    assert!(!response.interact_rect.is_positive(), "{response:?}");
+    for clipped in output.shapes {
+        if let egui::epaint::Shape::Rect(rect) = clipped.shape
+            && rect.rect == response.rect.expand(1.0)
+            && rect.stroke.width == 1.5
+        {
+            assert!(
+                !rect.rect.intersect(clipped.clip_rect).is_positive(),
+                "scrolled-away focus is visible through {:?}",
+                clipped.clip_rect
+            );
+        }
+    }
     cleanup(&app);
 }

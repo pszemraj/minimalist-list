@@ -851,6 +851,10 @@ impl MinimalistApp {
             }) {
                 return;
             }
+            // Expanding an empty visible region would leave a sliver at the clip edge.
+            if !response.interact_rect.is_positive() {
+                return;
+            }
             ui.painter()
                 .with_clip_rect(response.interact_rect.expand(2.0))
                 .rect_stroke(
