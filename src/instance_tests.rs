@@ -43,7 +43,12 @@ fn normal_exit_releases_claim_and_stale_endpoint_is_replaced() {
     let guard = primary(&workspace, &root);
     let endpoint = guard.endpoint.clone();
     let stale = fs::read_to_string(&endpoint).unwrap();
+    let address = guard.address;
     drop(guard);
+    assert!(
+        TcpStream::connect(address).is_err(),
+        "listener survived normal shutdown"
+    );
     assert!(!endpoint.exists());
     // A killed process leaves this file behind while its OS file lock is released.
     fs::write(&endpoint, &stale).unwrap();
@@ -274,6 +279,7 @@ fn reopening_during_owner_shutdown_acquires_the_released_claim() {
     // Drop stops the listener before removing the endpoint and unlocking. Hold
     // that real shutdown stage long enough for a concurrent launch to see it.
     guard.stopping.store(true, Ordering::Release);
+    let _ = TcpStream::connect_timeout(&guard.address, Duration::from_millis(150));
     guard.worker.take().unwrap().join().unwrap();
     let shutdown = thread::spawn(move || {
         thread::sleep(Duration::from_millis(80));
@@ -285,5 +291,70 @@ fn reopening_during_owner_shutdown_acquires_the_released_claim() {
         panic!("a launch concurrent with shutdown must replace the exited owner");
     };
     drop(replacement);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn failed_shutdown_wake_releases_endpoint_and_claim_without_waiting_for_accept() {
+    let (root, workspace) = fixture();
+    let endpoint = root.join("shutdown.endpoint");
+    let lock_path = root.join("shutdown.lock");
+    let lock = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(&lock_path)
+        .unwrap();
+    lock.lock().unwrap();
+    fs::write(&endpoint, "published endpoint").unwrap();
+    let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).unwrap();
+    let actual_address = listener.local_addr().unwrap();
+    let (finished, worker_finished) = std::sync::mpsc::channel();
+    let worker = thread::spawn(move || {
+        // Unlike the production loop's stop check, this enters accept even if
+        // Drop runs first, making a missing wake deterministically block join.
+        listener.accept().unwrap();
+        finished.send(()).unwrap();
+    });
+    let guard = InstanceGuard {
+        workspace,
+        lock,
+        endpoint: endpoint.clone(),
+        // Port zero cannot name a TCP listener, so this wake always fails.
+        address: SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 0)),
+        stopping: Arc::new(AtomicBool::new(false)),
+        show_requested: Arc::new(AtomicBool::new(false)),
+        repaint: Arc::new(Mutex::new(None)),
+        worker: Some(worker),
+    };
+    let (dropped, drop_finished) = std::sync::mpsc::channel();
+    let dropping = thread::spawn(move || {
+        drop(guard);
+        dropped.send(()).unwrap();
+    });
+    let returned_without_wake = drop_finished.recv_timeout(Duration::from_secs(1)).is_ok();
+    // Always unblock the real listener before asserting, including when the
+    // regression fails, so neither worker nor Drop can be left blocked.
+    TcpStream::connect_timeout(&actual_address, Duration::from_secs(1)).unwrap();
+    worker_finished
+        .recv_timeout(Duration::from_secs(1))
+        .unwrap();
+    dropping.join().unwrap();
+    assert!(
+        returned_without_wake,
+        "Drop waited for an accept it could not wake"
+    );
+    assert!(!endpoint.exists());
+    let next_owner = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&lock_path)
+        .unwrap();
+    assert!(
+        next_owner.try_lock().is_ok(),
+        "failed wake retained the workspace claim"
+    );
+    drop(next_owner);
     fs::remove_dir_all(root).unwrap();
 }

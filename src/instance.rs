@@ -81,9 +81,12 @@ impl InstanceGuard {
 impl Drop for InstanceGuard {
     fn drop(&mut self) {
         self.stopping.store(true, Ordering::Release);
-        // Wake the blocking accept without a periodically polling listener.
-        let _ = TcpStream::connect_timeout(&self.address, Duration::from_millis(150));
-        if let Some(worker) = self.worker.take() {
+        // A stop flag cannot interrupt blocking accept. Join only after waking
+        // it successfully; otherwise detach instead of hanging application exit.
+        let woke = TcpStream::connect_timeout(&self.address, Duration::from_millis(150)).is_ok();
+        if let Some(worker) = self.worker.take()
+            && woke
+        {
             let _ = worker.join();
         }
         // Keep the claim until its endpoint has been removed; a subsequent
