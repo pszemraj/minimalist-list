@@ -85,6 +85,8 @@ impl Palette {
     ) -> Self {
         Self {
             background: Color32::from_rgb(background.0, background.1, background.2),
+            // Faint tints are intentional; opaque fills change every card and panel.
+            // Get approval for a redesign: docs/dev.md#appearance-changes.
             surface: Color32::from_rgb(surface.0, surface.1, surface.2).linear_multiply(0.12),
             raised: Color32::from_rgb(raised.0, raised.1, raised.2).linear_multiply(0.18),
             accent: Color32::from_rgb(accent.0, accent.1, accent.2),
@@ -482,6 +484,7 @@ impl MinimalistApp {
         title: &str,
         list_id: Option<Uuid>,
     ) {
+        // Headers intentionally have no backing panel; see docs/dev.md#appearance-changes.
         ui.scope(|ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().button_padding = Vec2::new(4.0, 4.0);
