@@ -240,3 +240,22 @@ fn subtask_capture_keeps_focus_after_rows_are_inserted() {
     );
     std::fs::remove_dir_all(&app.workspace).unwrap();
 }
+
+#[test]
+fn accent_fade_settles_so_idle_frames_stop_repainting() {
+    let (ctx, mut app) = test_app();
+    let list = storage::create_list(&app.workspace, "Mint", crate::model::Accent::Mint).unwrap();
+    let id = list.key;
+    app.lists.push(list);
+    for screen in [Screen::List(id), Screen::Overview] {
+        app.screen = screen;
+        for _ in 0..200 {
+            app.update_motion(&ctx);
+        }
+        assert!(
+            app.displayed_palette == app.target_palette(),
+            "the fade must finish instead of requesting frames forever"
+        );
+    }
+    std::fs::remove_dir_all(&app.workspace).unwrap();
+}

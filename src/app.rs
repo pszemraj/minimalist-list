@@ -367,7 +367,13 @@ impl MinimalistApp {
         let target_palette = self.target_palette();
         if self.displayed_palette != target_palette {
             let step = (1.0 - (-elapsed * 14.0).exp()).max(0.08);
-            self.displayed_palette = self.displayed_palette.mix(target_palette, step);
+            let next = self.displayed_palette.mix(target_palette, step);
+            // Rounded channels can stop short of the target; finish instead of repainting forever.
+            self.displayed_palette = if next == self.displayed_palette {
+                target_palette
+            } else {
+                next
+            };
             ctx.request_repaint();
         }
 
