@@ -80,6 +80,7 @@ pub struct MinimalistApp {
     persisted_workspace_path: String,
     workspace: PathBuf,
     lists: Vec<StoredList>,
+    manual_task_order: std::collections::HashMap<Uuid, Vec<Uuid>>,
     fingerprint: WorkspaceFingerprint,
     screen: Screen,
     return_screen: Option<Screen>,
@@ -241,6 +242,7 @@ impl MinimalistApp {
             persisted_workspace_path,
             workspace,
             lists,
+            manual_task_order: std::collections::HashMap::new(),
             fingerprint,
             screen,
             return_screen: None,
@@ -463,8 +465,10 @@ impl MinimalistApp {
         self.keyboard.pending = Some(egui::Id::new(("new-task", id)));
         self.keyboard.overview_list = Some(id);
         self.begin_transition(1.0);
-        self.settings.last_list_id = Some(id);
-        self.save_settings();
+        if self.settings.last_list_id != Some(id) {
+            self.settings.last_list_id = Some(id);
+            self.save_settings();
+        }
         self.screen = Screen::List(id);
         self.history_open = false;
         self.revealed = None;
@@ -576,6 +580,7 @@ impl MinimalistApp {
                 }
                 storage::sort_lists(&mut lists);
                 self.cancel_overview_drag();
+                self.clear_save_conflicts();
                 self.lists = lists;
                 self.apply_list_order();
                 self.capture_loaded_task_orders_except(&snapshot.failed_paths);
@@ -679,6 +684,7 @@ impl MinimalistApp {
                 }
                 self.stash_input_drafts();
                 self.stash_overlay_drafts();
+                self.clear_save_conflicts();
                 self.workspace = path;
                 self.restore_overlay_drafts();
                 let recovered = self.persistence.workspace_failure.take().is_some();
@@ -749,6 +755,7 @@ impl eframe::App for MinimalistApp {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.flush_deferred_settings(ui.ctx());
         self.handle_app_shortcuts(ui.ctx());
         let palette = self.palette();
         {

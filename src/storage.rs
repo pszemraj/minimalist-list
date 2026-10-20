@@ -2,16 +2,22 @@
 
 use crate::model::{Accent, FontChoice, ListSort, TaskSort, TitleOverflow, TodoList};
 use serde::{Deserialize, Serialize};
+use std::cell::Cell;
 use std::collections::{BTreeMap, HashSet};
 use std::env;
 use std::ffi::OsString;
-use std::fs::{self, File};
-use std::io::Write;
+use std::fs;
+#[cfg(test)]
+use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 use uuid::Uuid;
 
 const APP_DIR: &str = "minimalist-list";
+
+#[path = "storage_io.rs"]
+mod io;
+use io::{cleanup_stale_temps, write_json_atomic, write_json_atomic_checked};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
@@ -33,6 +39,7 @@ pub struct Settings {
     pub list_order: BTreeMap<String, Vec<Uuid>>,
     pub list_sort: BTreeMap<String, ListSort>,
     pub task_sort: BTreeMap<String, TaskSort>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub manual_task_order: BTreeMap<String, Vec<Uuid>>,
     pub global_shortcut: String,
 }
@@ -67,6 +74,8 @@ pub struct StoredList {
     pub key: Uuid,
     pub path: PathBuf,
     pub data: TodoList,
+    /// Metadata observed when this list was loaded or last saved.
+    pub stamp: Cell<Option<FileStamp>>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -102,6 +111,9 @@ pub fn load_settings() -> Result<Settings, String> {
 }
 
 fn load_settings_from(path: &Path) -> Result<Settings, String> {
+    if let Some(parent) = path.parent() {
+        cleanup_stale_temps(parent);
+    }
     if !path.exists() {
         return Ok(Settings::default());
     }
@@ -126,7 +138,7 @@ pub fn save_settings(settings: &Settings) -> Result<(), String> {
 }
 
 /// Saves only preferences changed since this instance last loaded or saved them.
-/// Malformed stored settings are replaced with the current preferences.
+/// Malformed stored settings are backed up before replacement.
 ///
 /// # Arguments
 /// - `desired` - Current preferences, including local edits.
@@ -169,11 +181,15 @@ fn save_settings_changes_at(
     let current: Settings = match serde_json::from_slice(&bytes) {
         Ok(settings) => settings,
         Err(_) => {
+            let backup = path.with_file_name(format!("settings.invalid-{}.json", Uuid::new_v4()));
+            fs::copy(path, &backup)
+                .map_err(|error| format!("could not preserve {}: {error}", path.display()))?;
             write_json_atomic(path, desired)?;
             return Ok(desired.clone());
         }
     };
     let mut current = serde_json::to_value(current).map_err(|error| error.to_string())?;
+    let original = current.clone();
     let current_map = current
         .as_object_mut()
         .ok_or("invalid stored preferences")?;
@@ -210,8 +226,16 @@ fn save_settings_changes_at(
             current_map.insert(key.clone(), value.clone());
         }
     }
+    // List JSON is authoritative for manual task order, including sorted views.
+    current
+        .as_object_mut()
+        .ok_or("invalid preferences")?
+        .remove("manual_task_order");
+    let changed = current != original;
     let merged: Settings = serde_json::from_value(current).map_err(|error| error.to_string())?;
-    write_json_atomic(path, &merged)?;
+    if changed {
+        write_json_atomic(path, &merged)?;
+    }
     Ok(merged)
 }
 
@@ -347,6 +371,10 @@ pub fn load_workspace(root: &Path) -> Result<WorkspaceSnapshot, String> {
     fs::create_dir_all(&lists_dir)
         .map_err(|error| format!("could not create {}: {error}", lists_dir.display()))?;
 
+    cleanup_stale_temps(&lists_dir);
+    // Observe metadata before reading contents. A replacement during loading must
+    // remain visible to the next scan rather than being blessed as already read.
+    let mut fingerprint = workspace_fingerprint(root)?;
     let mut paths = fs::read_dir(&lists_dir)
         .map_err(|error| format!("could not read {}: {error}", lists_dir.display()))?
         .filter_map(Result::ok)
@@ -360,9 +388,10 @@ pub fn load_workspace(root: &Path) -> Result<WorkspaceSnapshot, String> {
 
     if paths.is_empty() {
         let list = create_list(root, "Tasks", Accent::default())?;
+        update_fingerprint_for_file(&mut fingerprint, &list)?;
         return Ok(WorkspaceSnapshot {
             lists: vec![list],
-            fingerprint: workspace_fingerprint(root)?,
+            fingerprint,
             warnings: Vec::new(),
             failed_paths: Vec::new(),
         });
@@ -414,13 +443,16 @@ pub fn load_workspace(root: &Path) -> Result<WorkspaceSnapshot, String> {
 
     Ok(WorkspaceSnapshot {
         lists,
-        fingerprint: workspace_fingerprint(root)?,
+        fingerprint,
         warnings,
         failed_paths,
     })
 }
 
 fn read_list(path: &Path) -> Result<(StoredList, u8), String> {
+    let stamp = fs::metadata(path)
+        .map(|metadata| stamp_from_metadata(&metadata))
+        .map_err(|error| format!("could not inspect {}: {error}", path.display()))?;
     let bytes =
         fs::read(path).map_err(|error| format!("could not read {}: {error}", path.display()))?;
     let mut data = serde_json::from_slice::<TodoList>(&bytes)
@@ -450,6 +482,7 @@ fn read_list(path: &Path) -> Result<(StoredList, u8), String> {
             key,
             path: path.to_owned(),
             data,
+            stamp: Cell::new(Some(stamp)),
         },
         canonical_name,
     ))
@@ -482,6 +515,7 @@ pub fn create_list(root: &Path, title: &str, accent: Accent) -> Result<StoredLis
         key: data.id,
         path,
         data,
+        stamp: Cell::new(None),
     };
     save_list(&stored)?;
     Ok(stored)
@@ -495,9 +529,78 @@ pub fn create_list(root: &Path, title: &str, accent: Accent) -> Result<StoredLis
 ///
 /// # Errors
 ///
-/// Returns an error when the list cannot be serialized, written, or replaced.
+/// Returns an error when the list changed on disk since loading or saving it,
+/// or when it cannot be serialized, written, or replaced.
 pub fn save_list(list: &StoredList) -> Result<(), String> {
-    write_json_atomic(&list.path, &list.data)
+    let metadata = write_json_atomic_checked(&list.path, &list.data, || {
+        if list_changed_on_disk(list)? {
+            return Err(format!(
+                "{} changed on disk. Its newer contents were kept; your changes remain unsaved.",
+                list.path.display()
+            ));
+        }
+        Ok(())
+    })?;
+    list.stamp.set(Some(stamp_from_metadata(&metadata)));
+    Ok(())
+}
+
+/// Compares the associated file with the version observed by this instance.
+///
+/// # Returns
+/// Whether the file was externally replaced, changed, created, or removed.
+///
+/// # Errors
+/// Returns an error when the file metadata cannot be inspected.
+pub fn list_changed_on_disk(list: &StoredList) -> Result<bool, String> {
+    let current = match fs::metadata(&list.path) {
+        Ok(metadata) => Some(stamp_from_metadata(&metadata)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => {
+            return Err(format!(
+                "could not inspect {}: {error}",
+                list.path.display()
+            ));
+        }
+    };
+    Ok(current != list.stamp.get())
+}
+
+/// Preserves local contents in an independent ordinary list before conflict recovery.
+///
+/// # Arguments
+/// - `root` - Active workspace root.
+/// - `source` - Local contents to preserve.
+///
+/// # Returns
+/// The saved local copy, with independent list, task, and checklist identities.
+///
+/// # Errors
+/// Returns an error when the copy cannot be saved.
+pub fn create_local_copy(root: &Path, source: &StoredList) -> Result<StoredList, String> {
+    let mut data = source.data.clone();
+    data.id = Uuid::new_v4();
+    data.title = format!("{} (local copy)", data.title);
+    for task in data
+        .tasks
+        .iter_mut()
+        .chain(data.archive.iter_mut().map(|entry| &mut entry.task))
+    {
+        task.id = Uuid::new_v4();
+        for child in &mut task.subtasks {
+            child.id = Uuid::new_v4();
+        }
+    }
+    let copy = StoredList {
+        key: data.id,
+        path: root
+            .join("lists")
+            .join(list_file_name(&data.title, data.id)),
+        data,
+        stamp: Cell::new(None),
+    };
+    save_list(&copy)?;
+    Ok(copy)
 }
 
 fn filename_title(title: &str) -> String {
@@ -643,7 +746,7 @@ pub fn workspace_fingerprint(root: &Path) -> Result<WorkspaceFingerprint, String
 /// # Arguments
 ///
 /// - `fingerprint` - Snapshot to update in place.
-/// - `path` - List file whose metadata should be recorded.
+/// - `list` - List whose loaded or saved metadata should be recorded.
 ///
 /// # Returns
 ///
@@ -651,20 +754,21 @@ pub fn workspace_fingerprint(root: &Path) -> Result<WorkspaceFingerprint, String
 ///
 /// # Errors
 ///
-/// Returns an error when the file name or metadata cannot be read.
+/// Returns an error when the file name or its observed metadata is unavailable.
 pub fn update_fingerprint_for_file(
     fingerprint: &mut WorkspaceFingerprint,
-    path: &Path,
+    list: &StoredList,
 ) -> Result<(), String> {
-    let name = path
+    let name = list
+        .path
         .file_name()
         .and_then(|name| name.to_str())
-        .ok_or_else(|| format!("could not identify {}", path.display()))?;
-    let metadata = fs::metadata(path)
-        .map_err(|error| format!("could not inspect {}: {error}", path.display()))?;
-    fingerprint
-        .0
-        .insert(name.to_owned(), stamp_from_metadata(&metadata));
+        .ok_or_else(|| format!("could not identify {}", list.path.display()))?;
+    let stamp = list
+        .stamp
+        .get()
+        .ok_or_else(|| format!("no observed version of {}", list.path.display()))?;
+    fingerprint.0.insert(name.to_owned(), stamp);
     Ok(())
 }
 
@@ -759,8 +863,11 @@ fn settings_path() -> PathBuf {
 }
 
 /// Gives each test thread its own settings file, away from the user's settings.
+///
+/// # Returns
+/// A thread-local settings path beneath the configured temporary directory.
 #[cfg(test)]
-fn settings_path() -> PathBuf {
+pub(crate) fn settings_path() -> PathBuf {
     thread_local! {
         static PATH: PathBuf = env::temp_dir()
             .join(format!("minimalist-list-settings-{}.json", Uuid::new_v4()));
@@ -807,41 +914,6 @@ fn prefer_existing_path(preferred: PathBuf, legacy: PathBuf) -> PathBuf {
     } else {
         preferred
     }
-}
-
-fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|error| format!("could not create {}: {error}", parent.display()))?;
-    }
-    let bytes = serde_json::to_vec_pretty(value)
-        .map_err(|error| format!("could not serialize {}: {error}", path.display()))?;
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("data.json");
-    let temp = path.with_file_name(format!(
-        ".{file_name}.tmp-{}-{}",
-        std::process::id(),
-        Uuid::new_v4()
-    ));
-
-    let write_result = (|| {
-        let mut file = File::create(&temp)
-            .map_err(|error| format!("could not write {}: {error}", temp.display()))?;
-        file.write_all(&bytes)
-            .map_err(|error| format!("could not write {}: {error}", temp.display()))?;
-        file.sync_all()
-            .map_err(|error| format!("could not flush {}: {error}", temp.display()))?;
-
-        fs::rename(&temp, path)
-            .map_err(|error| format!("could not replace {}: {error}", path.display()))
-    })();
-
-    if write_result.is_err() {
-        let _ = fs::remove_file(&temp);
-    }
-    write_result
 }
 
 fn xdg_dir_from(
@@ -897,3 +969,7 @@ mod tests;
 #[cfg(test)]
 #[path = "storage_filename_tests.rs"]
 mod filename_tests;
+
+#[cfg(test)]
+#[path = "storage_recovery_tests.rs"]
+mod recovery_tests;

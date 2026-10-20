@@ -140,13 +140,15 @@ fn unavailable_move_destination_keeps_source_and_retry_does_not_duplicate() {
     app.lists[0].data.tasks.push(task);
     app.save_list_index(0);
     let original_path = app.lists[1].path.clone();
+    let backup_path = app.workspace.join("destination-backup.json");
     // A directory where a file belongs fails deterministically without OS permission assumptions.
-    fs::remove_file(&original_path).unwrap();
+    fs::rename(&original_path, &backup_path).unwrap();
     fs::create_dir(&original_path).unwrap();
     assert!(!app.move_task_to_list(source, id, destination_id));
     assert_eq!(saved(&app, 0).tasks[0].id, id);
     assert!(app.lists[1].data.tasks.is_empty());
     fs::remove_dir(&original_path).unwrap();
+    fs::rename(&backup_path, &original_path).unwrap();
     assert!(app.move_task_to_list(source, id, destination_id));
     assert!(saved(&app, 0).tasks.is_empty());
     assert_eq!(saved(&app, 1).tasks.len(), 1);
@@ -258,7 +260,8 @@ fn failed_source_save_rolls_back_the_already_written_destination() {
     app.lists[0].data.tasks.push(task);
     app.save_list_index(0);
     let source_path = app.lists[0].path.clone();
-    fs::remove_file(&source_path).unwrap();
+    let backup_path = app.workspace.join("source-backup.json");
+    fs::rename(&source_path, &backup_path).unwrap();
     fs::create_dir(&source_path).unwrap();
     assert!(!app.move_task_to_list(source, id, destination_id));
     assert!(
@@ -267,6 +270,7 @@ fn failed_source_save_rolls_back_the_already_written_destination() {
     );
     assert_eq!(app.lists[0].data.tasks[0].id, id);
     fs::remove_dir(&source_path).unwrap();
+    fs::rename(&backup_path, &source_path).unwrap();
     assert!(app.retry_dirty_lists());
     assert_eq!(saved(&app, 0).tasks[0].id, id);
     assert!(saved(&app, 1).tasks.is_empty());
@@ -290,6 +294,8 @@ fn clearing_completed_only_writes_when_tasks_are_archived() {
         .unwrap()
         .set_times(FileTimes::new().set_modified(UNIX_EPOCH + Duration::from_secs(1_000_000)))
         .unwrap();
+    // Observe the fixture timestamp as the current disk baseline before editing.
+    app.lists = storage::load_workspace(&app.workspace).unwrap().lists;
     let modified = fs::metadata(&path).unwrap().modified().unwrap();
 
     for _ in 0..2 {
@@ -399,24 +405,25 @@ fn move_picker_keeps_exclusive_input_ownership_across_capture_search_shortcuts()
         let id = task.id;
         app.lists[0].data.tasks.push(task);
         app.begin_move_task(source, id);
-        let _output = ctx.run_logic(
-            &egui::RawInput {
-                events: vec![egui::Event::Key {
-                    key,
-                    physical_key: None,
-                    pressed: true,
-                    repeat: false,
-                    modifiers: egui::Modifiers::COMMAND,
-                }],
-                ..Default::default()
-            },
-            |ctx| app.handle_app_shortcuts(ctx),
-        );
+        let input = || egui::RawInput {
+            events: crate::app::tests::chord(key, egui::Modifiers::COMMAND),
+            ..Default::default()
+        };
+        crate::app::tests::run_frame(&ctx, input(), |ui| app.handle_app_shortcuts(ui.ctx()));
         assert!(app.details.move_task.is_some());
         assert!(
             app.quick_capture.is_none() && app.find.is_none(),
             "a move picker must not leave another modal active underneath it"
         );
+        // Positive control: the same delivered event opens its overlay without
+        // the move picker. This would fail if the harness discarded key input.
+        app.details.move_task = None;
+        crate::app::tests::run_frame(&ctx, input(), |ui| app.handle_app_shortcuts(ui.ctx()));
+        assert!(if key == egui::Key::N {
+            app.quick_capture.is_some()
+        } else {
+            app.find.is_some()
+        });
         fs::remove_dir_all(&app.workspace).unwrap();
     }
 }

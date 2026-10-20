@@ -69,6 +69,7 @@ fn descriptive_filename_identity_wins_over_json_and_sync_conflict_copies() {
     copy.data.id = list.key;
     copy.data.title = "Old legacy title".into();
     copy.path = root.join("lists").join(format!("{}.json", list.key));
+    copy.stamp.set(None);
     save_list(&copy).unwrap();
     let legacy = copy.path.clone();
     File::options()
@@ -82,6 +83,7 @@ fn descriptive_filename_identity_wins_over_json_and_sync_conflict_copies() {
         "current-title--{} (conflicted copy).json",
         list.key
     ));
+    copy.stamp.set(None);
     save_list(&copy).unwrap();
     let loaded = load_workspace(&root).unwrap();
     assert_eq!(loaded.lists.len(), 1);
@@ -114,7 +116,7 @@ fn explicit_rename_preserves_whole_task_data_and_refreshes_fingerprint() {
         format!("new-descriptive-title--{}.json", list.key)
     );
     remove_file_from_fingerprint(&mut fingerprint, &old);
-    update_fingerprint_for_file(&mut fingerprint, &list.path).unwrap();
+    update_fingerprint_for_file(&mut fingerprint, &list).unwrap();
     assert_eq!(fingerprint, workspace_fingerprint(&root).unwrap());
     let loaded = load_workspace(&root).unwrap();
     assert_eq!(
@@ -159,6 +161,7 @@ fn rename_collision_reloads_the_latest_saved_contents_without_replacing_copies()
         list.data.title = "Renamed".into();
         let mut stale = list.clone();
         stale.path = source.with_file_name(list_file_name(&list.data.title, list.key));
+        stale.stamp.set(None);
         save_list(&stale).unwrap();
         File::options()
             .write(true)
@@ -190,6 +193,9 @@ fn rename_collision_reloads_the_latest_saved_contents_without_replacing_copies()
             .unwrap()
             .set_modified(UNIX_EPOCH + std::time::Duration::from_secs(2_000))
             .unwrap();
+        stale.stamp.set(Some(stamp_from_metadata(
+            &fs::metadata(&stale.path).unwrap(),
+        )));
         stale.data.tasks.push(Task::new("New destination edit"));
         save_list(&stale).unwrap();
         let loaded = load_workspace(&root).unwrap();
@@ -417,14 +423,7 @@ fn settings_merge_preserves_other_workspaces_list_order() {
         merged.task_sort["/workspace/second::task-list"],
         TaskSort::IncompleteFirst
     );
-    assert_eq!(
-        merged.manual_task_order["/workspace/first::task-list"],
-        first_ids
-    );
-    assert_eq!(
-        merged.manual_task_order["/workspace/second::task-list"],
-        second_ids
-    );
+    assert!(merged.manual_task_order.is_empty());
     let mut removed = merged.clone();
     removed.list_order.remove("/workspace/first");
     let merged = save_settings_changes(&removed, &merged).unwrap();

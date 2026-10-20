@@ -32,7 +32,7 @@ Enable **Settings → Appearance → Show subtasks below tasks** to preview ever
 
 `Ctrl+N` or the header's `add` action opens Quick add. A new capture prefers the open list, then the last successful available destination. Choose a list and press Enter or **Add**; a successful capture names its destination. Switching between Quick add and Find preserves their drafts. Nonempty captures keep their destination while it exists; choose another list if it was deleted. Empty drafts choose again when reopened. Escape cancels the capture.
 
-Click task or child text to edit it inline, or press Enter on a focused task row. Tab also reaches child text, where Enter or Space starts editing. Enter or leaving the editor saves; Escape cancels. Saving a task title returns focus to its row; editing a child preserves its position and completion. Task editors save before navigating, archiving, hiding, or quitting. The checklist and delete controls on the right become prominent on hover and remain keyboard-focusable.
+Click task or child text to edit it inline, or press Enter on a focused task row. Tab also reaches child text, where Enter or Space starts editing. Enter or leaving the editor saves; Escape cancels. Enter returns focus to the task row or child's completion control; clicking another field keeps focus there. Editing a child preserves its position and completion. Task editors save before navigating, archiving, hiding, or quitting. The checklist and delete controls on the right become prominent on hover and remain keyboard-focusable.
 
 ## Add task context
 
@@ -62,7 +62,7 @@ Drag a task vertically to reorder it. Drag right past the threshold to complete 
 
 **List options → Sort** selects Manual, Title, Newest, Oldest, or Incomplete first. In Manual order, new tasks appear at the top. Return to Manual to recover your arrangement and use dragging or reorder shortcuts. See [stored order](storage.md#file-layout) for how sorting affects list files.
 
-`Ctrl+Shift+Backspace` (`Shift+Cmd+Delete` on macOS) or **Archive completed** moves completed tasks into restorable History. With no completed tasks, it leaves the list file untouched.
+`Ctrl+Shift+Backspace` (`Shift+Cmd+Delete` on macOS), outside a text editor, or **Archive completed** moves completed tasks into restorable History. With no completed tasks, it leaves the list file untouched.
 
 Deleting a task or child shows **Undo**. Select it, or press `Ctrl+Z` (`Cmd+Z` on macOS) outside a text editor, to restore the latest deletion with its contents, completion, and original position. This recovery is available for the current workspace until another deletion, dismissal, or workspace switch; it is not saved across restarts. Whole-list deletion uses its separate confirmation.
 

@@ -277,20 +277,86 @@ fn retaining_an_unreadable_sorted_list_does_not_replace_its_manual_snapshot() {
             .collect::<Vec<_>>(),
         manual
     );
-    app.save_list_index(index);
+    assert!(!app.save_list_index(index));
     assert_eq!(
-        storage::load_workspace(&app.workspace)
-            .unwrap()
-            .lists
-            .iter()
-            .find(|entry| entry.key == list)
-            .unwrap()
-            .data
-            .tasks
-            .iter()
-            .map(|task| task.id)
-            .collect::<Vec<_>>(),
-        manual
+        std::fs::read_to_string(&path).unwrap(),
+        "temporarily incomplete JSON"
     );
+    assert!(app.persistence.dirty_lists.contains(&list));
+    assert_eq!(app.manual_task_order[&list], manual);
+    std::fs::remove_dir_all(app.workspace).unwrap();
+}
+
+#[test]
+fn task_saves_and_reopening_selected_list_do_not_write_settings() {
+    for mode in [TaskSort::Manual, TaskSort::Title] {
+        let (_, mut app, list, manual) = fixture();
+        app.sort_tasks(list, mode);
+        app.open_list(list);
+        app.save_settings();
+        let path = storage::settings_path();
+        let bytes = std::fs::read(&path).unwrap();
+        let stamp = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000);
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(stamp)
+            .unwrap();
+        let task = Task::new("New task");
+        let added = task.id;
+        app.lists[0].data.tasks.insert(0, task);
+        assert!(app.save_list_index(0));
+        if mode == TaskSort::Manual {
+            app.apply_row_action(crate::app::list::RowAction::Reorder(list, added, 2));
+        }
+        app.go_to_overview();
+        app.open_list(list);
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), stamp);
+        assert!(app.settings.manual_task_order.is_empty());
+        let expected = if mode == TaskSort::Manual {
+            vec![manual[0], manual[1], added, manual[2], manual[3]]
+        } else {
+            [vec![added], manual].concat()
+        };
+        assert_eq!(disk_ids(&app), expected);
+        app.sort_tasks(list, TaskSort::Manual);
+        assert_eq!(ids(&app), expected);
+        std::fs::remove_dir_all(app.workspace).unwrap();
+    }
+}
+
+#[test]
+fn pruning_list_preferences_keeps_other_workspaces_and_live_lists() {
+    let (_, mut app, list, _) = fixture();
+    let removed = Uuid::new_v4();
+    let workspace = app.workspace.to_string_lossy().into_owned();
+    let elsewhere = format!("{workspace}-other");
+    app.settings
+        .task_sort
+        .insert(app.task_order_key(list), TaskSort::Title);
+    app.settings
+        .task_sort
+        .insert(app.task_order_key(removed), TaskSort::Newest);
+    let other_key = format!("{elsewhere}::{removed}");
+    app.settings
+        .task_sort
+        .insert(other_key.clone(), TaskSort::Oldest);
+    app.settings
+        .list_order
+        .insert(workspace.clone(), vec![removed, list]);
+    app.settings
+        .list_order
+        .insert(elsewhere.clone(), vec![removed]);
+    app.capture_loaded_task_orders();
+    assert_eq!(app.settings.task_sort.len(), 2);
+    assert_eq!(
+        app.settings.task_sort[&app.task_order_key(list)],
+        TaskSort::Title
+    );
+    assert_eq!(app.settings.task_sort[&other_key], TaskSort::Oldest);
+    assert_eq!(app.settings.list_order[&workspace], vec![list]);
+    assert_eq!(app.settings.list_order[&elsewhere], vec![removed]);
     std::fs::remove_dir_all(app.workspace).unwrap();
 }

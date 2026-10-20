@@ -52,7 +52,12 @@ fn opening_settings_preserves_fractional_preferences_until_a_slider_is_edited() 
     key(&ctx, &mut app, Key::ArrowDown, Modifiers::NONE);
     key(&ctx, &mut app, Key::ArrowRight, Modifiers::NONE);
     assert_eq!(app.settings.font_size, 20.0);
-    assert_eq!(storage::load_settings().unwrap().font_size, 20.0);
+    assert_eq!(storage::load_settings().unwrap().font_size, 19.4);
+    assert!(app.finish_pending_changes());
+    let saved = storage::load_settings().unwrap();
+    assert_eq!(saved.font_size, 20.0);
+    assert_eq!(saved.row_padding, 7.4);
+    assert_eq!(saved.background_opacity, 0.83);
     cleanup(&app);
 }
 

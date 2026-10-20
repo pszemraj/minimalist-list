@@ -435,7 +435,7 @@ impl MinimalistApp {
                 self.cycle_list(list, true);
             } else if take_shortcut(ctx, NEXT_LIST) {
                 self.cycle_list(list, false);
-            } else if take_shortcut(ctx, CLEAR_COMPLETED) {
+            } else if !ctx.text_edit_focused() && take_shortcut(ctx, CLEAR_COMPLETED) {
                 self.begin_clear_completed(list);
             } else {
                 self.task_keyboard(ctx, list);
@@ -801,6 +801,11 @@ impl MinimalistApp {
         {
             if response.gained_focus() {
                 response.scroll_to_me(None);
+            }
+            // The capture entry already draws its own focused frame glow.
+            if matches!(self.screen, Screen::List(list) if response.id == Id::new(("new-task", list)))
+            {
+                return;
             }
             if self.keyboard.anchor.is_some_and(|(id, item)| {
                 id == response.id && item.id() == id && !matches!(item, FocusItem::Archived(_, _))

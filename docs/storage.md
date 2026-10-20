@@ -53,7 +53,7 @@ If the native defaults do not exist on macOS or Windows, the app uses an existin
 
 `settings.lock` serializes local preference merges across running instances, preserving unrelated changes made by different workspaces.
 
-Malformed settings show a startup warning and use defaults. The next successful preference save replaces the malformed file with the current preferences; file read errors remain save errors.
+Malformed settings show a startup warning and use defaults. Before replacing them, a preference save preserves the original bytes beside the file as `settings.invalid-<UUID>.json`. File read errors remain save errors. Unchanged preferences leave the settings file untouched; continuous appearance adjustments save after a short pause and flush when leaving the application.
 
 ## File layout
 
@@ -66,9 +66,9 @@ minimalist-list/
     +-- projects--70d0f50d-8d45-4d24-88ce-bf82cbfab48a.json
 ```
 
-New filenames combine a safe, bounded list title with its stable UUID. Renaming a list saves its contents before updating its filename; name collisions never replace another file. If the filename update fails, the contents stay saved at the old path and **Retry save** retries the rename. Existing UUID-only filenames remain readable and ordinary saves keep their paths. The filename UUID is authoritative.
+New filenames combine a safe, bounded list title with its stable UUID. Renaming a list saves its contents before updating its filename; name collisions never replace another file. If the filename update fails, a warning identifies the saved old path. This does not block quitting, switching workspaces, or reloads; rename the list again to retry. Existing UUID-only filenames remain readable and ordinary saves keep their paths. The filename UUID is authoritative.
 
-Default list order comes from `created_at_unix`, with the UUID as a stable tie-breaker. Manual tile order and temporary list/task sort modes are local workspace-scoped settings. Task JSON always retains manual task order, including while a sorted view is active.
+Default list order comes from `created_at_unix`, with the UUID as a stable tie-breaker. Manual tile order and temporary list/task sort modes are local workspace-scoped settings. Task JSON retains manual task order, including while a sorted view is active; task IDs are not duplicated in local settings. Preferences for deleted lists are removed when that workspace is loaded.
 
 ## File-sync behavior
 
@@ -77,7 +77,9 @@ Edits to different lists write different files, so file-sync services can transf
 > [!IMPORTANT]
 > Minimalist List does not merge simultaneous changes to the same list. Let one device finish syncing before editing that list on another device.
 
-Every edit writes and flushes a temporary sibling file, then replaces the destination. The app checks disk every five seconds and reloads externally changed list files at the next scan. Reloads wait until task or child editing and dragging finish, while any task context dialog is open, and while unsaved list changes or filename updates need recovery. A sync service controls when a file arrives on another computer.
+Every edit writes and flushes a temporary sibling file, then replaces the destination. Saves compare the destination's timestamp and size with the last loaded or saved version, including immediately before replacement. A mismatch preserves the external file and retains local changes for recovery. This check cannot make a file-sync service provide a transaction across devices. On startup and workspace loading, recognized unlocked temporary files older than a day are removed; recent or active writes are retained.
+
+The app checks disk every five seconds and reloads externally changed list files at the next scan. Reloads wait until task or child editing and dragging finish, while any task context dialog is open, and while unsaved list changes need recovery. A sync service controls when a file arrives on another computer.
 
 ### Duplicate list files
 
@@ -86,6 +88,8 @@ If files contain the same list UUID, filenames with a recognized UUID take prece
 ### Save recovery
 
 A failed write leaves its changes in memory, shows a visible warning, and offers **Retry save**. Pending task edits and list renames must save before exiting or switching workspaces; a failed save keeps the original workspace open for recovery. Restore folder access and retry. A failed Quick add retains its draft and destination and blocks shutdown or workspace switching until it is retried successfully or explicitly cancelled; task context keeps its editor open with the draft and a **Retry save** button. Moving a task writes the destination before removing the source and attempts to roll back both lists if either write fails; the two list files are not a single atomic transaction.
+
+If another device changed a list before a local save, **Keep local copy and reload** saves your current local contents in a separate **(local copy)** list, then reloads the original. Both versions remain ordinary JSON files. The action also preserves the latest draft from a failed task-context or Quick add submission. Resolve each conflicting list before quitting or switching workspaces.
 
 ## JSON format
 

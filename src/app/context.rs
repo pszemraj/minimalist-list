@@ -15,7 +15,7 @@ pub(super) struct TaskContextEditor {
     pub(super) archived: bool,
     pub(super) text: String,
     title: String,
-    failure: Option<String>,
+    pub(super) failure: Option<String>,
     request_focus: bool,
     return_focus: Option<Id>,
 }
@@ -117,6 +117,7 @@ impl MinimalistApp {
                 true
             }
             Err(error) => {
+                self.record_save_conflict(&candidate);
                 editor.failure = Some(format!("Not saved. {error}"));
                 self.task_context = Some(editor);
                 false
@@ -140,6 +141,7 @@ impl MinimalistApp {
             return;
         };
         let mut save = false;
+        let mut recover = false;
         let mut cancel = false;
         let palette = self.palette();
         let modal = egui::Modal::new(Id::new("task-context-modal")).show(ctx, |ui| {
@@ -198,6 +200,9 @@ impl MinimalistApp {
                         ui.add(egui::Label::new(self.rich(error, 13.0, palette.danger)).wrap());
                     });
             }
+            if editor.failure.is_some() && self.has_save_conflict(editor.list) {
+                recover = ui.button("Keep local copy and reload").clicked();
+            }
             ui.horizontal(|ui| {
                 if !editor.archived {
                     save = ui
@@ -216,12 +221,18 @@ impl MinimalistApp {
                 cancel = close.clicked();
             });
         });
+        let list = editor.list;
         let return_focus = editor.return_focus;
         let read_only = editor.archived;
         self.task_context = Some(editor);
         // Notes use explicit Save/Cancel; an outside click must not discard a draft.
         let dismiss = modal.should_close() && (read_only || !modal.backdrop_response.clicked());
-        if cancel || dismiss {
+        if recover {
+            self.keep_local_copy_and_reload(list);
+        } else if cancel || dismiss {
+            if !self.persistence.dirty_lists.contains(&list) {
+                self.forget_save_conflict(list);
+            }
             self.task_context = None;
             self.keyboard.pending = return_focus;
         } else if save {

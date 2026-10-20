@@ -125,7 +125,6 @@ impl MinimalistApp {
             child.text = text.to_owned();
             self.save_list_index(index);
         }
-        self.keyboard.pending = Some(FocusItem::Subtask(edit.list, edit.task, edit.subtask).id());
     }
 
     /// Cancels the checklist draft and restores focus to the original child.

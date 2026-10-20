@@ -460,7 +460,7 @@ impl MinimalistApp {
             appearance_changed |= previews.changed();
         });
         if appearance_changed {
-            self.save_settings();
+            self.schedule_settings_save(ui.ctx());
         }
         ui.add_space(12.0);
         self.global_shortcut_settings_ui(ui, palette);
@@ -629,9 +629,12 @@ impl MinimalistApp {
             let list = self.lists.remove(index);
             match storage::delete_list(&list) {
                 Ok(()) => {
+                    self.forget_save_conflict(list_id);
                     self.persistence.dirty_lists.remove(&list_id);
                     self.persistence.pending_filenames.remove(&list_id);
                     storage::remove_file_from_fingerprint(&mut self.fingerprint, &list.path);
+                    self.prune_list_preferences();
+                    self.manual_task_order.remove(&list_id);
                     self.settings.last_list_id = self.lists.first().map(|item| item.key);
                     self.save_settings();
                     self.go_to_overview();
@@ -715,6 +718,7 @@ mod tests {
             let mut stale = app.lists[0].clone();
             stale.data.title = "Renamed".into();
             stale.path = original.with_file_name(format!("renamed--{list}.json"));
+            stale.stamp.set(None);
             storage::save_list(&stale).unwrap();
             std::fs::File::options()
                 .write(true)
@@ -728,7 +732,7 @@ mod tests {
                 .push(crate::model::Task::new("Latest saved task"));
             app.rename_input = "Renamed".into();
             app.rename_list(list);
-            assert!(app.persistence.pending_filenames.contains(&list));
+            assert!(!app.persistence.pending_filenames.contains(&list));
             if restart {
                 app = MinimalistApp::new(&ctx, app.settings.clone(), None, None);
                 assert!(app.persistence.pending_filenames.is_empty());

@@ -1,4 +1,4 @@
-//! Explicit filename renames remain retryable through failed writes and collisions.
+//! Content retries remain safe while filename-only failures stay nonblocking.
 
 use crate::{
     app::{MinimalistApp, tests::test_app},
@@ -66,7 +66,7 @@ fn failed_initial_rename_write_retries_content_filename_and_fingerprint() {
 }
 
 #[test]
-fn filename_collision_retries_without_duplicates_or_losing_sorted_manual_order() {
+fn filename_collision_warns_without_blocking_or_losing_sorted_manual_order() {
     let (mut app, list, original, manual) = fixture();
     let root = app.workspace.clone();
     app.sort_tasks(list, TaskSort::Title);
@@ -75,8 +75,10 @@ fn filename_collision_retries_without_duplicates_or_losing_sorted_manual_order()
     app.rename_input = "Renamed".into();
     app.rename_list(list);
     assert_eq!(app.lists[0].path, original);
-    assert!(app.persistence.pending_filenames.contains(&list));
-    assert!(!app.retry_dirty_lists());
+    assert!(!app.persistence.pending_filenames.contains(&list));
+    assert!(app.persistence.dirty_lists.is_empty());
+    assert!(app.status.as_ref().unwrap().contains("previous filename"));
+    assert!(app.retry_dirty_lists());
     assert_eq!(
         fs::read_to_string(&destination).unwrap(),
         "unrelated existing file"
@@ -88,10 +90,11 @@ fn filename_collision_retries_without_duplicates_or_losing_sorted_manual_order()
         saved.tasks.iter().map(|task| task.id).collect::<Vec<_>>(),
         manual
     );
-    app.switch_workspace(&root.join("other").to_string_lossy());
-    assert_eq!(app.workspace, root);
+    assert!(app.finish_pending_changes());
     fs::remove_file(&destination).unwrap();
-    assert!(app.retry_dirty_lists());
+    app.rename_input = "Another name".into();
+    app.rename_list(list);
+    let destination = original.with_file_name(format!("another-name--{list}.json"));
     assert_eq!(app.lists[0].path, destination);
     assert!(!original.exists());
     assert_eq!(app.lists[0].data.tasks[0].text, "Alpha");
@@ -146,7 +149,7 @@ fn ordinary_legacy_saves_keep_their_path_until_an_explicit_rename() {
 }
 
 #[test]
-fn context_candidate_save_keeps_a_pending_filename_retry_and_latest_content() {
+fn context_candidate_save_keeps_filename_warning_nonblocking_and_latest_content() {
     let (mut app, list, original, manual) = fixture();
     let root = app.workspace.clone();
     let destination = original.with_file_name(format!("renamed--{list}.json"));
@@ -156,8 +159,8 @@ fn context_candidate_save_keeps_a_pending_filename_retry_and_latest_content() {
     app.open_task_context(list, manual[0], false);
     app.task_context.as_mut().unwrap().text = "Latest context\nfrom a candidate write".into();
     assert!(app.save_task_context());
-    assert!(app.persistence.pending_filenames.contains(&list));
-    assert!(app.persistence.dirty_lists.contains(&list));
+    assert!(!app.persistence.pending_filenames.contains(&list));
+    assert!(!app.persistence.dirty_lists.contains(&list));
     assert_eq!(app.lists[0].path, original);
     assert_eq!(
         fs::read_to_string(&destination).unwrap(),
@@ -178,7 +181,8 @@ fn context_candidate_save_keeps_a_pending_filename_retry_and_latest_content() {
         saved.lists[0].data.tasks[0].context,
         "Latest context\nfrom a candidate write"
     );
-    assert!(!original.exists());
+    assert!(original.exists());
+    assert!(app.finish_pending_changes());
     assert_eq!(
         app.fingerprint,
         storage::workspace_fingerprint(&root).unwrap()

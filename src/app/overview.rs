@@ -488,17 +488,16 @@ impl MinimalistApp {
         match storage::create_list(&self.workspace, title, self.new_list_accent) {
             Ok(list) => {
                 let id = list.key;
-                let path = list.path.clone();
+                if let Err(error) =
+                    storage::update_fingerprint_for_file(&mut self.fingerprint, &list)
+                {
+                    self.status = Some(error);
+                }
                 self.lists.push(list);
                 storage::sort_lists(&mut self.lists);
                 self.apply_list_order();
                 self.new_list_title.clear();
                 self.creating_list = false;
-                if let Err(error) =
-                    storage::update_fingerprint_for_file(&mut self.fingerprint, &path)
-                {
-                    self.status = Some(error);
-                }
                 self.open_list(id);
             }
             Err(error) => self.status = Some(error),

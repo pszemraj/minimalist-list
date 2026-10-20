@@ -80,6 +80,7 @@ fn stored_list(title: &str) -> StoredList {
         key: data.id,
         path: PathBuf::from(format!("{title}.json")),
         data,
+        stamp: Default::default(),
     }
 }
 

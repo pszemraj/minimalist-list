@@ -21,10 +21,10 @@ pub(super) struct ShortcutsState {
 
 /// Holds the draft and destination selected in the quick-capture overlay.
 pub(super) struct QuickCaptureState {
-    text: String,
-    selected_list_id: Option<Uuid>,
+    pub(super) text: String,
+    pub(super) selected_list_id: Option<Uuid>,
     request_focus: bool,
-    failure: Option<String>,
+    pub(super) failure: Option<String>,
 }
 
 /// Holds the current global-search query and keyboard selection.
@@ -322,6 +322,7 @@ impl MinimalistApp {
         }
 
         let mut submit = false;
+        let mut recover = false;
         if state.request_focus {
             ctx.memory_mut(|memory| memory.request_focus(Id::new("quick-capture-text")));
         }
@@ -348,6 +349,13 @@ impl MinimalistApp {
                         state.request_focus = false;
                     }
 
+                    if state.failure.is_some()
+                        && state
+                            .selected_list_id
+                            .is_some_and(|id| self.has_save_conflict(id))
+                    {
+                        recover = ui.button("Keep local copy and reload").clicked();
+                    }
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
                         ui.label(self.rich("List", 13.0, palette.muted));
@@ -468,6 +476,7 @@ impl MinimalistApp {
                         return;
                     }
                     Err(error) => {
+                        self.record_save_conflict(&candidate);
                         self.status = Some(error.clone());
                         state.failure = Some(error);
                     }
@@ -475,9 +484,20 @@ impl MinimalistApp {
             }
         }
 
-        if !modal.should_close() {
+        if recover {
+            let list = state.selected_list_id;
+            self.quick_capture = Some(state);
+            if let Some(id) = list {
+                self.keep_local_copy_and_reload(id);
+            }
+        } else if !modal.should_close() {
             self.quick_capture = Some(state);
         } else {
+            if let Some(list) = state.selected_list_id
+                && !self.persistence.dirty_lists.contains(&list)
+            {
+                self.forget_save_conflict(list);
+            }
             self.restore_overlay_focus();
         }
     }

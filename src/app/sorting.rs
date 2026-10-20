@@ -69,14 +69,31 @@ impl MinimalistApp {
         &mut self,
         retained_paths: &[std::path::PathBuf],
     ) {
+        self.prune_list_preferences();
+        self.manual_task_order
+            .retain(|id, _| self.lists.iter().any(|list| list.key == *id));
         for list in &self.lists {
             if retained_paths.contains(&list.path) {
                 continue;
             }
-            self.settings.manual_task_order.insert(
-                self.task_order_key(list.key),
+            self.manual_task_order.insert(
+                list.key,
                 list.data.tasks.iter().map(|task| task.id).collect(),
             );
+        }
+    }
+
+    /// Removes preferences for lists no longer present in the current workspace.
+    pub(super) fn prune_list_preferences(&mut self) {
+        let workspace = self.workspace.to_string_lossy();
+        let prefix = format!("{workspace}::");
+        let live: HashSet<_> = self.lists.iter().map(|list| list.key).collect();
+        self.settings.task_sort.retain(|key, _| {
+            key.strip_prefix(&prefix)
+                .is_none_or(|id| id.parse::<Uuid>().is_ok_and(|id| live.contains(&id)))
+        });
+        if let Some(order) = self.settings.list_order.get_mut(workspace.as_ref()) {
+            order.retain(|id| live.contains(id));
         }
     }
 
@@ -87,11 +104,9 @@ impl MinimalistApp {
     pub(super) fn apply_task_sorts(&mut self) {
         for index in 0..self.lists.len() {
             let list = self.lists[index].key;
-            let key = self.task_order_key(list);
             let previous = self
-                .settings
                 .manual_task_order
-                .get(&key)
+                .get(&list)
                 .cloned()
                 .unwrap_or_else(|| {
                     self.lists[index]
@@ -105,7 +120,7 @@ impl MinimalistApp {
             let mode = self.task_sort_mode(list);
             apply_order(&mut self.lists[index].data.tasks, &manual, TaskSort::Manual);
             apply_order(&mut self.lists[index].data.tasks, &manual, mode);
-            self.settings.manual_task_order.insert(key, manual);
+            self.manual_task_order.insert(list, manual);
         }
     }
 
@@ -114,25 +129,19 @@ impl MinimalistApp {
     /// # Arguments
     /// - `candidate` - Whole-list candidate, including its latest task mutations.
     pub(super) fn prepare_list_for_save(&mut self, candidate: &mut StoredList) {
-        let key = self.task_order_key(candidate.key);
         let mode = self.task_sort_mode(candidate.key);
         let manual = if mode == TaskSort::Manual {
             candidate.data.tasks.iter().map(|task| task.id).collect()
         } else {
             let previous = self
-                .settings
                 .manual_task_order
-                .get(&key)
+                .get(&candidate.key)
                 .cloned()
                 .unwrap_or_default();
             reconcile_order(&previous, &candidate.data.tasks)
         };
-        let changed = self.settings.manual_task_order.get(&key) != Some(&manual);
-        self.settings.manual_task_order.insert(key, manual.clone());
+        self.manual_task_order.insert(candidate.key, manual.clone());
         apply_order(&mut candidate.data.tasks, &manual, TaskSort::Manual);
-        if changed {
-            self.save_settings();
-        }
     }
 
     /// Clones the loaded list and prepares its tasks for a Manual-order disk write.
@@ -164,10 +173,7 @@ impl MinimalistApp {
     /// Panics if an internally resolved list index becomes invalid.
     pub(super) fn manual_task_position(&self, list: Uuid, task: Uuid) -> Option<usize> {
         if self.task_sort_mode(list) != TaskSort::Manual
-            && let Some(order) = self
-                .settings
-                .manual_task_order
-                .get(&self.task_order_key(list))
+            && let Some(order) = self.manual_task_order.get(&list)
             && let Some(position) = order.iter().position(|id| *id == task)
         {
             return Some(position);
@@ -191,7 +197,6 @@ impl MinimalistApp {
     /// # Panics
     /// Panics if an internally resolved list index becomes invalid.
     pub(super) fn restore_manual_task_position(&mut self, list: Uuid, task: Uuid, position: usize) {
-        let key = self.task_order_key(list);
         let fallback = self
             .list_index(list)
             .map(|index| {
@@ -203,14 +208,9 @@ impl MinimalistApp {
                     .collect()
             })
             .unwrap_or_default();
-        let order = self
-            .settings
-            .manual_task_order
-            .entry(key)
-            .or_insert(fallback);
+        let order = self.manual_task_order.entry(list).or_insert(fallback);
         order.retain(|id| *id != task);
         order.insert(position.min(order.len()), task);
-        self.save_settings();
     }
 
     /// Renders the task view mode selector, including restoration of Manual order.
@@ -258,9 +258,7 @@ impl MinimalistApp {
         let old_mode = self.task_sort_mode(list);
         let key = self.task_order_key(list);
         if old_mode == TaskSort::Manual {
-            self.settings
-                .manual_task_order
-                .insert(key.clone(), previous.clone());
+            self.manual_task_order.insert(list, previous.clone());
         }
         self.settings.task_sort.insert(key, order);
         self.apply_task_sorts();

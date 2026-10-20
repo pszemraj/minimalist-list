@@ -1,19 +1,24 @@
 //! Save results, retryable in-memory edits, and visible persistence status.
 
 use super::{MinimalistApp, theme::Palette};
-use crate::storage::{self, Settings};
+use crate::storage::{self, Settings, StoredList};
 use eframe::egui::{self, Button, Color32, CornerRadius, Frame, Margin};
-use std::{collections::HashSet, time::Instant};
+use std::{
+    collections::{HashMap, HashSet},
+    time::Instant,
+};
 use uuid::Uuid;
 
 /// Tracks retryable saves and the last local preference snapshot.
 pub(super) struct PersistenceState {
     pub(super) dirty_lists: HashSet<Uuid>,
+    conflicted_candidates: HashMap<Uuid, StoredList>,
     pub(super) pending_filenames: HashSet<Uuid>,
     pub(super) workspace_failure: Option<String>,
     baseline: Settings,
     last_retry_error: Option<String>,
     pub(super) settings_dirty: bool,
+    settings_save_after: Option<Instant>,
     pub(super) notice: Option<(String, Instant)>,
 }
 
@@ -33,11 +38,13 @@ impl PersistenceState {
     pub(super) fn new(baseline: Settings, workspace_failure: Option<String>) -> Self {
         Self {
             dirty_lists: HashSet::new(),
+            conflicted_candidates: HashMap::new(),
             pending_filenames: HashSet::new(),
             workspace_failure,
             baseline,
             last_retry_error: None,
             settings_dirty: false,
+            settings_save_after: None,
             notice: None,
         }
     }
@@ -49,8 +56,27 @@ impl MinimalistApp {
         self.persistence.notice = Some((message, Instant::now()));
     }
 
+    /// Coalesces continuous appearance edits into one preference write after a pause.
+    pub(super) fn schedule_settings_save(&mut self, ctx: &egui::Context) {
+        let delay = std::time::Duration::from_millis(250);
+        self.persistence.settings_save_after = Some(Instant::now() + delay);
+        ctx.request_repaint_after(delay);
+    }
+
+    /// Flushes a scheduled preference update once its quiet period has elapsed.
+    pub(super) fn flush_deferred_settings(&mut self, ctx: &egui::Context) {
+        if let Some(deadline) = self.persistence.settings_save_after {
+            if Instant::now() >= deadline {
+                self.save_settings();
+            } else {
+                ctx.request_repaint_after(deadline.saturating_duration_since(Instant::now()));
+            }
+        }
+    }
+
     /// Saves locally changed preferences without replacing newer unrelated values.
     pub(super) fn save_settings(&mut self) {
+        self.persistence.settings_save_after = None;
         let mut desired = self.settings.clone();
         desired
             .workspace_path
@@ -77,7 +103,7 @@ impl MinimalistApp {
     /// Saves one list and retains failed content for explicit retry.
     ///
     /// # Returns
-    /// Whether the list contents and any explicitly requested filename update reached disk.
+    /// Whether the list contents reached disk; filename-only failures remain warnings.
     ///
     /// # Panics
     /// Panics if the caller supplies an invalid loaded-list index.
@@ -85,8 +111,12 @@ impl MinimalistApp {
         let list = self.list_for_save(index);
         let id = list.key;
         let saved = match storage::save_list(&list) {
-            Ok(()) => self.complete_list_save(index),
+            Ok(()) => {
+                self.lists[index].stamp.set(list.stamp.get());
+                self.complete_list_save(index)
+            }
             Err(error) => {
+                self.record_save_conflict(&list);
                 self.persistence.dirty_lists.insert(id);
                 let error = format!("Changes are unsaved: {error}");
                 self.persistence.last_retry_error = Some(error.clone());
@@ -104,13 +134,14 @@ impl MinimalistApp {
     /// - `index` - Loaded list whose associated file has just been saved.
     ///
     /// # Returns
-    /// Whether the content and its pending filename update are both saved.
+    /// Whether the content is saved, even if its descriptive filename could not be updated.
     ///
     /// # Panics
     /// Panics if the caller supplies an invalid loaded-list index.
     pub(super) fn complete_list_save(&mut self, index: usize) -> bool {
         let id = self.lists[index].key;
-        let mut saved = true;
+        self.persistence.dirty_lists.remove(&id);
+        self.persistence.conflicted_candidates.remove(&id);
         if self.persistence.pending_filenames.contains(&id) {
             let previous = self.lists[index].path.clone();
             match storage::rename_list_file(&mut self.lists[index]) {
@@ -121,25 +152,20 @@ impl MinimalistApp {
                     }
                 }
                 Err(error) => {
-                    saved = false;
-                    self.persistence.dirty_lists.insert(id);
+                    self.persistence.pending_filenames.remove(&id);
                     let error = format!(
-                        "List name saved; its filename update is pending. Retry save: {error}"
+                        "List saved at its previous filename. Rename it again to retry the filename update: {error}"
                     );
-                    self.persistence.last_retry_error = Some(error.clone());
                     self.status = Some(error);
                 }
             }
         }
         if let Err(error) =
-            storage::update_fingerprint_for_file(&mut self.fingerprint, &self.lists[index].path)
+            storage::update_fingerprint_for_file(&mut self.fingerprint, &self.lists[index])
         {
             self.status = Some(error);
         }
-        if saved {
-            self.persistence.dirty_lists.remove(&id);
-        }
-        saved
+        true
     }
 
     /// Retries retained list and preference writes before leaving the workspace.
@@ -163,7 +189,7 @@ impl MinimalistApp {
                 self.save_list_index(index);
             }
         }
-        if self.persistence.settings_dirty {
+        if self.persistence.settings_dirty || self.persistence.settings_save_after.is_some() {
             self.save_settings();
         }
         let saved = self.persistence.dirty_lists.is_empty()
@@ -225,16 +251,31 @@ impl MinimalistApp {
             .corner_radius(CornerRadius::same(10))
             .inner_margin(Margin::same(8))
             .show(ui, |ui| {
-                egui::ScrollArea::vertical()
-                    .id_salt("status-message")
-                    .max_height(54.0)
-                    .show(ui, |ui| {
-                        ui.add(egui::Label::new(self.rich(message, 13.0, palette.text)).wrap());
-                    });
+                if failed_workspace.is_some() {
+                    ui.add(egui::Label::new(self.rich(message, 13.0, palette.text)).wrap());
+                } else {
+                    egui::ScrollArea::vertical()
+                        .id_salt("status-message")
+                        .max_height(54.0)
+                        .show(ui, |ui| {
+                            ui.add(egui::Label::new(self.rich(message, 13.0, palette.text)).wrap());
+                        });
+                }
                 if !success_only {
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         if dirty && ui.button("Retry save").clicked() {
                             self.retry_dirty_lists();
+                        }
+                        let conflict = self
+                            .persistence
+                            .conflicted_candidates
+                            .keys()
+                            .copied()
+                            .find(|id| self.persistence.dirty_lists.contains(id));
+                        if let Some(id) = conflict
+                            && ui.button("Keep local copy and reload").clicked()
+                        {
+                            self.keep_local_copy_and_reload(id);
                         }
                         if failed_workspace.is_some() && ui.button("Retry workspace").clicked() {
                             self.retry_workspace();
@@ -255,3 +296,10 @@ impl MinimalistApp {
             });
     }
 }
+
+#[cfg(test)]
+#[path = "persistence_ui_tests.rs"]
+mod ui_tests;
+
+#[path = "save_conflict.rs"]
+mod save_conflict;

@@ -161,6 +161,10 @@ impl MinimalistApp {
                                 self.cancel_subtask_edit();
                             } else if submit || response.lost_focus() {
                                 self.finish_subtask_edit();
+                                if submit {
+                                    self.keyboard.pending =
+                                        Some(FocusItem::Subtask(list, task, subtask.id).id());
+                                }
                             }
                         } else {
                             let color = if subtask.completed {

@@ -78,6 +78,7 @@ fn failed_context_save_retains_exact_draft_and_retry_saves_once() {
     assert!(app.task_context.as_ref().unwrap().failure.is_some());
     assert!(app.lists[0].data.tasks[0].context.is_empty());
     fs::remove_dir(&original).unwrap();
+    fs::rename(original.with_extension("backup"), &original).unwrap();
     assert!(app.save_task_context());
     assert!(app.task_context.is_none());
     let saved: crate::model::TodoList =
@@ -899,6 +900,7 @@ fn failed_context_save_blocks_workspace_switch_and_native_close_until_retry() {
         "Recover after native close attempt"
     );
     fs::remove_dir(&original_path).unwrap();
+    fs::rename(original_path.with_extension("backup"), &original_path).unwrap();
     assert!(app.finish_pending_changes());
     let saved: crate::model::TodoList =
         serde_json::from_slice(&fs::read(original_path).unwrap()).unwrap();

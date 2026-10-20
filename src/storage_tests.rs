@@ -338,6 +338,7 @@ fn sort_lists_orders_by_creation_then_identity() {
             key,
             path: PathBuf::new(),
             data,
+            stamp: Default::default(),
         }
     };
     let first_id = Uuid::from_u128(1);
@@ -403,7 +404,7 @@ fn updating_one_file_keeps_other_changes_detectable() {
     save_list(&second).expect("save external change");
     first.data.title = "First changed locally".to_owned();
     save_list(&first).expect("save local change");
-    update_fingerprint_for_file(&mut known, &first.path).expect("record local write");
+    update_fingerprint_for_file(&mut known, &first).expect("record local write");
 
     let current = workspace_fingerprint(&root).expect("fingerprint current workspace");
     let second_name = second
@@ -426,6 +427,7 @@ fn canonical_file_wins_over_sync_conflict_copy() {
         .join(format!("{} (conflicted copy).json", canonical.key));
     let mut conflict = canonical.clone();
     conflict.path = conflict_path;
+    conflict.stamp.set(None);
     conflict.data.title = "Conflict".to_owned();
     save_list(&conflict).expect("write conflict copy");
 

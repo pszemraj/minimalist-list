@@ -284,6 +284,12 @@ fn held_row_actions_wait_for_release_before_acting_again() {
                 ),
             )
             .unwrap();
+        // The aged timestamp is our observed fixture baseline, not a synced edit.
+        app.lists[0].stamp.set(
+            storage::load_workspace(&app.workspace).unwrap().lists[0]
+                .stamp
+                .get(),
+        );
         let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
         let saved = std::fs::read(&path).unwrap();
         for _ in 0..5 {

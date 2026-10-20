@@ -391,6 +391,12 @@ fn task_commands_edit_complete_reorder_delete_and_keep_identity() {
                 ),
             )
             .unwrap();
+        // The aged timestamp is our observed fixture baseline, not a synced edit.
+        app.lists[0].stamp.set(
+            storage::load_workspace(&app.workspace).unwrap().lists[0]
+                .stamp
+                .get(),
+        );
         let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
         frame(
             &ctx,
@@ -938,3 +944,6 @@ mod reference;
 
 #[path = "keyboard_navigation_tests.rs"]
 mod navigation;
+
+#[path = "keyboard_input_regressions.rs"]
+mod input_regressions;
