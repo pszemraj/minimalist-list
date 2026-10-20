@@ -262,3 +262,54 @@ fn task_entry_uses_its_frame_glow_without_an_inner_focus_ring() {
     }
     cleanup(&app);
 }
+
+#[test]
+fn clicking_retry_workspace_returns_typing_to_the_task_entry() {
+    let (ctx, mut app) = test_app();
+    let list = app.lists[0].key;
+    idle(&ctx, &mut app);
+    let lists = app.workspace.join("lists");
+    let offline = app.workspace.join("lists-offline");
+    std::fs::rename(&lists, &offline).unwrap();
+    app.next_scan = std::time::Instant::now();
+    app.scan_external_changes();
+    assert!(app.persistence.workspace_failure.is_some());
+    let output = frame(&ctx, &mut app, Vec::new(), 430.0);
+    let retry = output
+        .shapes
+        .iter()
+        .find_map(|shape| match &shape.shape {
+            egui::epaint::Shape::Text(text) if text.galley.text() == "Retry workspace" => {
+                Some(egui::Rect::from_min_size(text.pos, text.galley.size()).center())
+            }
+            _ => None,
+        })
+        .expect("recovery offers Retry workspace");
+    std::fs::rename(&offline, &lists).unwrap();
+    for pressed in [true, false] {
+        frame(
+            &ctx,
+            &mut app,
+            vec![
+                Event::PointerMoved(retry),
+                Event::PointerButton {
+                    pos: retry,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: Modifiers::NONE,
+                },
+            ],
+            430.0,
+        );
+    }
+    idle(&ctx, &mut app);
+    assert!(app.persistence.workspace_failure.is_none());
+    assert!(matches!(app.screen, Screen::List(id) if id == list));
+    assert_eq!(
+        ctx.memory(|m| m.focused()),
+        Some(Id::new(("new-task", list)))
+    );
+    type_text(&ctx, &mut app, "Typed after recovery");
+    assert_eq!(app.new_task, "Typed after recovery");
+    cleanup(&app);
+}

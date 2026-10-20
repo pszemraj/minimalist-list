@@ -833,12 +833,15 @@ impl eframe::App for MinimalistApp {
             (1.0 - eased) * 10.0,
         );
         let mut content_rect = viewport.shrink(margin).translate(offset);
+        // A banner retry shows the reopened workspace next pass, like other navigation;
+        // rendering it under that click would make egui surrender the entry's new focus.
+        let workspace_available = self.persistence.workspace_failure.is_none();
         if self.status.is_some()
             || self.persistence.notice.is_some()
             || self.persistence.settings_dirty
             || !self.persistence.dirty_lists.is_empty()
             || !self.persistence.pending_filenames.is_empty()
-            || self.persistence.workspace_failure.is_some()
+            || !workspace_available
         {
             let mut status_ui = ui.new_child(
                 egui::UiBuilder::new()
@@ -865,7 +868,7 @@ impl eframe::App for MinimalistApp {
             content_ui.disable();
         }
         let screen = self.screen.clone();
-        if self.persistence.workspace_failure.is_none() || matches!(screen, Screen::Settings) {
+        if workspace_available || matches!(screen, Screen::Settings) {
             match screen {
                 Screen::Overview => self.overview_ui(&mut content_ui, palette),
                 Screen::List(id) => self.list_ui(&mut content_ui, id, palette),
