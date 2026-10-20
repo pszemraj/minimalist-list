@@ -183,11 +183,15 @@ impl MinimalistApp {
             settings.workspace_path.clone_from(path);
         }
         let mut status = startup_warning;
+        let mut initialize = false;
         let workspace = match storage::resolve_launch_workspace(
             &settings.workspace_path,
             workspace_override.is_some(),
         ) {
-            Ok(path) => path,
+            Ok((path, create)) => {
+                initialize = create;
+                path
+            }
             Err(error) => {
                 status = Some(format!(
                     "Workspace {} unavailable: {error}",
@@ -204,7 +208,13 @@ impl MinimalistApp {
         let (lists, fingerprint) = if workspace_failure.is_some() {
             (Vec::new(), WorkspaceFingerprint::default())
         } else {
-            match storage::load_workspace(&workspace) {
+            // Only a folder this launch may create can start with a default list.
+            let loaded = if initialize {
+                storage::load_workspace(&workspace)
+            } else {
+                storage::load_existing_workspace(&workspace)
+            };
+            match loaded {
                 Ok(snapshot) => {
                     if !snapshot.warnings.is_empty() {
                         status = Some(snapshot.warnings.join("\n"));
@@ -565,12 +575,7 @@ impl MinimalistApp {
         if current == self.fingerprint {
             return;
         }
-        if let Err(error) = storage::require_list_files(&self.workspace) {
-            self.mark_workspace_unavailable(error);
-            return;
-        }
-
-        match storage::load_workspace(&self.workspace) {
+        match storage::load_existing_workspace(&self.workspace) {
             Ok(snapshot) => {
                 let focus_neighbors = self.focus_neighbors();
                 let mut lists = snapshot.lists;
@@ -684,7 +689,12 @@ impl MinimalistApp {
         } else {
             None
         };
-        match storage::load_workspace(&path) {
+        let loaded = if explicit {
+            storage::load_workspace(&path)
+        } else {
+            storage::load_existing_workspace(&path)
+        };
+        match loaded {
             Ok(snapshot) => {
                 if let Some(next) = next_instance {
                     if let Some(previous) = &self.instance {

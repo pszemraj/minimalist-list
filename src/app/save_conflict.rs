@@ -110,7 +110,7 @@ impl MinimalistApp {
             candidate.data.title = self.rename_input.trim().to_owned();
         }
         self.prepare_list_for_save(&mut candidate);
-        let result = storage::load_workspace(&self.workspace).and_then(|snapshot| {
+        let result = storage::load_existing_workspace(&self.workspace).and_then(|snapshot| {
             storage::create_local_copy(&self.workspace, &candidate).map(|copy| (snapshot, copy))
         });
         let (snapshot, copy) = match result {

@@ -516,3 +516,25 @@ fn replacing_a_list_keeps_it_readable_to_other_instances() {
     assert_eq!(missing, 0, "list disappeared during replacement");
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn existing_workspace_loads_never_create_a_folder_or_default_list() {
+    let root = env::temp_dir().join(format!("minimalist-existing-{}", Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    assert!(load_existing_workspace(&root).is_err());
+    assert!(!root.join("lists").exists());
+    fs::create_dir(root.join("lists")).unwrap();
+    assert!(
+        load_existing_workspace(&root)
+            .err()
+            .unwrap()
+            .contains("has no list files")
+    );
+    assert_eq!(fs::read_dir(root.join("lists")).unwrap().count(), 0);
+    let list = create_list(&root, "Synced", Accent::Sky).unwrap();
+    assert_eq!(
+        load_existing_workspace(&root).unwrap().lists[0].key,
+        list.key
+    );
+    fs::remove_dir_all(root).unwrap();
+}

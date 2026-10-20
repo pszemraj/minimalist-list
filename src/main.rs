@@ -108,6 +108,7 @@ fn claim_launch_instance(
 ) -> Result<instance::LaunchOutcome, String> {
     // Keep failed requests separate so they can display their recovery window.
     let workspace = storage::resolve_launch_workspace(requested_workspace, explicit)
+        .map(|(path, _)| path)
         .unwrap_or_else(|_| requested_workspace.into());
     instance::claim(&workspace, state_dir, start_hidden)
 }
