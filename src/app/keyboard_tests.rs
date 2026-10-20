@@ -1,7 +1,7 @@
 //! Headless keyboard journeys using real egui widgets and persisted task files.
 
 use super::*;
-use crate::app::tests::test_app;
+use crate::app::tests::{chord, test_app};
 use crate::model::{Accent, ArchivedTask, Task};
 use crate::storage;
 
@@ -11,23 +11,13 @@ fn frame(
     events: Vec<Event>,
     width: f32,
 ) -> egui::FullOutput {
-    let input = egui::RawInput {
-        time: Some(ctx.input(|input| input.time) + 0.3),
-        screen_rect: Some(egui::Rect::from_min_size(
-            egui::Pos2::ZERO,
-            egui::vec2(width, 500.0),
-        )),
+    let input = crate::app::tests::frame_input(
+        egui::vec2(width, 500.0),
+        ctx.input(|input| input.time) + 0.3,
         events,
-        ..Default::default()
-    };
+    );
     app.update_motion(ctx);
-    let mut output = ctx.run_ui(input, |ui| {
-        // eframe provides this hidden constructor for headless App tests.
-        // Review its compatibility when upgrading the locked eframe version.
-        <MinimalistApp as eframe::App>::ui(app, ui, &mut eframe::Frame::_new_kittest());
-    });
-    output.textures_delta.clear();
-    output
+    crate::app::tests::run_app_frame(ctx, app, input)
 }
 
 fn idle(ctx: &egui::Context, app: &mut MinimalistApp) {
@@ -37,17 +27,7 @@ fn idle(ctx: &egui::Context, app: &mut MinimalistApp) {
 }
 
 fn key(ctx: &egui::Context, app: &mut MinimalistApp, key: Key, modifiers: Modifiers) {
-    let events = [true, false]
-        .into_iter()
-        .map(|pressed| Event::Key {
-            key,
-            physical_key: None,
-            pressed,
-            repeat: false,
-            modifiers,
-        })
-        .collect();
-    frame(ctx, app, events, 430.0);
+    frame(ctx, app, chord(key, modifiers), 430.0);
     idle(ctx, app);
 }
 
@@ -266,7 +246,7 @@ fn immediate_arrows_override_entry_and_return_focus_requests() {
 }
 
 #[test]
-fn settings_round_trip_preserves_destination_and_rename_for_ctrl_and_cmd() {
+fn settings_shortcut_opens_global_preferences_and_preserves_destination_for_ctrl_and_cmd() {
     for comma_modifiers in [
         Modifiers {
             ctrl: true,
@@ -291,14 +271,17 @@ fn settings_round_trip_preserves_destination_and_rename_for_ctrl_and_cmd() {
         key(&ctx, &mut app, Key::Comma, comma_modifiers);
         key(&ctx, &mut app, Key::Comma, comma_modifiers);
         assert!(matches!(app.screen, Screen::Settings));
-        app.rename_input = "Renamed".into();
+        assert!(app.settings_list_id.is_none());
+        assert!(
+            ctx.read_response(Id::new(("settings-list-name", list)))
+                .is_none()
+        );
         key(&ctx, &mut app, Key::Escape, Modifiers::NONE);
         assert!(matches!(app.screen, Screen::List(id) if id == list));
         assert_eq!(
             ctx.memory(|m| m.focused()),
             Some(Id::new(("new-task", list)))
         );
-        assert_eq!(app.lists[0].data.title, "Renamed");
         key(
             &ctx,
             &mut app,
@@ -400,6 +383,12 @@ fn task_commands_edit_complete_reorder_delete_and_keep_identity() {
                 ),
             )
             .unwrap();
+        // The aged timestamp is our observed fixture baseline, not a synced edit.
+        app.lists[0].stamp.set(
+            storage::load_workspace(&app.workspace).unwrap().lists[0]
+                .stamp
+                .get(),
+        );
         let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
         frame(
             &ctx,
@@ -947,3 +936,6 @@ mod reference;
 
 #[path = "keyboard_navigation_tests.rs"]
 mod navigation;
+
+#[path = "keyboard_input_regressions.rs"]
+mod input_regressions;

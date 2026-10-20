@@ -3,6 +3,35 @@
 use super::*;
 
 #[test]
+fn settings_mode_switches_are_keyboard_navigable_sections() {
+    for list_options in [false, true] {
+        let (ctx, mut app) = test_app();
+        let list = app.lists[0].key;
+        app.open_settings(list_options.then_some(list));
+        idle(&ctx, &mut app);
+        let switch = app.keyboard.settings_rows[0][0];
+        let next = app.keyboard.settings_rows[1][0];
+        focus(&ctx, &mut app, switch);
+        for action in [Key::ArrowUp, Key::PageUp] {
+            key(&ctx, &mut app, action, Modifiers::NONE);
+            assert_eq!(ctx.memory(|memory| memory.focused()), Some(switch));
+        }
+        key(&ctx, &mut app, Key::ArrowDown, Modifiers::NONE);
+        assert_eq!(ctx.memory(|memory| memory.focused()), Some(next));
+        key(&ctx, &mut app, Key::ArrowUp, Modifiers::NONE);
+        assert_eq!(ctx.memory(|memory| memory.focused()), Some(switch));
+        key(&ctx, &mut app, Key::PageDown, Modifiers::NONE);
+        assert_eq!(ctx.memory(|memory| memory.focused()), Some(next));
+        key(&ctx, &mut app, Key::PageUp, Modifiers::NONE);
+        assert_eq!(ctx.memory(|memory| memory.focused()), Some(switch));
+        assert_eq!(app.settings_list_id, list_options.then_some(list));
+        key(&ctx, &mut app, Key::Enter, Modifiers::NONE);
+        assert_eq!(app.settings_list_id, (!list_options).then_some(list));
+        cleanup(&app);
+    }
+}
+
+#[test]
 fn opening_settings_preserves_fractional_preferences_until_a_slider_is_edited() {
     let (ctx, mut app) = test_app();
     app.settings.font_size = 19.4;
@@ -23,7 +52,12 @@ fn opening_settings_preserves_fractional_preferences_until_a_slider_is_edited() 
     key(&ctx, &mut app, Key::ArrowDown, Modifiers::NONE);
     key(&ctx, &mut app, Key::ArrowRight, Modifiers::NONE);
     assert_eq!(app.settings.font_size, 20.0);
-    assert_eq!(storage::load_settings().unwrap().font_size, 20.0);
+    assert_eq!(storage::load_settings().unwrap().font_size, 19.4);
+    assert!(app.finish_pending_changes());
+    let saved = storage::load_settings().unwrap();
+    assert_eq!(saved.font_size, 20.0);
+    assert_eq!(saved.row_padding, 7.4);
+    assert_eq!(saved.background_opacity, 0.83);
     cleanup(&app);
 }
 
@@ -37,7 +71,7 @@ fn task_secondary_controls_navigate_to_primary_rows_without_activating_them() {
         app.lists[0].data.tasks = vec![first.clone(), second.clone()];
         focus(&ctx, &mut app, FocusItem::Task(list, first.id).id());
         if delete_control {
-            tab_to_label(&ctx, &mut app, "x");
+            tab_to_label(&ctx, &mut app, "×");
         } else {
             key(&ctx, &mut app, Key::Tab, Modifiers::NONE);
         }
@@ -285,7 +319,6 @@ fn backspace_returns_from_empty_entry_and_task_rows_to_their_overview_card() {
 #[test]
 fn settings_arrows_move_rows_and_page_keys_jump_sections() {
     let (ctx, mut app) = test_app();
-    let list = app.lists[0].key;
     key(&ctx, &mut app, Key::Comma, Modifiers::COMMAND);
     key(&ctx, &mut app, Key::ArrowDown, Modifiers::NONE);
     assert!(!ctx.text_edit_focused());
@@ -299,16 +332,19 @@ fn settings_arrows_move_rows_and_page_keys_jump_sections() {
     assert!(storage::load_settings().unwrap().always_on_top);
     key(&ctx, &mut app, Key::PageDown, Modifiers::NONE);
     assert!(!ctx.text_edit_focused());
+    let appearance = ctx.memory(|m| m.focused());
     key(&ctx, &mut app, Key::PageDown, Modifiers::NONE);
     assert_eq!(
         ctx.memory(|m| m.focused()),
-        Some(Id::new(("settings-list-name", list)))
+        Some(Id::new("settings-global-shortcut"))
     );
-    let response = ctx
-        .read_response(Id::new(("settings-list-name", list)))
-        .unwrap();
-    assert!(response.interact_rect.is_positive());
+    key(&ctx, &mut app, Key::PageDown, Modifiers::NONE);
+    assert_eq!(
+        ctx.memory(|m| m.focused()),
+        Some(Id::new("settings-global-shortcut"))
+    );
     key(&ctx, &mut app, Key::PageUp, Modifiers::NONE);
+    assert_eq!(ctx.memory(|m| m.focused()), appearance);
     key(&ctx, &mut app, Key::PageUp, Modifiers::NONE);
     assert_eq!(ctx.memory(|m| m.focused()), pin);
     key(&ctx, &mut app, Key::PageUp, Modifiers::NONE);
@@ -397,7 +433,9 @@ fn settings_horizontal_arrows_edit_text_and_adjust_sliders() {
     let opacity = app.settings.background_opacity;
     key(&ctx, &mut app, Key::ArrowLeft, Modifiers::NONE);
     assert!((app.settings.background_opacity - (opacity - 0.01)).abs() < 0.001);
-    key(&ctx, &mut app, Key::PageDown, Modifiers::NONE);
+    app.close_settings();
+    app.open_settings(Some(list));
+    idle(&ctx, &mut app);
     key(&ctx, &mut app, Key::A, Modifiers::COMMAND);
     type_text(&ctx, &mut app, "abcd");
     key(&ctx, &mut app, Key::Home, Modifiers::NONE);

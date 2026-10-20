@@ -6,6 +6,16 @@
 )]
 
 mod app;
+mod hotkey;
+mod instance;
+#[cfg(target_os = "linux")]
+mod linux;
+#[cfg(any(target_os = "linux", test))]
+mod linux_cursor;
+#[cfg(any(target_os = "linux", test))]
+mod linux_taskbar;
+#[cfg(target_os = "macos")]
+mod macos;
 mod model;
 mod storage;
 mod tray;
@@ -90,6 +100,19 @@ fn select_workspace_override(
     })
 }
 
+fn claim_launch_instance(
+    requested_workspace: &str,
+    explicit: bool,
+    state_dir: &std::path::Path,
+    start_hidden: bool,
+) -> Result<instance::LaunchOutcome, String> {
+    // Keep failed requests separate so they can display their recovery window.
+    let workspace = storage::resolve_launch_workspace(requested_workspace, explicit)
+        .map(|(path, _)| path)
+        .unwrap_or_else(|_| requested_workspace.into());
+    instance::claim(&workspace, state_dir, start_hidden)
+}
+
 fn main() -> eframe::Result {
     let (data_dir, start_hidden) = match parse_launch_args(env::args_os().skip(1)) {
         Ok(LaunchAction::Run {
@@ -116,18 +139,37 @@ fn main() -> eframe::Result {
     let workspace_override =
         select_workspace_override(data_dir, env::var_os("MINIMALIST_LIST_WORKSPACE"));
 
+    let requested_workspace = workspace_override
+        .as_deref()
+        .unwrap_or(&settings.workspace_path);
+    let state_path = storage::window_state_path();
+    let state_dir = state_path
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let instance = match claim_launch_instance(
+        requested_workspace,
+        workspace_override.is_some(),
+        state_dir,
+        start_hidden,
+    ) {
+        Ok(instance::LaunchOutcome::Existing) => return Ok(()),
+        Ok(instance::LaunchOutcome::Primary(instance)) => instance,
+        Err(error) => return Err(eframe::Error::AppCreation(error.into())),
+    };
     let level = if settings.always_on_top {
         WindowLevel::AlwaysOnTop
     } else {
         WindowLevel::Normal
     };
     let options = eframe::NativeOptions {
+        persistence_path: Some(storage::window_state_path()),
         viewport: egui::ViewportBuilder::default()
             .with_app_id("minimalist-list")
-            .with_icon(tray::icon_data())
+            .with_icon(tray::window_icon_data())
             .with_inner_size([520.0, 760.0])
             .with_min_inner_size([320.0, 280.0])
             .with_transparent(true)
+            .with_taskbar(false)
             .with_visible(!start_hidden)
             // A minimized macOS window stays in the Dock after hiding; close hides instead.
             .with_minimize_button(!cfg!(target_os = "macos"))
@@ -162,12 +204,24 @@ fn main() -> eframe::Result {
         }));
         options
     };
-    eframe::run_native(
+    #[cfg(target_os = "linux")]
+    let run_native = linux::run_native;
+    #[cfg(not(target_os = "linux"))]
+    let run_native = eframe::run_native;
+    run_native(
         "Minimalist List",
         options,
         Box::new(move |cc| {
             let mut app = MinimalistApp::new(&cc.egui_ctx, settings, workspace_override, warning);
+            app.set_instance_guard(instance, &cc.egui_ctx);
             app.setup_tray(&cc.egui_ctx, tray_supported);
+            #[cfg(target_os = "windows")]
+            if let Some(window) = cc.winit_window() {
+                tray::set_window_taskbar_icon(window);
+            }
+            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            app.update_taskbar_presence(cc.winit_window().map(AsRef::as_ref));
+            app.setup_global_shortcut(&cc.egui_ctx);
             if start_hidden {
                 app.start_hidden(&cc.egui_ctx);
             }
@@ -179,6 +233,43 @@ fn main() -> eframe::Result {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unavailable_requested_workspace_keeps_its_own_launch_identity() {
+        let root = std::env::temp_dir().join(format!("startup-claim-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let blocked = root.join("requested-workspace");
+        std::fs::write(&blocked, "temporarily unavailable").unwrap();
+        let default_workspace = storage::default_workspace_dir();
+        let instance::LaunchOutcome::Primary(default_owner) =
+            claim_launch_instance(default_workspace.to_str().unwrap(), true, &root, false).unwrap()
+        else {
+            panic!("expected a default workspace owner");
+        };
+
+        let instance::LaunchOutcome::Primary(recovery_owner) =
+            claim_launch_instance(blocked.to_str().unwrap(), true, &root, false).unwrap()
+        else {
+            panic!("the failed request must reach its recovery UI");
+        };
+        assert!(!default_owner.take_show_request());
+        assert!(matches!(
+            claim_launch_instance(blocked.to_str().unwrap(), true, &root, false).unwrap(),
+            instance::LaunchOutcome::Existing
+        ));
+        assert!(recovery_owner.take_show_request());
+        assert!(!default_owner.take_show_request());
+
+        assert!(matches!(
+            claim_launch_instance(default_workspace.to_str().unwrap(), true, &root, false).unwrap(),
+            instance::LaunchOutcome::Existing
+        ));
+        assert!(default_owner.take_show_request());
+        assert!(!recovery_owner.take_show_request());
+        drop(recovery_owner);
+        drop(default_owner);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn parses_data_dir_argument() {

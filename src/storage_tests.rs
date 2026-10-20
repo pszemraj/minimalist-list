@@ -10,6 +10,8 @@ fn old_settings_keep_typography_and_default_new_preferences() {
     assert_eq!(settings.row_padding, 12.0);
     assert_eq!(settings.title_overflow, TitleOverflow::Scroll);
     assert_eq!(settings.background_opacity, 0.85);
+    assert!(settings.list_order.is_empty());
+    assert_eq!(settings.global_shortcut, "CommandOrControl+Alt+Shift+KeyL");
     let mut saved = settings;
     saved.title_overflow = TitleOverflow::Wrap;
     saved.background_opacity = 0.2;
@@ -105,13 +107,11 @@ fn native_paths_reuse_legacy_locations_independently() {
             let (native_data, native_config, legacy_data, legacy_config) = if overrides {
                 let data = case.join("native-data");
                 let config = case.join("native-config");
-                let xdg_data = case.join("xdg-data");
-                let xdg_config = case.join("xdg-config");
+                let xdg_data = home.join(".local/share");
+                let xdg_config = home.join(".config");
                 environment.extend([
                     ("LOCALAPPDATA", data.clone().into_os_string()),
                     ("APPDATA", config.clone().into_os_string()),
-                    ("XDG_DATA_HOME", xdg_data.clone().into_os_string()),
-                    ("XDG_CONFIG_HOME", xdg_config.clone().into_os_string()),
                 ]);
                 match platform {
                     PathPlatform::Windows => (data, config, xdg_data, xdg_config),
@@ -338,6 +338,8 @@ fn sort_lists_orders_by_creation_then_identity() {
             key,
             path: PathBuf::new(),
             data,
+            stamp: Default::default(),
+            source_bytes: Default::default(),
         }
     };
     let first_id = Uuid::from_u128(1);
@@ -403,7 +405,7 @@ fn updating_one_file_keeps_other_changes_detectable() {
     save_list(&second).expect("save external change");
     first.data.title = "First changed locally".to_owned();
     save_list(&first).expect("save local change");
-    update_fingerprint_for_file(&mut known, &first.path).expect("record local write");
+    update_fingerprint_for_file(&mut known, &first).expect("record local write");
 
     let current = workspace_fingerprint(&root).expect("fingerprint current workspace");
     let second_name = second
@@ -426,6 +428,7 @@ fn canonical_file_wins_over_sync_conflict_copy() {
         .join(format!("{} (conflicted copy).json", canonical.key));
     let mut conflict = canonical.clone();
     conflict.path = conflict_path;
+    conflict.stamp.set(None);
     conflict.data.title = "Conflict".to_owned();
     save_list(&conflict).expect("write conflict copy");
 
@@ -511,5 +514,27 @@ fn replacing_a_list_keeps_it_readable_to_other_instances() {
     saved.unwrap();
     assert!(reads > 0);
     assert_eq!(missing, 0, "list disappeared during replacement");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn existing_workspace_loads_never_create_a_folder_or_default_list() {
+    let root = env::temp_dir().join(format!("minimalist-existing-{}", Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    assert!(load_existing_workspace(&root).is_err());
+    assert!(!root.join("lists").exists());
+    fs::create_dir(root.join("lists")).unwrap();
+    assert!(
+        load_existing_workspace(&root)
+            .err()
+            .unwrap()
+            .contains("has no list files")
+    );
+    assert_eq!(fs::read_dir(root.join("lists")).unwrap().count(), 0);
+    let list = create_list(&root, "Synced", Accent::Sky).unwrap();
+    assert_eq!(
+        load_existing_workspace(&root).unwrap().lists[0].key,
+        list.key
+    );
     fs::remove_dir_all(root).unwrap();
 }

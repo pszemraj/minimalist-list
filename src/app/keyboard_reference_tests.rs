@@ -3,6 +3,47 @@
 use super::*;
 
 #[test]
+fn shortcut_reference_displays_configured_and_disabled_global_shortcuts() {
+    for width in [320.0, 520.0] {
+        let (ctx, mut app) = test_app();
+        let default = crate::hotkey::label(&app.settings.global_shortcut);
+        app.open_shortcuts();
+        for (configured, expected) in [
+            (
+                "CommandOrControl+Alt+KeyK",
+                if cfg!(target_os = "macos") {
+                    "Cmd+Option+K"
+                } else {
+                    "Ctrl+Alt+K"
+                },
+            ),
+            ("", "Disabled"),
+        ] {
+            app.settings.global_shortcut = configured.into();
+            for _ in 0..3 {
+                frame(&ctx, &mut app, Vec::new(), width);
+            }
+            let output = frame(&ctx, &mut app, Vec::new(), width);
+            let text: Vec<_> = output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::epaint::Shape::Text(text) => Some(text.galley.text()),
+                    _ => None,
+                })
+                .collect();
+            assert!(text.contains(&"Show window (global)"), "{text:?}");
+            assert!(
+                text.contains(&expected),
+                "Missing {expected} at width {width}"
+            );
+            assert!(!text.contains(&default.as_str()));
+        }
+        cleanup(&app);
+    }
+}
+
+#[test]
 fn held_enter_stays_with_the_layer_that_received_the_first_press() {
     let (ctx, mut app) = test_app();
     idle(&ctx, &mut app);
@@ -296,18 +337,7 @@ fn shortcuts_reference_dismissal_accepts_the_very_next_input() {
     idle(&ctx, &mut app);
     type_text(&ctx, &mut app, "Start");
     key(&ctx, &mut app, Key::Slash, Modifiers::COMMAND);
-    let press = |key| {
-        [true, false]
-            .into_iter()
-            .map(|pressed| Event::Key {
-                key,
-                physical_key: None,
-                pressed,
-                repeat: false,
-                modifiers: Modifiers::NONE,
-            })
-            .collect()
-    };
+    let press = |key| chord(key, Modifiers::NONE);
     frame(&ctx, &mut app, press(Key::Escape), 430.0);
     type_text(&ctx, &mut app, " finish");
     assert_eq!(app.new_task, "Start finish");
@@ -385,13 +415,9 @@ fn reference_uses_shared_bindings_and_native_key_names() {
         ("Quick add", QUICK_ADD),
         ("Find tasks and History", FIND),
         ("New list (Lists, list, Settings)", NEW_LIST),
+        ("Close window", CLOSE_WINDOW),
         ("Back to Lists", BACK_TO_LISTS),
-        (
-            "Back to Lists (empty entry or outside text)",
-            BACKSPACE_TO_LISTS,
-        ),
         ("Move completed tasks to History", CLEAR_COMPLETED),
-        ("Delete the task", DELETE_TASK),
     ] {
         let (_, label) = groups
             .iter()
@@ -400,17 +426,34 @@ fn reference_uses_shared_bindings_and_native_key_names() {
             .unwrap();
         assert_eq!(*label, shortcut(binding));
     }
-    let (_, first_last) = groups
-        .iter()
-        .flat_map(|(_, rows)| rows)
-        .find(|(name, _)| *name == "First / last task")
-        .unwrap();
-    assert_eq!(
-        *first_last,
-        format!(
-            "{} / {}",
-            shortcut(KeyboardShortcut::new(Modifiers::NONE, Key::Home)),
-            shortcut(KeyboardShortcut::new(Modifiers::NONE, Key::End)),
-        )
+    for (action, binding) in [
+        (
+            "Copy task text",
+            KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::C),
+        ),
+        (
+            "Undo deletion",
+            KeyboardShortcut::new(Modifiers::COMMAND, Key::Z),
+        ),
+    ] {
+        let (_, label) = groups
+            .iter()
+            .flat_map(|(_, rows)| rows)
+            .find(|(name, _)| *name == action)
+            .unwrap();
+        assert_eq!(*label, shortcut(binding));
+    }
+    assert!(
+        groups
+            .iter()
+            .flat_map(|(_, rows)| rows)
+            .all(|(_, binding)| ![
+                "Enter",
+                "Escape",
+                "Arrow keys",
+                "Up / Down",
+                "Enter / Space"
+            ]
+            .contains(&binding.as_str()))
     );
 }

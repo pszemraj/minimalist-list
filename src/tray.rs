@@ -117,7 +117,19 @@ impl Tray {
             .host
             .get_property::<bool>("IsStatusNotifierHostRegistered")
             .unwrap_or(false);
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(target_os = "windows")]
+        {
+            #[link(name = "user32")]
+            unsafe extern "system" {
+                fn FindWindowA(
+                    class_name: *const std::ffi::c_char,
+                    window_name: *const std::ffi::c_char,
+                ) -> *mut std::ffi::c_void;
+            }
+            // A live icon object can outlast Explorer or precede its startup.
+            !unsafe { FindWindowA(c"Shell_TrayWnd".as_ptr(), std::ptr::null()) }.is_null()
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "windows")))]
         true
     }
 }
@@ -163,7 +175,7 @@ fn linux_host() -> Result<zbus::blocking::Proxy<'static>, String> {
     Ok(host)
 }
 
-/// Creates the checklist icon shared by the native window and tray.
+/// Creates the template-friendly checklist icon used by the native tray.
 ///
 /// # Returns
 ///
@@ -174,6 +186,34 @@ pub(crate) fn icon_data() -> egui::IconData {
         width: 32,
         height: 32,
     }
+}
+
+/// Loads the full-color application icon used by native windows and the taskbar.
+///
+/// # Returns
+/// The bundled RGBA application icon.
+///
+/// # Panics
+/// Panics if the bundled application PNG is invalid.
+pub(crate) fn window_icon_data() -> egui::IconData {
+    eframe::icon_data::from_png_bytes(include_bytes!("../assets/minimalist-list.png"))
+        .expect("invalid bundled application icon")
+}
+
+/// Sets Windows' separate large taskbar icon as well as the viewport's small icon.
+///
+/// # Arguments
+/// - `window` - Root window belonging to this application instance.
+///
+/// # Panics
+/// Panics if the bundled image is invalid or cannot form a native icon.
+#[cfg(target_os = "windows")]
+pub(crate) fn set_window_taskbar_icon(window: &winit::window::Window) {
+    use winit::platform::windows::WindowExtWindows;
+    let data = window_icon_data();
+    let icon = winit::window::Icon::from_rgba(data.rgba, data.width, data.height)
+        .expect("invalid bundled application icon");
+    window.set_taskbar_icon(Some(icon));
 }
 
 fn icon_rgba() -> Vec<u8> {
@@ -190,4 +230,32 @@ fn icon_rgba() -> Vec<u8> {
         }
     }
     rgba
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn shell_and_window_icons_have_all_required_sizes_and_transparency() {
+        let window = super::window_icon_data();
+        assert_eq!((window.width, window.height), (256, 256));
+        assert!(
+            window
+                .rgba
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .any(|pixel| pixel[3] == 0)
+        );
+        let ico = include_bytes!("../assets/minimalist-list.ico");
+        assert_eq!(&ico[..6], &[0, 0, 1, 0, 7, 0]);
+        let mut dimensions = Vec::new();
+        for entry in ico[6..6 + 7 * 16].as_chunks::<16>().0 {
+            let length = u32::from_le_bytes(entry[8..12].try_into().unwrap()) as usize;
+            let offset = u32::from_le_bytes(entry[12..16].try_into().unwrap()) as usize;
+            let image = eframe::icon_data::from_png_bytes(&ico[offset..offset + length]).unwrap();
+            assert_eq!(image.width, image.height);
+            dimensions.push(image.width);
+        }
+        assert_eq!(dimensions, [16, 24, 32, 48, 64, 128, 256]);
+    }
 }

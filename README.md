@@ -5,7 +5,7 @@ Minimalist List is a native desktop task list built with `egui` and `eframe`, in
 <p align="center">
   <img src="assets/ui.png" alt="Minimalist List on Windows in the default Charcoal palette, showing tasks, subtasks, and completion" width="360">
   <br>
-  <sub>Charcoal theme on Windows · Tasks and subtasks</sub>
+  <sub>Charcoal theme on Windows: tasks and subtasks</sub>
 </p>
 
 ## Install and run
@@ -30,7 +30,7 @@ cd minimalist-list
 cargo run
 ```
 
-For desktop installation and startup at sign-in, run the installer for your platform.
+For desktop installation, run the installer for your platform.
 
 Windows (PowerShell):
 
@@ -50,22 +50,20 @@ macOS:
 bash scripts/install-macos.sh
 ```
 
-Windows and Linux add an app-menu shortcut; macOS installs `~/Applications/Minimalist List.app`.
+Windows and Linux add an app-menu shortcut; macOS installs `~/Applications/Minimalist List.app`. The installers enable startup at sign-in. Quit before reinstalling. See [startup and tray behavior](docs/usage.md#startup-and-system-tray) for window controls and disabling startup.
 
-Sign-in starts the app hidden in the tray or menu bar; an ordinary launch opens the window. Close hides it again, as does minimize on Windows and Linux. Use the icon's **Show Minimalist List** or **Quit** action. Linux hiding requires X11/XWayland and a tray host; without one, the window opens normally.
-
-Quit before reinstalling. See [startup and tray behavior](docs/usage.md#startup-and-system-tray) to disable startup.
+Verify the checkout with `cargo test --locked`; `cargo run --locked -- --version` checks the executable. The [development guide](docs/dev.md#verification) lists the full checks.
 
 ## Start using it
 
-Open a list and type `Buy groceries` into the field at the top. Enter adds the task at the top of the list and returns focus to the field. See [list management](docs/usage.md#manage-lists) to create more lists.
+Open a list, type `Buy groceries` into the [task entry](docs/usage.md#capture-and-edit-tasks), and press Enter. See [list management](docs/usage.md#manage-lists) to create more lists.
 
-Press Backspace (`Delete` on macOS) when task entry is empty to return to Lists. Use arrows to choose a list and Enter to open it.
-
-Press `Ctrl+/` (`Cmd+/` on macOS) to see the keyboard shortcuts in the app.
+Use [keyboard navigation](docs/usage.md#keyboard-shortcuts) to work without a mouse, or the [global reveal shortcut](docs/usage.md#global-reveal-shortcut) to show the running app from another application.
 
 ## Documentation
 
-- [Tasks, subtasks, search, history, and appearance](docs/usage.md)
+- [Tasks, subtasks, context, search, history, and appearance](docs/usage.md)
 - [Workspace folders, settings paths, and file sync](docs/storage.md)
 - [Source layout, checks, and GUI inspection](docs/dev.md)
+
+Bundled bold fonts: [sources](assets/fonts/SOURCES.txt), [Ubuntu Font Licence](assets/fonts/Ubuntu-LICENSE.txt), and [Hack licenses](assets/fonts/Hack-LICENSE.txt).

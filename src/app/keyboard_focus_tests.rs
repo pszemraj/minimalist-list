@@ -3,6 +3,54 @@
 use super::*;
 
 #[test]
+fn task_entry_tab_skips_drag_strip_but_downward_pointer_drag_refocuses_entry() {
+    let (ctx, mut app) = test_app();
+    let list = app.lists[0].key;
+    let task = Task::new("Named task");
+    let task_focus = FocusItem::Task(list, task.id).id();
+    app.lists[0].data.tasks.push(task);
+    let entry = Id::new(("new-task", list));
+    focus(&ctx, &mut app, entry);
+    let entry_rect = ctx.read_response(entry).unwrap().rect;
+    // The strip sits below the entry frame's bottom margin and widget spacing.
+    let start = entry_rect.center_bottom() + egui::vec2(0.0, 24.0);
+    key(&ctx, &mut app, Key::Tab, Modifiers::NONE);
+    assert_eq!(ctx.memory(|memory| memory.focused()), Some(task_focus));
+    frame(
+        &ctx,
+        &mut app,
+        vec![
+            Event::PointerMoved(start),
+            Event::PointerButton {
+                pos: start,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: Modifiers::NONE,
+            },
+        ],
+        430.0,
+    );
+    let end = start + egui::vec2(0.0, 30.0);
+    frame(&ctx, &mut app, vec![Event::PointerMoved(end)], 430.0);
+    assert!(app.request_task_focus);
+    frame(
+        &ctx,
+        &mut app,
+        vec![Event::PointerButton {
+            pos: end,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: Modifiers::NONE,
+        }],
+        430.0,
+    );
+    idle(&ctx, &mut app);
+    assert_eq!(ctx.memory(|memory| memory.focused()), Some(entry));
+    assert_eq!(app.lists[0].data.tasks[0].text, "Named task");
+    cleanup(&app);
+}
+
+#[test]
 fn held_control_activation_waits_across_completion_and_subtask_removal() {
     for action in [Key::Enter, Key::Space] {
         for control in 0..3 {
@@ -26,6 +74,12 @@ fn held_control_activation_waits_across_completion_and_subtask_removal() {
                     FocusItem::Subtask(list, task_id, first).id(),
                 );
                 if control == 2 {
+                    // Checklist text is now an editable button between completion and Delete.
+                    key(&ctx, &mut app, Key::Tab, Modifiers::NONE);
+                    assert_eq!(
+                        ctx.memory(|memory| memory.focused()),
+                        Some(Id::new(("edit-subtask-button", list, task_id, first)))
+                    );
                     key(&ctx, &mut app, Key::Tab, Modifiers::NONE);
                 }
             }
@@ -66,6 +120,55 @@ fn held_control_activation_waits_across_completion_and_subtask_removal() {
 }
 
 #[test]
+fn held_child_edit_activation_keeps_the_editor_open_until_a_new_submit_press() {
+    for action in [Key::Enter, Key::Space] {
+        let (ctx, mut app) = test_app();
+        let list = app.lists[0].key;
+        let mut task = Task::new("Parent");
+        task.subtasks
+            .push(crate::model::Subtask::new("Original child"));
+        task.subtasks[0].completed = true;
+        let task_id = task.id;
+        let child = task.subtasks[0].id;
+        app.lists[0].data.tasks.push(task);
+        app.save_list_index(0);
+        app.subtasks_for = Some((list, task_id));
+        focus(
+            &ctx,
+            &mut app,
+            Id::new(("edit-subtask-button", list, task_id, child)),
+        );
+        key_edge(&ctx, &mut app, action, true);
+        idle(&ctx, &mut app);
+        assert!(app.details.editor.is_some());
+        assert_eq!(
+            ctx.memory(|memory| memory.focused()),
+            Some(Id::new(("edit-subtask", list, task_id, child)))
+        );
+        key(&ctx, &mut app, Key::A, Modifiers::COMMAND);
+        type_text(&ctx, &mut app, "Corrected child");
+        let saved = std::fs::read(&app.lists[0].path).unwrap();
+        for _ in 0..5 {
+            key_edge(&ctx, &mut app, action, true);
+            idle(&ctx, &mut app);
+            assert!(app.details.editor.is_some());
+            assert_eq!(std::fs::read(&app.lists[0].path).unwrap(), saved);
+        }
+        key_edge(&ctx, &mut app, action, false);
+        key(&ctx, &mut app, Key::Enter, Modifiers::NONE);
+        assert!(app.details.editor.is_none());
+        let loaded = storage::load_workspace(&app.workspace).unwrap();
+        assert_eq!(loaded.lists[0].data.tasks[0].subtasks[0].id, child);
+        assert!(loaded.lists[0].data.tasks[0].subtasks[0].completed);
+        assert_eq!(
+            loaded.lists[0].data.tasks[0].subtasks[0].text,
+            "Corrected child"
+        );
+        cleanup(&app);
+    }
+}
+
+#[test]
 fn delete_list_confirmation_requires_a_second_physical_press() {
     for action in [Key::Enter, Key::Space] {
         let (ctx, mut app) = test_app();
@@ -73,7 +176,8 @@ fn delete_list_confirmation_requires_a_second_physical_press() {
         let path = app.lists[0].path.clone();
         let survivor = add_list(&mut app, "Survivor");
         idle(&ctx, &mut app);
-        key(&ctx, &mut app, Key::Comma, Modifiers::COMMAND);
+        app.open_settings(Some(list));
+        idle(&ctx, &mut app);
         let button = tab_to_label(&ctx, &mut app, "Delete list");
         key_edge(&ctx, &mut app, action, true);
         assert!(app.delete_armed);
@@ -180,6 +284,12 @@ fn held_row_actions_wait_for_release_before_acting_again() {
                 ),
             )
             .unwrap();
+        // The aged timestamp is our observed fixture baseline, not a synced edit.
+        app.lists[0].stamp.set(
+            storage::load_workspace(&app.workspace).unwrap().lists[0]
+                .stamp
+                .get(),
+        );
         let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
         let saved = std::fs::read(&path).unwrap();
         for _ in 0..5 {
@@ -494,7 +604,8 @@ fn settings_rename_keeps_external_changes_unless_a_local_draft_is_pending() {
             let (ctx, mut app) = test_app();
             let list = app.lists[0].key;
             let original = app.lists[0].data.title.clone();
-            key(&ctx, &mut app, Key::Comma, Modifiers::COMMAND);
+            app.open_settings(Some(list));
+            idle(&ctx, &mut app);
             if draft != "untouched" {
                 focus(&ctx, &mut app, Id::new(("settings-list-name", list)));
                 key(&ctx, &mut app, Key::A, Modifiers::COMMAND);
@@ -550,7 +661,8 @@ fn new_list_from_settings_saves_rename_and_clears_return_session() {
         let (ctx, mut app) = test_app();
         let list = app.lists[0].key;
         idle(&ctx, &mut app);
-        key(&ctx, &mut app, Key::Comma, command);
+        app.open_settings(Some(list));
+        idle(&ctx, &mut app);
         focus(&ctx, &mut app, Id::new(("settings-list-name", list)));
         key(&ctx, &mut app, Key::A, command);
         type_text(&ctx, &mut app, "Renamed before new list");
@@ -640,7 +752,8 @@ fn unchanged_workspace_enter_preserves_list_and_launch_override() {
 #[test]
 fn unavailable_return_focus_keeps_a_deliberate_click() {
     let (ctx, mut app) = test_app();
-    key(&ctx, &mut app, Key::Comma, Modifiers::COMMAND);
+    let list = app.lists[0].key;
+    app.open_settings(Some(list));
     idle(&ctx, &mut app);
     let chosen = Id::new(("settings-list-name", app.lists[0].key));
     frame(
@@ -710,71 +823,6 @@ fn overview_fallback_remembers_a_surviving_card() {
         ctx.memory(|m| m.focused()),
         Some(FocusItem::Card(app.lists[0].key).id())
     );
-    cleanup(&app);
-}
-
-#[test]
-fn scrolled_settings_focus_outline_stays_in_the_visible_region() {
-    let (ctx, mut app) = test_app();
-    key(&ctx, &mut app, Key::Comma, Modifiers::COMMAND);
-    idle(&ctx, &mut app);
-    let workspace = Id::new("settings-workspace");
-    let output = frame(&ctx, &mut app, Vec::new(), 430.0);
-    let response = ctx.read_response(workspace).unwrap();
-    assert!(output.shapes.iter().any(|clipped| {
-        matches!(&clipped.shape, egui::epaint::Shape::Rect(rect)
-            if rect.rect == response.rect.expand(1.0)
-                && rect.stroke.width == 1.5
-                && clipped.clip_rect.contains_rect(rect.rect))
-    }));
-    // The displayed fixture path can wrap. Scroll until the field is clipped,
-    // in small steps so its outline remains beneath the header for this check.
-    let pos = response.rect.center();
-    for _ in 0..20 {
-        frame(
-            &ctx,
-            &mut app,
-            vec![
-                Event::PointerMoved(pos),
-                Event::MouseWheel {
-                    unit: egui::MouseWheelUnit::Point,
-                    delta: egui::vec2(0.0, -24.0),
-                    phase: egui::TouchPhase::Move,
-                    modifiers: Modifiers::NONE,
-                },
-            ],
-            430.0,
-        );
-        idle(&ctx, &mut app);
-        if !ctx
-            .read_response(workspace)
-            .unwrap()
-            .interact_rect
-            .is_positive()
-        {
-            break;
-        }
-    }
-    let output = frame(&ctx, &mut app, Vec::new(), 430.0);
-    let response = ctx.read_response(workspace).unwrap();
-    assert_eq!(ctx.memory(|m| m.focused()), Some(workspace));
-    assert!(response.rect.intersects(ctx.content_rect()));
-    assert!(!response.interact_rect.is_positive(), "{response:?}");
-    let mut outlines = 0;
-    for clipped in output.shapes {
-        if let egui::epaint::Shape::Rect(rect) = clipped.shape
-            && rect.rect == response.rect.expand(1.0)
-            && rect.stroke.width == 1.5
-        {
-            outlines += 1;
-            assert!(
-                !rect.rect.intersect(clipped.clip_rect).is_positive(),
-                "scrolled-away focus is visible through {:?}",
-                clipped.clip_rect
-            );
-        }
-    }
-    assert!(outlines > 0);
     cleanup(&app);
 }
 

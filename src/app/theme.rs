@@ -1,14 +1,50 @@
 //! Accent-derived colors and shared rendering helpers.
 
 use super::MinimalistApp;
-use super::keyboard::{BACK_TO_LISTS, FIND, OPEN_SETTINGS, QUICK_ADD, shortcut};
+use super::keyboard::{
+    BACK_TO_LISTS, FIND, OPEN_SETTINGS, QUICK_ADD, mark_own_focus_frame, shortcut,
+};
 use crate::model::{Accent, FontChoice};
 use eframe::egui;
 use egui::{
-    Align, Align2, Button, Color32, CornerRadius, CursorIcon, FontFamily, FontId, Frame, Id, Label,
-    Layout, Margin, Pos2, Rect, RichText, Sense, Stroke, TextEdit, Vec2,
+    Align, Button, Color32, CornerRadius, CursorIcon, FontFamily, FontId, Frame, Id, Label, Layout,
+    Margin, Pos2, Rect, RichText, Sense, Stroke, TextEdit, Vec2,
 };
 use uuid::Uuid;
+
+const DEFAULT_SIZE_RECIPROCAL: f32 = 1.0 / 19.0;
+
+/// Registers embedded bold faces while retaining egui's fallback glyph coverage.
+///
+/// # Panics
+///
+/// Panics if egui's default font definitions omit a standard font family.
+pub(super) fn install_fonts(ctx: &egui::Context) {
+    let mut fonts = egui::FontDefinitions::default();
+    for (name, bytes, base) in [
+        (
+            "sans-bold",
+            include_bytes!("../../assets/fonts/Ubuntu-Bold.ttf").as_slice(),
+            FontFamily::Proportional,
+        ),
+        (
+            "mono-bold",
+            include_bytes!("../../assets/fonts/Hack-Bold.ttf").as_slice(),
+            FontFamily::Monospace,
+        ),
+    ] {
+        fonts.font_data.insert(
+            name.to_owned(),
+            std::sync::Arc::new(egui::FontData::from_static(bytes)),
+        );
+        let mut fallback = fonts.families[&base].clone();
+        fallback.insert(0, name.to_owned());
+        fonts
+            .families
+            .insert(FontFamily::Name(name.into()), fallback);
+    }
+    ctx.set_fonts(fonts);
+}
 
 #[derive(Clone, Copy, PartialEq)]
 /// Complete set of colors used to render one accent theme.
@@ -51,6 +87,8 @@ impl Palette {
     ) -> Self {
         Self {
             background: Color32::from_rgb(background.0, background.1, background.2),
+            // Faint tints are intentional; opaque fills change every card and panel.
+            // Get approval for a redesign: AGENTS.md#appearance-changes.
             surface: Color32::from_rgb(surface.0, surface.1, surface.2).linear_multiply(0.12),
             raised: Color32::from_rgb(raised.0, raised.1, raised.2).linear_multiply(0.18),
             accent: Color32::from_rgb(accent.0, accent.1, accent.2),
@@ -109,9 +147,11 @@ impl MinimalistApp {
     ///
     /// A font identifier with the requested size and configured family.
     pub(super) fn font_id(&self, size: f32) -> FontId {
-        let family = match self.settings.font {
-            FontChoice::Sans => FontFamily::Proportional,
-            FontChoice::Mono => FontFamily::Monospace,
+        let family = match (self.settings.font, self.settings.bold_text) {
+            (FontChoice::Sans, false) => FontFamily::Proportional,
+            (FontChoice::Mono, false) => FontFamily::Monospace,
+            (FontChoice::Sans, true) => FontFamily::Name("sans-bold".into()),
+            (FontChoice::Mono, true) => FontFamily::Name("mono-bold".into()),
         };
         FontId::new(size, family)
     }
@@ -128,11 +168,38 @@ impl MinimalistApp {
     ///
     /// Rich text ready to pass to an egui widget.
     pub(super) fn rich(&self, text: impl Into<String>, size: f32, color: Color32) -> RichText {
-        let mut rich = RichText::new(text).font(self.font_id(size)).color(color);
-        if self.settings.bold_text {
-            rich = rich.strong();
-        }
-        rich
+        RichText::new(text).font(self.font_id(size)).color(color)
+    }
+
+    /// Scales content text relative to its size at the default text-size setting.
+    ///
+    /// # Returns
+    ///
+    /// A font identifier scaled by the configured content size.
+    pub(super) fn content_font_id(&self, base_size: f32) -> FontId {
+        self.font_id(base_size * self.settings.font_size * DEFAULT_SIZE_RECIPROCAL)
+    }
+
+    /// Styles task content with the configured font, weight, and relative size.
+    ///
+    /// # Arguments
+    ///
+    /// - `text` - Content to display.
+    /// - `base_size` - Size in points at the default content-size setting.
+    /// - `color` - Text color.
+    ///
+    /// # Returns
+    ///
+    /// Rich text ready to render task content in an egui widget.
+    pub(super) fn content_rich(
+        &self,
+        text: impl Into<String>,
+        base_size: f32,
+        color: Color32,
+    ) -> RichText {
+        RichText::new(text)
+            .font(self.content_font_id(base_size))
+            .color(color)
     }
 
     /// Renders a single-line input with the shared flat frame and focus treatment.
@@ -173,6 +240,7 @@ impl MinimalistApp {
             });
         let rect = shown.response.rect;
         let response = shown.inner;
+        mark_own_focus_frame(ui.ctx(), id);
         let focus = ui.ctx().animate_bool_with_time_and_easing(
             id.with("focus"),
             response.has_focus(),
@@ -215,7 +283,13 @@ impl MinimalistApp {
         font: FontId,
         palette: Palette,
     ) -> egui::Response {
-        let mut response = ui.add_sized([ui.available_width(), 36.0], Button::new("").frame(false));
+        let label_width = (ui.available_width() - 58.0).max(1.0);
+        let galley = ui
+            .painter()
+            .layout(label.to_owned(), font, palette.text, label_width);
+        let height = (galley.size().y + 12.0).max(36.0);
+        let mut response =
+            ui.add_sized([ui.available_width(), height], Button::new("").frame(false));
         if response.clicked() {
             *value = !*value;
             response.mark_changed();
@@ -243,11 +317,12 @@ impl MinimalistApp {
                 palette.raised.linear_multiply(hover * 0.45),
             );
         }
-        ui.painter().text(
-            Pos2::new(response.rect.left() + 4.0, response.rect.center().y),
-            Align2::LEFT_CENTER,
-            label,
-            font,
+        ui.painter().galley(
+            Pos2::new(
+                response.rect.left() + 4.0,
+                response.rect.center().y - galley.size().y * 0.5,
+            ),
+            galley,
             palette.text.lerp_to_gamma(palette.accent, enabled * 0.12),
         );
 
@@ -288,6 +363,30 @@ impl MinimalistApp {
         }
 
         response
+    }
+
+    /// Builds the shared accent choice without allocating its widget identity.
+    ///
+    /// # Arguments
+    /// - `accent` - Accent represented by the button.
+    /// - `selected` - Whether this is the current accent.
+    ///
+    /// # Returns
+    /// A button for the caller to add in its existing control order.
+    pub(super) fn accent_choice_button(&self, accent: Accent, selected: bool) -> Button<'static> {
+        let palette = Palette::from_accent(accent);
+        Button::new(self.rich(accent.label(), 13.0, palette.text))
+            .selected(selected)
+            .fill(if selected {
+                palette.raised
+            } else {
+                palette.surface
+            })
+            .stroke(Stroke::new(
+                if selected { 2.0 } else { 0.0 },
+                palette.accent,
+            ))
+            .corner_radius(12.0)
     }
 
     /// Renders content inside the shared rounded surface-card frame.
@@ -412,84 +511,102 @@ impl MinimalistApp {
         title: &str,
         list_id: Option<Uuid>,
     ) {
-        ui.horizontal(|ui| {
-            ui.spacing_mut().button_padding = Vec2::new(4.0, 4.0);
-            ui.spacing_mut().item_spacing.x = 6.0;
-            if list_id.is_some()
-                && ui
-                    .add(Button::new(self.rich("<", 24.0, palette.text)).frame(false))
-                    .on_hover_text(format!("Back to Lists ({})", shortcut(BACK_TO_LISTS)))
-                    .clicked()
-            {
-                self.go_to_overview();
-            }
-
-            let pin = if self.settings.always_on_top {
-                "pinned"
-            } else {
-                "pin"
-            };
-            // Controls precede the title in accessibility order so its width uses their actual layout.
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if !self.settings.window_decorations
+        // Headers intentionally have no backing panel; see AGENTS.md#appearance-changes.
+        ui.scope(|ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().button_padding = Vec2::new(4.0, 4.0);
+                ui.spacing_mut().item_spacing.x = 6.0;
+                if list_id.is_some()
                     && ui
-                        .add(Button::new(self.rich("x", 18.0, palette.muted)).frame(false))
-                        .on_hover_text(self.close_hint())
+                        .add(Button::new(self.rich("<", 24.0, palette.text)).frame(false))
+                        .on_hover_text(format!("Back to Lists ({})", shortcut(BACK_TO_LISTS)))
                         .clicked()
                 {
-                    self.close_window(ui.ctx());
-                }
-                let settings = ui
-                    .add(Button::new(self.rich("...", 18.0, palette.muted)).frame(false))
-                    .on_hover_text(format!("Settings ({})", shortcut(OPEN_SETTINGS)));
-                if settings.clicked() {
-                    self.open_settings(list_id);
-                    // Pointer openers belong to this frame, before last_focus is refreshed.
-                    self.keyboard.settings_return = Some(settings.id);
-                }
-                let find = ui
-                    .add(Button::new(self.rich("find", 14.0, palette.muted)).frame(false))
-                    .on_hover_text(format!("Find anything ({})", shortcut(FIND)));
-                if find.clicked() {
-                    self.open_find();
-                    self.keyboard.overlay_return = Some(find.id);
-                }
-                let add = ui
-                    .add(Button::new(self.rich("add", 14.0, palette.accent)).frame(false))
-                    .on_hover_text(format!("Quick add ({})", shortcut(QUICK_ADD)));
-                if add.clicked() {
-                    self.open_quick_capture(list_id);
-                    self.keyboard.overlay_return = Some(add.id);
-                }
-                if ui
-                    .add(Button::new(self.rich(pin, 14.0, palette.accent)).frame(false))
-                    .on_hover_text("Always on top")
-                    .clicked()
-                {
-                    self.settings.always_on_top = !self.settings.always_on_top;
-                    self.last_pin_state = None;
-                    self.save_settings();
+                    self.go_to_overview();
                 }
 
-                let title_response = ui
-                    .allocate_ui_with_layout(
-                        Vec2::new(ui.available_width(), 36.0),
-                        Layout::left_to_right(Align::Center),
-                        |ui| {
-                            ui.add(
-                                Label::new(self.rich(title, 28.0, palette.text))
-                                    .truncate()
-                                    .sense(Sense::click_and_drag()),
-                            )
-                        },
-                    )
-                    .inner
-                    .on_hover_cursor(CursorIcon::Grab);
-                if title_response.double_clicked() {
-                    self.go_to_overview();
-                } else if title_response.drag_started() {
-                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
-                }
+                let pin = if self.settings.always_on_top {
+                    "pinned"
+                } else {
+                    "pin"
+                };
+                // Controls precede the title in accessibility order so its width uses their actual layout.
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if !self.settings.window_decorations
+                        && ui
+                            .add(Button::new(self.rich("x", 18.0, palette.muted)).frame(false))
+                            .on_hover_text(self.close_hint())
+                            .clicked()
+                    {
+                        self.close_window(ui.ctx());
+                    }
+                    let settings = ui
+                        .add(Button::new(self.rich("...", 18.0, palette.muted)).frame(false))
+                        .on_hover_text(if list_id.is_some() {
+                            "List options".to_owned()
+                        } else {
+                            format!("Settings ({})", shortcut(OPEN_SETTINGS))
+                        });
+                    settings.widget_info(|| {
+                        egui::WidgetInfo::labeled(
+                            egui::WidgetType::Button,
+                            true,
+                            if list_id.is_some() {
+                                "List options"
+                            } else {
+                                "Settings"
+                            },
+                        )
+                    });
+                    if settings.clicked() {
+                        self.open_settings(list_id);
+                        // Pointer openers belong to this frame, before last_focus is refreshed.
+                        self.keyboard.settings_return = Some(settings.id);
+                    }
+                    let find = ui
+                        .add(Button::new(self.rich("find", 14.0, palette.muted)).frame(false))
+                        .on_hover_text(format!("Find tasks ({})", shortcut(FIND)));
+                    if find.clicked() {
+                        self.open_find();
+                        self.keyboard.overlay_return = Some(find.id);
+                    }
+                    let add = ui
+                        .add(Button::new(self.rich("add", 14.0, palette.accent)).frame(false))
+                        .on_hover_text(format!("Quick add ({})", shortcut(QUICK_ADD)));
+                    if add.clicked() {
+                        self.open_quick_capture(list_id);
+                        self.keyboard.overlay_return = Some(add.id);
+                    }
+                    if ui
+                        .add(Button::new(self.rich(pin, 14.0, palette.accent)).frame(false))
+                        .on_hover_text("Always on top")
+                        .clicked()
+                    {
+                        self.settings.always_on_top = !self.settings.always_on_top;
+                        self.last_pin_state = None;
+                        self.save_settings();
+                    }
+
+                    let title_response = ui
+                        .allocate_ui_with_layout(
+                            Vec2::new(ui.available_width(), 36.0),
+                            Layout::left_to_right(Align::Center),
+                            |ui| {
+                                ui.add(
+                                    Label::new(self.rich(title, 28.0, palette.text))
+                                        .truncate()
+                                        .sense(Sense::click_and_drag()),
+                                )
+                            },
+                        )
+                        .inner
+                        .on_hover_cursor(CursorIcon::Grab);
+                    if title_response.double_clicked() {
+                        self.go_to_overview();
+                    } else if title_response.drag_started() {
+                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
+                    }
+                });
             });
         });
     }
@@ -498,6 +615,124 @@ impl MinimalistApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn translucent_surfaces_leave_header_text_unbacked() {
+        for accent in Accent::ALL {
+            let palette = Palette::from_accent(accent);
+            assert!((1..64).contains(&palette.surface.a()));
+            assert!((palette.surface.a() + 1..64).contains(&palette.raised.a()));
+            assert_eq!(palette.text.a(), 255);
+            assert_eq!(palette.muted.a(), 255);
+        }
+        let (ctx, mut app) = super::super::tests::test_app();
+        app.settings.background_opacity = 0.2;
+        let viewport = Rect::from_min_size(Pos2::ZERO, egui::vec2(320.0, 520.0));
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(viewport),
+                ..Default::default()
+            },
+            |ui| {
+                let mut content =
+                    ui.new_child(egui::UiBuilder::new().max_rect(viewport.shrink(16.0)));
+                app.header(&mut content, app.palette(), "Lists", None);
+            },
+        );
+        output.textures_delta.clear();
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::epaint::Shape::Text(text) if text.galley.text() == "Lists"
+        )));
+        for (index, shape) in output.shapes.iter().enumerate() {
+            if let egui::epaint::Shape::Text(text) = &shape.shape {
+                let text_rect = Rect::from_min_size(text.pos, text.galley.size());
+                assert!(!output.shapes[..index].iter().any(|shape| matches!(&shape.shape,
+                    egui::epaint::Shape::Rect(rect) if rect.fill.a() > 0 && rect.rect.contains_rect(text_rect)
+                )), "Unexpected backing under {}", text.galley.text());
+            }
+        }
+        assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::epaint::Shape::Rect(rect) if rect.fill.a() == 255 && rect.rect.contains(viewport.center())
+        )));
+        std::fs::remove_dir_all(app.workspace).unwrap();
+    }
+
+    #[test]
+    fn bold_faces_render_distinct_glyphs_and_relative_content_scales() {
+        let (ctx, mut app) = super::super::tests::test_app();
+        for choice in [FontChoice::Sans, FontChoice::Mono] {
+            app.settings.font = choice;
+            super::super::tests::run_frame(&ctx, Default::default(), |ui| {
+                app.settings.bold_text = false;
+                let regular = ui.painter().layout_no_wrap(
+                    "Readable task".into(),
+                    app.font_id(19.0),
+                    Color32::WHITE,
+                );
+                app.settings.bold_text = true;
+                let bold = ui.painter().layout_no_wrap(
+                    "Readable task".into(),
+                    app.font_id(19.0),
+                    Color32::WHITE,
+                );
+                assert_ne!(regular.rows[0].visuals.mesh, bold.rows[0].visuals.mesh);
+                app.settings.font_size = 14.0;
+                let small = ui.painter().layout_no_wrap(
+                    "Task child".into(),
+                    app.content_font_id(15.0),
+                    Color32::WHITE,
+                );
+                app.settings.font_size = 30.0;
+                let large = ui.painter().layout_no_wrap(
+                    "Task child".into(),
+                    app.content_font_id(15.0),
+                    Color32::WHITE,
+                );
+                assert!(large.size().y > small.size().y * 1.9);
+            });
+        }
+        std::fs::remove_dir_all(&app.workspace).unwrap();
+    }
+
+    #[test]
+    fn toggle_label_wraps_before_reserved_switch_at_narrow_width() {
+        for choice in [FontChoice::Sans, FontChoice::Mono] {
+            let (ctx, mut app) = super::super::tests::test_app();
+            app.settings.font = choice;
+            for size in [15.0, 30.0] {
+                let mut bounds = Rect::NOTHING;
+                let mut value = false;
+                let mut output = ctx.run_ui(Default::default(), |ui| {
+                    ui.set_width(256.0);
+                    let response = MinimalistApp::toggle_row(
+                        ui,
+                        Id::new("test-toggle"),
+                        "Show window title bar",
+                        &mut value,
+                        app.font_id(size),
+                        app.palette(),
+                    );
+                    bounds = response.rect;
+                });
+                let label = output
+                    .shapes
+                    .iter()
+                    .find_map(|shape| match &shape.shape {
+                        egui::epaint::Shape::Text(text)
+                            if text.galley.text() == "Show window title bar" =>
+                        {
+                            Some(Rect::from_min_size(text.pos, text.galley.size()))
+                        }
+                        _ => None,
+                    })
+                    .unwrap();
+                assert!(label.right() <= bounds.right() - 54.0);
+                assert!(bounds.contains_rect(label));
+                output.textures_delta.clear();
+            }
+            std::fs::remove_dir_all(&app.workspace).unwrap();
+        }
+    }
 
     #[test]
     fn small_header_keeps_title_clear_of_controls_with_both_fonts_and_pin_states() {

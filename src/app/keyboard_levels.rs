@@ -169,10 +169,7 @@ impl MinimalistApp {
             } else if take_shortcut(ctx, DELETE_TASK) {
                 self.apply_row_action(RowAction::Delete(list, task.id));
             } else if take_key(ctx, Key::ArrowRight, Modifiers::NONE) {
-                if self.subtasks_for != Some((list, task.id)) {
-                    self.new_subtask.clear();
-                }
-                self.subtasks_for = Some((list, task.id));
+                self.switch_subtask_panel(Some((list, task.id)));
                 let target = task
                     .subtasks
                     .first()
@@ -181,7 +178,7 @@ impl MinimalistApp {
                     });
                 self.focus_now(ctx, target);
             } else if take_key(ctx, Key::ArrowLeft, Modifiers::NONE) {
-                self.subtasks_for = None;
+                self.switch_subtask_panel(None);
             }
         }
     }
@@ -245,7 +242,7 @@ impl MinimalistApp {
         } else if take_key(ctx, Key::End, Modifiers::NONE) {
             entry
         } else if take_key(ctx, Key::ArrowLeft, Modifiers::NONE) {
-            self.subtasks_for = None;
+            self.switch_subtask_panel(None);
             FocusItem::Task(list, task_id).id()
         } else {
             return true;
