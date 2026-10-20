@@ -130,7 +130,7 @@ fn focused_enter_submits_without_nested_context_input() {
 pub(super) fn test_app() -> (egui::Context, MinimalistApp) {
     let ctx = egui::Context::default();
     let workspace = std::env::temp_dir().join(format!("minimalist-list-ui-{}", Uuid::new_v4()));
-    std::fs::create_dir_all(&workspace).unwrap();
+    std::fs::create_dir_all(workspace.join("lists")).unwrap();
     let settings = Settings {
         workspace_path: workspace.to_string_lossy().into_owned(),
         ..Settings::default()

@@ -320,14 +320,14 @@ pub fn normalize_workspace_path(raw: &str) -> Result<PathBuf, String> {
 ///
 /// # Errors
 ///
-/// Returns an error when a saved non-default folder is missing, or when the path
-/// cannot be resolved or its list directory cannot be created.
+/// Returns an error when a saved non-default folder or its list directory is
+/// missing, or when the path cannot be resolved or its list directory cannot be created.
 pub fn resolve_launch_workspace(raw: &str, explicit: bool) -> Result<PathBuf, String> {
     let create = explicit || expand_tilde(raw.trim()) == default_workspace_dir();
     resolve_workspace_path(raw, create)
 }
 
-/// Resolves a workspace folder that must already exist.
+/// Resolves a workspace folder whose list directory must already exist.
 ///
 /// # Returns
 ///
@@ -335,8 +335,8 @@ pub fn resolve_launch_workspace(raw: &str, explicit: bool) -> Result<PathBuf, St
 ///
 /// # Errors
 ///
-/// Returns an error when the folder is missing, cannot be resolved, or its list
-/// directory cannot be created.
+/// Returns an error when the folder or its list directory is missing, or the path
+/// cannot be resolved.
 pub fn existing_workspace_path(raw: &str) -> Result<PathBuf, String> {
     resolve_workspace_path(raw, false)
 }
@@ -353,10 +353,13 @@ fn resolve_workspace_path(raw: &str, create_missing: bool) -> Result<PathBuf, St
             .map_err(|error| format!("could not resolve current directory: {error}"))?
             .join(path)
     };
-    if !create_missing && !absolute.is_dir() {
-        return Err(format!("{} is missing", absolute.display()));
+    let lists = absolute.join("lists");
+    if !create_missing && !lists.is_dir() {
+        // A synced lists folder can vanish while its parent remains.
+        let missing = if absolute.is_dir() { &lists } else { &absolute };
+        return Err(format!("{} is missing", missing.display()));
     }
-    fs::create_dir_all(absolute.join("lists"))
+    fs::create_dir_all(&lists)
         .map_err(|error| format!("could not create {}: {error}", absolute.display()))?;
     absolute
         .canonicalize()

@@ -392,6 +392,23 @@ fn vanished_workspace_shows_recovery_without_recreating_the_folder() {
     );
     assert_eq!(app.lists.len(), 1);
     assert_eq!(fs::read_dir(workspace.join("lists")).unwrap().count(), 1);
+
+    let lists = workspace.join("lists");
+    let moved_lists = workspace.join("lists.moved");
+    fs::rename(&lists, &moved_lists).unwrap();
+    app.next_scan = std::time::Instant::now();
+    app.scan_external_changes();
+    assert!(app.persistence.workspace_failure.is_some());
+    app.open_workspace(&workspace.to_string_lossy(), false);
+    assert!(
+        !lists.exists(),
+        "retrying must not recreate a missing lists folder"
+    );
+    assert!(app.persistence.workspace_failure.is_some());
+    fs::rename(&moved_lists, &lists).unwrap();
+    app.open_workspace(&workspace.to_string_lossy(), false);
+    assert!(app.persistence.workspace_failure.is_none());
+    assert_eq!(fs::read_dir(&lists).unwrap().count(), 1);
     fs::remove_dir_all(&workspace).unwrap();
 }
 
