@@ -1,4 +1,4 @@
-//! Editor focus, destructive shortcuts, and capture-entry focus rendering.
+//! Editor focus, destructive shortcuts, text-field focus rendering, and recovery focus.
 
 use super::*;
 
@@ -232,34 +232,69 @@ fn text_before_archive_shortcut_in_one_frame_protects_the_capture_draft() {
     cleanup(&app);
 }
 
+fn focus_ring_drawn(ctx: &egui::Context, app: &mut MinimalistApp, id: Id) -> bool {
+    let output = frame(ctx, app, Vec::new(), 430.0);
+    assert_eq!(ctx.memory(|m| m.focused()), Some(id));
+    let ring = ctx.read_response(id).unwrap().rect.expand(1.0);
+    output.shapes.iter().any(|shape| {
+        matches!(&shape.shape, egui::epaint::Shape::Rect(rect)
+            if rect.rect == ring && rect.stroke.width == 1.5)
+    })
+}
+
 #[test]
-fn task_entry_uses_its_frame_glow_without_an_inner_focus_ring() {
-    let (ctx, app) = test_app();
+fn self_framed_text_fields_skip_the_keyboard_focus_ring() {
+    let (ctx, mut app) = test_app();
     let list = app.lists[0].key;
-    for (id, expected_ring) in [
-        (Id::new(("new-task", list)), false),
-        (Id::new("other-field"), true),
+    let mut task = Task::new("Parent");
+    task.subtasks.push(crate::model::Subtask::new("Child"));
+    let parent = task.id;
+    let child = task.subtasks[0].id;
+    app.lists[0].data.tasks.push(task);
+    let entry = Id::new(("new-task", list));
+    focus(&ctx, &mut app, entry);
+    assert!(!focus_ring_drawn(&ctx, &mut app, entry));
+    // The frameless inline task editor has no outline of its own.
+    app.editing = Some((list, parent));
+    app.edit_text = "Parent".into();
+    app.request_edit_focus = true;
+    idle(&ctx, &mut app);
+    assert!(focus_ring_drawn(
+        &ctx,
+        &mut app,
+        Id::new(("edit-task", list, parent))
+    ));
+    app.editing = None;
+    app.subtasks_for = Some((list, parent));
+    let entry = Id::new(("new-subtask", list, parent));
+    focus(&ctx, &mut app, entry);
+    assert!(!focus_ring_drawn(&ctx, &mut app, entry));
+    app.begin_subtask_edit(list, parent, child);
+    idle(&ctx, &mut app);
+    assert!(!focus_ring_drawn(
+        &ctx,
+        &mut app,
+        Id::new(("edit-subtask", list, parent, child))
+    ));
+    app.cancel_subtask_edit();
+    app.subtasks_for = None;
+    app.open_settings(Some(list));
+    let rename = Id::new(("settings-list-name", list));
+    focus(&ctx, &mut app, rename);
+    assert!(!focus_ring_drawn(&ctx, &mut app, rename));
+    app.settings_list_id = None;
+    for id in [
+        Id::new("settings-workspace"),
+        Id::new("settings-global-shortcut"),
     ] {
-        let mut text = String::new();
-        let palette = app.palette();
-        let mut target_rect = egui::Rect::NOTHING;
-        let mut output = egui::FullOutput::default();
-        for _ in 0..2 {
-            output = crate::app::tests::run_frame(&ctx, Default::default(), |ui| {
-                let response = ui.add(egui::TextEdit::singleline(&mut text).id(id));
-                response.request_focus();
-                target_rect = response.rect.expand(1.0);
-                app.keyboard_focus_ui(ui, palette);
-            });
-        }
-        let has_inner_ring = output.shapes.iter().any(|shape| {
-            matches!(&shape.shape, egui::epaint::Shape::Rect(rect)
-                if rect.rect == target_rect
-                    && rect.stroke.width == 1.5
-                    && rect.stroke.color == palette.accent)
-        });
-        assert_eq!(has_inner_ring, expected_ring);
+        focus(&ctx, &mut app, id);
+        assert!(!focus_ring_drawn(&ctx, &mut app, id));
     }
+    app.go_to_overview();
+    app.creating_list = true;
+    app.request_list_focus = true;
+    idle(&ctx, &mut app);
+    assert!(!focus_ring_drawn(&ctx, &mut app, Id::new("new-list-title")));
     cleanup(&app);
 }
 

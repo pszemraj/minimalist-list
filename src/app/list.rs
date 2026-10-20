@@ -2,7 +2,7 @@
 
 use super::{
     DragState, INSERT_ANIMATION_SECONDS, MinimalistApp, SWIPE_ACTIONS, SWIPE_COMPLETE,
-    keyboard::{FocusItem, take_key},
+    keyboard::{FocusItem, mark_own_focus_frame, take_key},
     text_input_shortcuts,
     theme::Palette,
 };
@@ -79,6 +79,7 @@ impl MinimalistApp {
             });
         let create_rect = create_frame.response.rect;
         let create_response = create_frame.inner;
+        mark_own_focus_frame(ui.ctx(), create_response.id);
         if self.request_task_focus {
             create_response.request_focus();
             self.request_task_focus = false;

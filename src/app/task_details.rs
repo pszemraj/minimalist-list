@@ -1,6 +1,11 @@
 //! Measured checklist and read-only History views.
 
-use super::{MinimalistApp, keyboard::FocusItem, text_input_shortcuts, theme::Palette};
+use super::{
+    MinimalistApp,
+    keyboard::{FocusItem, mark_own_focus_frame},
+    text_input_shortcuts,
+    theme::Palette,
+};
 use crate::model::Task;
 use eframe::egui::{
     self, Align, Button, CornerRadius, Frame, Id, Layout, Margin, Sense, Stroke, TextEdit, Vec2,
@@ -92,6 +97,8 @@ impl MinimalistApp {
                             .hint_text("Add subtask")
                             .desired_width(f32::INFINITY),
                     );
+                    // egui's text frame already outlines these fields when focused.
+                    mark_own_focus_frame(ui.ctx(), response.id);
                     let (submit, _) = text_input_shortcuts(ui, &response);
                     self.track_focus(&response, FocusItem::Task(list_id, task.id));
                     if submit {
@@ -151,6 +158,7 @@ impl MinimalistApp {
                                     .desired_rows(1)
                                     .return_key(None),
                             );
+                            mark_own_focus_frame(ui.ctx(), response.id);
                             if edit.request_focus {
                                 response.request_focus();
                                 edit.request_focus = false;

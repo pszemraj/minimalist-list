@@ -1,7 +1,9 @@
 //! Accent-derived colors and shared rendering helpers.
 
 use super::MinimalistApp;
-use super::keyboard::{BACK_TO_LISTS, FIND, OPEN_SETTINGS, QUICK_ADD, shortcut};
+use super::keyboard::{
+    BACK_TO_LISTS, FIND, OPEN_SETTINGS, QUICK_ADD, mark_own_focus_frame, shortcut,
+};
 use crate::model::{Accent, FontChoice};
 use eframe::egui;
 use egui::{
@@ -238,6 +240,7 @@ impl MinimalistApp {
             });
         let rect = shown.response.rect;
         let response = shown.inner;
+        mark_own_focus_frame(ui.ctx(), id);
         let focus = ui.ctx().animate_bool_with_time_and_easing(
             id.with("focus"),
             response.has_focus(),

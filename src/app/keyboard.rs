@@ -144,6 +144,19 @@ pub(super) fn take_key(ctx: &egui::Context, key: Key, modifiers: Modifiers) -> b
     taken
 }
 
+const OWN_FOCUS_FRAME: &str = "own-focus-frame";
+
+/// Marks a text field that draws its own focused frame or glow, so the keyboard focus
+/// ring is not stacked inside it.
+///
+/// # Arguments
+///
+/// - `ctx` - Context that remembers the marker.
+/// - `id` - Identity of the text field.
+pub(super) fn mark_own_focus_frame(ctx: &egui::Context, id: Id) {
+    ctx.data_mut(|data| data.insert_temp(id.with(OWN_FOCUS_FRAME), true));
+}
+
 /// Formats a shortcut for the native platform.
 ///
 /// # Arguments
@@ -823,8 +836,10 @@ impl MinimalistApp {
             if response.gained_focus() {
                 response.scroll_to_me(None);
             }
-            // The capture entry already draws its own focused frame glow.
-            if matches!(self.screen, Screen::List(list) if response.id == Id::new(("new-task", list)))
+            if ui
+                .ctx()
+                .data(|data| data.get_temp::<bool>(response.id.with(OWN_FOCUS_FRAME)))
+                .is_some()
             {
                 return;
             }

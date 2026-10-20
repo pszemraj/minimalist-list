@@ -831,16 +831,17 @@ fn scrolled_settings_focus_outline_stays_in_the_visible_region() {
     let (ctx, mut app) = test_app();
     key(&ctx, &mut app, Key::Comma, Modifiers::COMMAND);
     idle(&ctx, &mut app);
-    let workspace = Id::new("settings-workspace");
+    // The workspace field draws its own glow, so use the frameless button below it.
+    let control = tab_to_label(&ctx, &mut app, "Choose folder");
     let output = frame(&ctx, &mut app, Vec::new(), 430.0);
-    let response = ctx.read_response(workspace).unwrap();
+    let response = ctx.read_response(control).unwrap();
     assert!(output.shapes.iter().any(|clipped| {
         matches!(&clipped.shape, egui::epaint::Shape::Rect(rect)
             if rect.rect == response.rect.expand(1.0)
                 && rect.stroke.width == 1.5
                 && clipped.clip_rect.contains_rect(rect.rect))
     }));
-    // The displayed fixture path can wrap. Scroll until the field is clipped,
+    // The displayed fixture path can wrap. Scroll until the control is clipped,
     // in small steps so its outline remains beneath the header for this check.
     let pos = response.rect.center();
     for _ in 0..20 {
@@ -860,7 +861,7 @@ fn scrolled_settings_focus_outline_stays_in_the_visible_region() {
         );
         idle(&ctx, &mut app);
         if !ctx
-            .read_response(workspace)
+            .read_response(control)
             .unwrap()
             .interact_rect
             .is_positive()
@@ -869,8 +870,8 @@ fn scrolled_settings_focus_outline_stays_in_the_visible_region() {
         }
     }
     let output = frame(&ctx, &mut app, Vec::new(), 430.0);
-    let response = ctx.read_response(workspace).unwrap();
-    assert_eq!(ctx.memory(|m| m.focused()), Some(workspace));
+    let response = ctx.read_response(control).unwrap();
+    assert_eq!(ctx.memory(|m| m.focused()), Some(control));
     assert!(response.rect.intersects(ctx.content_rect()));
     assert!(!response.interact_rect.is_positive(), "{response:?}");
     let mut outlines = 0;
