@@ -1,13 +1,5 @@
 # Development notes
 
-## Appearance changes
-
-Preserve the established appearance and defaults unless the user requests a visual change. Bug fixes, refactoring, and accessibility work do not authorize a redesign. If a fix requires a broader visual change, explain its effect and get explicit approval before implementing it.
-
-Use the [README screenshots](../README.md) as the visual baseline: faint translucent card and panel tints, headers without backing panels, and the existing typography and spacing. Do not make shared surfaces opaque, add header backgrounds, or change default opacity as an incidental fix. Scope legibility fixes to the affected control.
-
-For authorized visual changes, compare before and after with the same settings and window size, follow the [native appearance checks](#interaction-checks), and report untested platforms. Do not replace screenshots or weaken visual regressions to accommodate an unapproved redesign.
-
 ## Source layout
 
 ```text

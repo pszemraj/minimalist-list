@@ -40,6 +40,14 @@ cargo build --locked --workspace --all-targets --all-features
 - Use the machine's `misc` environment for Python tools. Do not put environment-manager choices or local environment names in tracked documentation.
 - Use Context7 for library API or migration documentation and the Semble skill for behavioral code search when relevant. Exact identifiers and known files can be searched with `rg`.
 
+## Appearance changes
+
+Preserve the established appearance and defaults unless the user requests a visual change. Bug fixes, refactoring, and accessibility work do not authorize a redesign. If a fix requires a broader visual change, explain its effect and get explicit approval before implementing it.
+
+Use the [README screenshots](README.md) as the visual baseline: faint translucent card and panel tints, headers without backing panels, and the existing typography and spacing. Do not make shared surfaces opaque, add header backgrounds, or change default opacity as an incidental fix. Scope legibility fixes to the affected control.
+
+For authorized visual changes, compare before and after with the same settings and window size, follow the [native appearance checks](docs/dev.md#interaction-checks), and report untested platforms. Do not replace screenshots or weaken visual regressions to accommodate an unapproved redesign.
+
 ## Validation before runtime commits
 
 Start with the full check when changing Rust/runtime behavior:

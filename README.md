@@ -62,8 +62,6 @@ Use [keyboard navigation](docs/usage.md#keyboard-shortcuts) to work without a mo
 
 ## Documentation
 
-Contributors and agents must follow the [appearance change rules](docs/dev.md#appearance-changes) before modifying the UI.
-
 - [Tasks, subtasks, context, search, history, and appearance](docs/usage.md)
 - [Workspace folders, settings paths, and file sync](docs/storage.md)
 - [Source layout, checks, and GUI inspection](docs/dev.md)
