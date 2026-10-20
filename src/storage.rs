@@ -2,7 +2,7 @@
 
 use crate::model::{Accent, FontChoice, ListSort, TaskSort, TitleOverflow, TodoList};
 use serde::{Deserialize, Serialize};
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashSet};
 use std::env;
 use std::ffi::OsString;
@@ -10,6 +10,7 @@ use std::fs;
 #[cfg(test)]
 use std::fs::File;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::UNIX_EPOCH;
 use uuid::Uuid;
 
@@ -17,7 +18,10 @@ const APP_DIR: &str = "minimalist-list";
 
 #[path = "storage_io.rs"]
 mod io;
-use io::{cleanup_stale_temps, write_json_atomic, write_json_atomic_checked};
+#[cfg(test)]
+use io::write_json_atomic_checked;
+use io::{cleanup_stale_temps, write_json_atomic};
+pub use io::{list_changed_on_disk, save_list};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
@@ -76,6 +80,8 @@ pub struct StoredList {
     pub data: TodoList,
     /// Metadata observed when this list was loaded or last saved.
     pub stamp: Cell<Option<FileStamp>>,
+    /// Exact file contents observed before local edits, shared cheaply by candidates.
+    pub source_bytes: RefCell<Option<Arc<[u8]>>>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -483,6 +489,7 @@ fn read_list(path: &Path) -> Result<(StoredList, u8), String> {
             path: path.to_owned(),
             data,
             stamp: Cell::new(Some(stamp)),
+            source_bytes: RefCell::new(Some(bytes.into())),
         },
         canonical_name,
     ))
@@ -520,54 +527,10 @@ fn save_new_list(root: &Path, data: TodoList) -> Result<StoredList, String> {
             .join(list_file_name(&data.title, data.id)),
         data,
         stamp: Cell::new(None),
+        source_bytes: RefCell::new(None),
     };
     save_list(&stored)?;
     Ok(stored)
-}
-
-/// Persists a list atomically to its associated path.
-///
-/// # Returns
-///
-/// `Ok(())` after the list file is replaced.
-///
-/// # Errors
-///
-/// Returns an error when the list changed on disk since loading or saving it,
-/// or when it cannot be serialized, written, or replaced.
-pub fn save_list(list: &StoredList) -> Result<(), String> {
-    let metadata = write_json_atomic_checked(&list.path, &list.data, || {
-        if list_changed_on_disk(list)? {
-            return Err(format!(
-                "{} changed on disk. Its newer contents were kept; your changes remain unsaved.",
-                list.path.display()
-            ));
-        }
-        Ok(())
-    })?;
-    list.stamp.set(Some(stamp_from_metadata(&metadata)));
-    Ok(())
-}
-
-/// Compares the associated file with the version observed by this instance.
-///
-/// # Returns
-/// Whether the file was externally replaced, changed, created, or removed.
-///
-/// # Errors
-/// Returns an error when the file metadata cannot be inspected.
-pub fn list_changed_on_disk(list: &StoredList) -> Result<bool, String> {
-    let current = match fs::metadata(&list.path) {
-        Ok(metadata) => Some(stamp_from_metadata(&metadata)),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-        Err(error) => {
-            return Err(format!(
-                "could not inspect {}: {error}",
-                list.path.display()
-            ));
-        }
-    };
-    Ok(current != list.stamp.get())
 }
 
 /// Preserves local contents in an independent ordinary list before conflict recovery.

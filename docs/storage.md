@@ -77,7 +77,7 @@ Sync services transfer the [per-list files](#file-layout) independently.
 > [!IMPORTANT]
 > Minimalist List does not merge simultaneous changes to the same list. Let one device finish syncing before editing that list on another device.
 
-Every edit writes and flushes a temporary sibling file, then replaces the destination. Saves compare the destination's timestamp and size with the last loaded or saved version, including immediately before replacement. A mismatch preserves the external file and retains local changes for [recovery](#save-recovery). A change between the final check and replacement is still possible. On startup and workspace loading, recognized unlocked temporary files older than a day are removed; recent or active writes are retained.
+Every edit writes and flushes a temporary sibling file, then replaces the destination. Saves compare the destination's timestamp and size with the last loaded or saved version, including immediately before replacement. A metadata mismatch also compares the file with its last loaded or saved bytes: timestamp-only changes permit saving, while changed contents preserve the external file and retain local changes for [recovery](#save-recovery). A change between the final check and replacement is still possible. On startup and workspace loading, recognized unlocked temporary files older than a day are removed; recent or active writes are retained.
 
 The app checks disk every five seconds and reloads externally changed list files at the next scan. Reloads wait until task or child editing and dragging finish, while any task context dialog is open, and while unsaved list changes need recovery. A sync service controls when a file arrives on another computer.
 
@@ -89,7 +89,7 @@ If files contain the same list UUID, filenames with a recognized UUID take prece
 
 Before quitting or switching workspaces, the app saves inline edits, list title changes, open context drafts, and accepted archive/delete actions. Hiding also saves open editors and list names. A failed write retains changes in memory and keeps the window and workspace available. Restore folder access and choose **Retry save**.
 
-A failed Quick add keeps its draft and destination until retried or explicitly cancelled, including when Find hides it. Task context keeps its editor open with the draft and a **Retry save** button. These failures block shutdown and workspace switching until saved or cancelled.
+A failed Quick add keeps its draft and destination until retried or explicitly cancelled, including when Find hides it. Task context keeps its editor open with the draft. Retry actions appear for write failures; external-edit conflicts offer local-copy recovery instead. These failures block shutdown and workspace switching until saved or cancelled.
 
 If another device changed the list, choose **Keep local copy and reload** in the save warning or failed editor. It saves the local contents in a separate **(local copy)** list with new list, task, and child IDs, then reloads the original. The copy includes current inline edits, editable context, active or suspended Quick add drafts, and an unfinished list-name change for that list. Both versions remain ordinary JSON files. Resolve each conflicting list before quitting or switching workspaces.
 

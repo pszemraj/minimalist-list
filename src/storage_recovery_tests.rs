@@ -162,3 +162,109 @@ fn workspace_loading_cleans_only_stale_unlocked_owned_temporary_files() {
     assert!(!locked.exists());
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn metadata_only_changes_keep_the_loaded_byte_baseline_through_local_edits() {
+    let root = root();
+    let list = create_list(&root, "Original", Accent::Mint).unwrap();
+    // Keep a valid, non-pretty file so comparing against serialization cannot pass.
+    let original = serde_json::to_vec(&list.data).unwrap();
+    fs::write(&list.path, &original).unwrap();
+    let mut local = load_workspace(&root).unwrap().lists.remove(0);
+    assert_eq!(
+        local.source_bytes.borrow().as_deref(),
+        Some(original.as_slice())
+    );
+    for (second, title) in [(1_000, "First local edit"), (2_000, "Second local edit")] {
+        let baseline = fs::read(&local.path).unwrap();
+        File::options()
+            .write(true)
+            .open(&local.path)
+            .unwrap()
+            .set_modified(UNIX_EPOCH + Duration::from_secs(second))
+            .unwrap();
+        local.data.title = title.into();
+        assert!(!list_changed_on_disk(&local).unwrap());
+        assert_eq!(fs::read(&local.path).unwrap(), baseline);
+        save_list(&local).unwrap();
+        let saved = fs::read(&local.path).unwrap();
+        assert_eq!(
+            local.source_bytes.borrow().as_deref(),
+            Some(saved.as_slice())
+        );
+        assert_eq!(load_workspace(&root).unwrap().lists[0].data.title, title);
+    }
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn metadata_mismatch_compares_original_bytes_and_rejects_changed_content_of_any_length() {
+    for replacement in ["Other", "Remote title with a different length"] {
+        let root = root();
+        let mut local = create_list(&root, "Local", Accent::Mint).unwrap();
+        let baseline = fs::read(&local.path).unwrap();
+        let mut remote = local.data.clone();
+        remote.title = replacement.into();
+        let bytes = serde_json::to_vec_pretty(&remote).unwrap();
+        if replacement == "Other" {
+            assert_eq!(bytes.len(), baseline.len());
+        } else {
+            assert_ne!(bytes.len(), baseline.len());
+        }
+        fs::write(&local.path, &bytes).unwrap();
+        File::options()
+            .write(true)
+            .open(&local.path)
+            .unwrap()
+            .set_modified(UNIX_EPOCH + Duration::from_secs(1_000))
+            .unwrap();
+        local.data.title = replacement.into();
+        // Matching the current local edit is insufficient: the loaded version differed.
+        assert!(list_changed_on_disk(&local).unwrap());
+        assert!(save_list(&local).unwrap_err().contains("changed on disk"));
+        assert_eq!(fs::read(&local.path).unwrap(), bytes);
+        assert_eq!(
+            local.source_bytes.borrow().as_deref(),
+            Some(baseline.as_slice())
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[test]
+fn metadata_only_first_check_does_not_bypass_the_final_content_check() {
+    let root = root();
+    let mut local = create_list(&root, "Local", Accent::Mint).unwrap();
+    File::options()
+        .write(true)
+        .open(&local.path)
+        .unwrap()
+        .set_modified(UNIX_EPOCH + Duration::from_secs(1_000))
+        .unwrap();
+    let mut remote = local.data.clone();
+    remote.title = "Other".into();
+    let bytes = serde_json::to_vec_pretty(&remote).unwrap();
+    local.data.title = "Unsaved local changes".into();
+    let checks = Cell::new(0);
+    let result = write_json_atomic_checked(&local.path, &local.data, || {
+        if checks.replace(checks.get() + 1) == 1 {
+            fs::write(&local.path, &bytes).unwrap();
+            File::options()
+                .write(true)
+                .open(&local.path)
+                .unwrap()
+                .set_modified(UNIX_EPOCH + Duration::from_secs(2_000))
+                .unwrap();
+        }
+        if list_changed_on_disk(&local)? {
+            Err("external content changed".into())
+        } else {
+            Ok(())
+        }
+    });
+    assert_eq!(checks.get(), 2);
+    assert!(result.unwrap_err().contains("external content changed"));
+    assert_eq!(fs::read(&local.path).unwrap(), bytes);
+    assert_eq!(fs::read_dir(root.join("lists")).unwrap().count(), 1);
+    fs::remove_dir_all(root).unwrap();
+}

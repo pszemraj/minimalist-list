@@ -339,6 +339,7 @@ fn sort_lists_orders_by_creation_then_identity() {
             path: PathBuf::new(),
             data,
             stamp: Default::default(),
+            source_bytes: Default::default(),
         }
     };
     let first_id = Uuid::from_u128(1);

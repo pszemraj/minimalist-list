@@ -1,5 +1,6 @@
 //! Atomic file replacement and cleanup of abandoned sibling files.
 
+use super::{StoredList, stamp_from_metadata};
 use serde::Serialize;
 use std::{
     fs::{self, File},
@@ -32,7 +33,7 @@ pub(super) fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> Result<
 /// - `before_replace` - Guard evaluated before staging and again immediately before replacement.
 ///
 /// # Returns
-/// Metadata belonging to the flushed temporary file that was installed.
+/// Metadata and bytes belonging to the flushed temporary file that was installed.
 ///
 /// # Errors
 /// Returns an error if the guard rejects the write or persistence fails.
@@ -40,7 +41,7 @@ pub(super) fn write_json_atomic_checked<T: Serialize>(
     path: &Path,
     value: &T,
     before_replace: impl Fn() -> Result<(), String>,
-) -> Result<fs::Metadata, String> {
+) -> Result<(fs::Metadata, Vec<u8>), String> {
     before_replace()?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
@@ -72,7 +73,7 @@ pub(super) fn write_json_atomic_checked<T: Serialize>(
         before_replace()?;
         fs::rename(&temp, path)
             .map_err(|error| format!("could not replace {}: {error}", path.display()))?;
-        Ok(saved_metadata)
+        Ok((saved_metadata, bytes))
     })();
     if write_result.is_err() {
         let _ = fs::remove_file(&temp);
@@ -119,4 +120,61 @@ pub(super) fn cleanup_stale_temps(directory: &Path) {
             let _ = fs::remove_file(path);
         }
     }
+}
+
+/// Persists a list atomically to its associated path.
+///
+/// # Returns
+///
+/// `Ok(())` after the list file is replaced.
+///
+/// # Errors
+///
+/// Returns an error when the list changed on disk since loading or saving it,
+/// or when it cannot be serialized, written, or replaced.
+pub fn save_list(list: &StoredList) -> Result<(), String> {
+    let (metadata, bytes) = write_json_atomic_checked(&list.path, &list.data, || {
+        if list_changed_on_disk(list)? {
+            return Err(format!(
+                "{} changed on disk. Its newer contents were kept; your changes remain unsaved.",
+                list.path.display()
+            ));
+        }
+        Ok(())
+    })?;
+    list.stamp.set(Some(stamp_from_metadata(&metadata)));
+    *list.source_bytes.borrow_mut() = Some(bytes.into());
+    Ok(())
+}
+
+/// Compares the file with its last loaded or saved bytes on a metadata mismatch.
+///
+/// # Returns
+/// Whether its contents differ from the observed version, or its presence changed.
+///
+/// # Errors
+/// Returns an error when the file metadata or required contents cannot be read.
+pub fn list_changed_on_disk(list: &StoredList) -> Result<bool, String> {
+    let current = match fs::metadata(&list.path) {
+        Ok(metadata) => Some(stamp_from_metadata(&metadata)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => {
+            return Err(format!(
+                "could not inspect {}: {error}",
+                list.path.display()
+            ));
+        }
+    };
+    if current == list.stamp.get() {
+        return Ok(false);
+    }
+    if current.is_some()
+        && list.stamp.get().is_some()
+        && let Some(original) = list.source_bytes.borrow().as_ref()
+    {
+        let bytes = fs::read(&list.path)
+            .map_err(|error| format!("could not read {}: {error}", list.path.display()))?;
+        return Ok(bytes.as_slice() != original.as_ref());
+    }
+    Ok(true)
 }

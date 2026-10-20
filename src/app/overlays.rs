@@ -348,10 +348,9 @@ impl MinimalistApp {
                         state.request_focus = false;
                     }
 
-                    if state.failure.is_some()
-                        && state
-                            .selected_list_id
-                            .is_some_and(|id| self.has_save_conflict(id))
+                    if state
+                        .selected_list_id
+                        .is_some_and(|id| self.has_save_conflict(id))
                     {
                         recover = ui.button("Keep local copy and reload").clicked();
                     }
@@ -413,8 +412,22 @@ impl MinimalistApp {
                         .on_hover_text(error);
                     }
                     ui.add_space(8.0);
+                    let conflicted = state
+                        .selected_list_id
+                        .is_some_and(|id| self.has_save_conflict(id));
                     ui.horizontal(|ui| {
-                        ui.label(self.rich("Enter adds · Esc cancels", 12.0, palette.muted));
+                        ui.label(self.rich(
+                            if conflicted {
+                                "Esc cancels"
+                            } else {
+                                "Enter adds · Esc cancels"
+                            },
+                            12.0,
+                            palette.muted,
+                        ));
+                        if conflicted {
+                            return;
+                        }
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             submit |= ui
                                 .add_enabled(
@@ -434,7 +447,9 @@ impl MinimalistApp {
                                 .clicked();
                         });
                     });
-                    submit |= text_input_shortcuts(ui, &response).0;
+                    if !conflicted {
+                        submit |= text_input_shortcuts(ui, &response).0;
+                    }
                     self.keyboard_focus_ui(ui, palette);
                 });
         });

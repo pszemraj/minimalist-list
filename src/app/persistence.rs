@@ -113,6 +113,9 @@ impl MinimalistApp {
         let saved = match storage::save_list(&list) {
             Ok(()) => {
                 self.lists[index].stamp.set(list.stamp.get());
+                self.lists[index]
+                    .source_bytes
+                    .clone_from(&list.source_bytes);
                 self.complete_list_save(index)
             }
             Err(error) => {
@@ -215,7 +218,9 @@ impl MinimalistApp {
             .copied()
             .collect();
         for id in ids {
-            if let Some(index) = self.list_index(id) {
+            if !self.has_save_conflict(id)
+                && let Some(index) = self.list_index(id)
+            {
                 self.save_list_index(index);
             }
         }
@@ -293,7 +298,14 @@ impl MinimalistApp {
                 }
                 if !success_only {
                     ui.horizontal_wrapped(|ui| {
-                        if dirty && ui.button("Retry save").clicked() {
+                        let retryable = self.persistence.settings_dirty
+                            || self
+                                .persistence
+                                .dirty_lists
+                                .iter()
+                                .chain(self.persistence.pending_filenames.iter())
+                                .any(|id| !self.has_save_conflict(*id));
+                        if retryable && ui.button("Retry save").clicked() {
                             self.retry_dirty_lists();
                         }
                         let conflict = self

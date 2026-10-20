@@ -270,3 +270,154 @@ fn failed_capture_recovery_preserves_underlying_unsubmitted_context_and_rename()
     assert_eq!(fs::read(&remote.path).unwrap(), remote_bytes);
     fs::remove_dir_all(app.workspace).unwrap();
 }
+
+#[test]
+fn retry_save_only_appears_for_independent_recoverable_writes() {
+    for independent in ["none", "dirty list", "preferences", "filename"] {
+        let (ctx, mut app) = test_app();
+        let conflicted = app.lists[0].key;
+        let mut remote = storage::load_workspace(&app.workspace)
+            .unwrap()
+            .lists
+            .remove(0);
+        remote.data.tasks.push(Task::new("Remote task"));
+        storage::save_list(&remote).unwrap();
+        let remote_bytes = fs::read(&remote.path).unwrap();
+        app.lists[0].data.tasks.push(Task::new("Local task"));
+        assert!(!app.save_list_index(0));
+        let mut other_id = None;
+        if matches!(independent, "dirty list" | "filename") {
+            let other =
+                storage::create_list(&app.workspace, "Independent", crate::model::Accent::Mint)
+                    .unwrap();
+            other_id = Some(other.key);
+            app.lists.push(other);
+            if independent == "dirty list" {
+                app.lists[1].data.tasks.push(Task::new("Retry this task"));
+                app.persistence.dirty_lists.insert(other_id.unwrap());
+            } else {
+                app.lists[1].data.title = "Renamed independent list".into();
+                app.persistence.pending_filenames.insert(other_id.unwrap());
+            }
+        } else if independent == "preferences" {
+            app.settings.font_size = 24.0;
+            app.persistence.settings_dirty = true;
+        }
+        let palette = app.palette();
+        let mut output = None;
+        for _ in 0..3 {
+            output = Some(run_frame(&ctx, Default::default(), |ui| {
+                app.status_ui(ui, palette)
+            }));
+        }
+        let output = output.unwrap();
+        let shown = |label| {
+            output.shapes.iter().any(|shape| {
+                matches!(&shape.shape,
+                    egui::epaint::Shape::Text(text) if text.galley.text() == label
+                )
+            })
+        };
+        assert!(shown("Keep local copy and reload"), "{independent}");
+        assert_eq!(shown("Retry save"), independent != "none", "{independent}");
+        assert!(!app.retry_dirty_lists());
+        assert!(app.persistence.dirty_lists.contains(&conflicted));
+        assert_eq!(fs::read(&remote.path).unwrap(), remote_bytes);
+        if let Some(other_id) = other_id {
+            assert!(!app.persistence.dirty_lists.contains(&other_id));
+            assert!(!app.persistence.pending_filenames.contains(&other_id));
+            let other = storage::load_workspace(&app.workspace)
+                .unwrap()
+                .lists
+                .into_iter()
+                .find(|list| list.key == other_id)
+                .unwrap();
+            if independent == "dirty list" {
+                assert_eq!(other.data.tasks[0].text, "Retry this task");
+            } else {
+                assert!(
+                    other
+                        .path
+                        .file_name()
+                        .unwrap()
+                        .to_string_lossy()
+                        .starts_with("renamed-independent-list--")
+                );
+            }
+        } else if independent == "preferences" {
+            assert_eq!(storage::load_settings().unwrap().font_size, 24.0);
+        }
+        fs::remove_dir_all(app.workspace).unwrap();
+    }
+}
+
+#[test]
+fn conflicted_context_and_quick_add_offer_recovery_without_retry_actions() {
+    for context in [true, false] {
+        let (ctx, mut app) = test_app();
+        let task = Task::new("Existing task");
+        let task_id = task.id;
+        let list = app.lists[0].key;
+        app.lists[0].data.tasks.push(task);
+        assert!(app.save_list_index(0));
+        let mut remote = storage::load_workspace(&app.workspace)
+            .unwrap()
+            .lists
+            .remove(0);
+        remote.data.tasks[0].text = "Remote title".into();
+        storage::save_list(&remote).unwrap();
+        let remote_bytes = fs::read(&remote.path).unwrap();
+        if context {
+            app.open_task_context(list, task_id, false);
+            app.task_context.as_mut().unwrap().text = "Local context draft".into();
+            assert!(!app.save_task_context());
+        } else {
+            app.open_quick_capture(Some(list));
+            app.quick_capture.as_mut().unwrap().text = "Quick add draft".into();
+            run_frame(&ctx, Default::default(), |_| {
+                app.overlay_ui(&ctx, app.palette())
+            });
+            run_frame(
+                &ctx,
+                egui::RawInput {
+                    events: crate::app::tests::chord(egui::Key::Enter, egui::Modifiers::NONE),
+                    ..Default::default()
+                },
+                |_| app.overlay_ui(&ctx, app.palette()),
+            );
+            assert!(app.quick_capture.as_ref().unwrap().failure.is_some());
+        }
+        assert!(app.has_save_conflict(list));
+        let mut output = None;
+        for _ in 0..3 {
+            output = Some(run_frame(&ctx, Default::default(), |_| {
+                app.task_context_ui(&ctx);
+                app.overlay_ui(&ctx, app.palette());
+            }));
+        }
+        let output = output.unwrap();
+        let shown = |label| {
+            output.shapes.iter().any(|shape| {
+                matches!(&shape.shape,
+                    egui::epaint::Shape::Text(text) if text.galley.text() == label
+                )
+            })
+        };
+        assert!(shown("Keep local copy and reload"));
+        assert!(!shown("Retry save"));
+        assert!(!shown(if context { "Save" } else { "Add" }));
+        if !context {
+            run_frame(
+                &ctx,
+                egui::RawInput {
+                    events: crate::app::tests::chord(egui::Key::Enter, egui::Modifiers::NONE),
+                    ..Default::default()
+                },
+                |_| app.overlay_ui(&ctx, app.palette()),
+            );
+            assert_eq!(app.quick_capture.as_ref().unwrap().text, "Quick add draft");
+        }
+        assert_eq!(fs::read(&remote.path).unwrap(), remote_bytes);
+        fs::remove_dir_all(app.workspace).unwrap();
+    }
+}

@@ -32,8 +32,8 @@ src/app/task_text.rs        Title wrapping and hover scrolling
 src/app/theme.rs            Fonts, palettes, and shared rendering helpers
 src/app/window.rs           Tray hiding, restoration, and shutdown
 src/model.rs                Serializable list and task model
-src/storage.rs              Paths, preference merging, list loading, and save guards
-src/storage_io.rs           Atomic replacement and abandoned temporary-file cleanup
+src/storage.rs              Paths, preference merging, and list loading
+src/storage_io.rs           Guarded list saves, atomic replacement, and temporary-file cleanup
 src/tray.rs                 Native tray icon and menu actions
 ```
 

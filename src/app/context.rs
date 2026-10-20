@@ -192,11 +192,12 @@ impl MinimalistApp {
                         ui.add(egui::Label::new(self.rich(error, 13.0, palette.danger)).wrap());
                     });
             }
-            if editor.failure.is_some() && self.has_save_conflict(editor.list) {
+            let conflicted = self.has_save_conflict(editor.list);
+            if conflicted && !editor.archived {
                 recover = ui.button("Keep local copy and reload").clicked();
             }
             ui.horizontal(|ui| {
-                if !editor.archived {
+                if !editor.archived && !conflicted {
                     save = ui
                         .button(if editor.failure.is_some() {
                             "Retry save"
