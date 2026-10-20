@@ -741,6 +741,11 @@ impl eframe::App for MinimalistApp {
     }
 
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        let focused = frame.winit_window().map_or_else(
+            || ctx.input(|input| input.focused),
+            |window| window.has_focus(),
+        );
+        ctx.all_styles_mut(|style| style.visuals.text_cursor.blink = focused);
         let minimized = frame
             .winit_window()
             .is_some_and(|window| window.is_minimized().unwrap_or(false));

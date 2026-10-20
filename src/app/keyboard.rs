@@ -435,12 +435,33 @@ impl MinimalistApp {
                 self.cycle_list(list, true);
             } else if take_shortcut(ctx, NEXT_LIST) {
                 self.cycle_list(list, false);
-            } else if !ctx.text_edit_focused() && take_shortcut(ctx, CLEAR_COMPLETED) {
+            } else if self.archive_shortcut_allowed(ctx, list)
+                && take_shortcut(ctx, CLEAR_COMPLETED)
+            {
                 self.begin_clear_completed(list);
             } else {
                 self.task_keyboard(ctx, list);
             }
         }
+    }
+
+    /// Keeps archive available in empty capture fields while protecting editor text.
+    fn archive_shortcut_allowed(&self, ctx: &egui::Context, list: Uuid) -> bool {
+        if self.editing.is_some() || self.details.editor.is_some() {
+            return false;
+        }
+        if !ctx.text_edit_focused() {
+            return true;
+        }
+        let focused = ctx.memory(|memory| memory.focused());
+        if focused == Some(Id::new(("new-task", list))) {
+            return self.new_task.is_empty();
+        }
+        self.subtasks_for.is_some_and(|(parent_list, task)| {
+            parent_list == list
+                && focused == Some(Id::new(("new-subtask", list, task)))
+                && self.new_subtask.is_empty()
+        })
     }
 
     fn take_backspace_to_lists(&self, ctx: &egui::Context, list: Uuid) -> bool {
@@ -808,7 +829,10 @@ impl MinimalistApp {
                 return;
             }
             if self.keyboard.anchor.is_some_and(|(id, item)| {
-                id == response.id && item.id() == id && !matches!(item, FocusItem::Archived(_, _))
+                id == response.id
+                    && ((item.id() == id && !matches!(item, FocusItem::Archived(_, _)))
+                        || matches!(item, FocusItem::Task(_, task)
+                            if id == Id::new(("task-text", task))))
             }) {
                 return;
             }

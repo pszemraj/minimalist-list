@@ -145,20 +145,18 @@ impl MinimalistApp {
         } else {
             false
         };
-        if response.has_focus() || row_focused {
+        if response.has_focus() {
             ui.painter().rect_stroke(
                 rect,
                 4.0,
                 Stroke::new(1.0, palette.accent),
                 egui::StrokeKind::Inside,
             );
-            if overflow > 0.0 {
-                egui::Tooltip::for_widget(&response).show(|ui| {
-                    ui.add(
-                        egui::Label::new(self.content_rich(&task.text, 16.0, palette.text)).wrap(),
-                    );
-                });
-            }
+        }
+        if (response.has_focus() || row_focused) && overflow > 0.0 {
+            egui::Tooltip::for_widget(&response).show(|ui| {
+                ui.add(egui::Label::new(self.content_rich(&task.text, 16.0, palette.text)).wrap());
+            });
         }
         response.on_hover_cursor(egui::CursorIcon::Text)
     }
@@ -202,6 +200,9 @@ mod tests {
             "A long task title that must remain readable through keyboard focus, including the entire final sentence.",
         );
         let id = task.id;
+        let row_id = super::super::keyboard::FocusItem::Task(list, id).id();
+        let title_id = Id::new(("task-text", id));
+        let palette = app.palette();
         app.lists[0].data.tasks.push(task.clone());
         app.request_task_focus = false;
         let mut frame = || {
@@ -219,12 +220,36 @@ mod tests {
             output
         };
         frame();
-        ctx.memory_mut(|memory| {
-            memory.request_focus(super::super::keyboard::FocusItem::Task(list, id).id())
-        });
+        ctx.memory_mut(|memory| memory.request_focus(row_id));
         frame();
         frame();
         let output = frame();
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::epaint::Shape::Text(text) if text.galley.text() == task.text && text.galley.rows.len() > 1)));
+        let row_rect = ctx.read_response(row_id).unwrap().rect;
+        let title_rect = ctx.read_response(title_id).unwrap().rect;
+        let outlines = |output: &egui::FullOutput, rect| {
+            output
+                .shapes
+                .iter()
+                .filter(|shape| {
+                    matches!(&shape.shape, egui::epaint::Shape::Rect(outline)
+                    if outline.rect == rect
+                        && outline.stroke.width > 0.0
+                        && outline.stroke.color == palette.accent)
+                })
+                .count()
+        };
+        assert_eq!(outlines(&output, row_rect), 1);
+        assert_eq!(outlines(&output, title_rect), 0);
+        assert_eq!(outlines(&output, title_rect.expand(1.0)), 0);
+
+        ctx.memory_mut(|memory| memory.request_focus(title_id));
+        frame();
+        frame();
+        let output = frame();
+        assert_eq!(outlines(&output, row_rect), 0);
+        assert_eq!(outlines(&output, title_rect), 1);
+        assert_eq!(outlines(&output, title_rect.expand(1.0)), 0);
         assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::epaint::Shape::Text(text) if text.galley.text() == task.text && text.galley.rows.len() > 1)));
         std::fs::remove_dir_all(&app.workspace).unwrap();
     }

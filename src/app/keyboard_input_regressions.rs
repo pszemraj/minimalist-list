@@ -96,7 +96,18 @@ fn subtask_enter_returns_focus_to_its_completion_control() {
 
 #[test]
 fn archive_shortcut_leaves_task_and_subtask_text_editors_untouched() {
-    for editor in 0..3 {
+    for (editor, text) in [
+        (0, "Draft"),
+        (0, " "),
+        (1, "Draft"),
+        (1, ""),
+        (1, " "),
+        (2, "Draft"),
+        (2, ""),
+        (2, " "),
+        (3, "Draft"),
+        (3, " "),
+    ] {
         let (ctx, mut app) = test_app();
         let list = app.lists[0].key;
         let mut task = Task::new("Completed parent");
@@ -107,17 +118,26 @@ fn archive_shortcut_leaves_task_and_subtask_text_editors_untouched() {
         app.lists[0].data.tasks.push(task);
         app.save_list_index(0);
         match editor {
-            0 => focus(&ctx, &mut app, Id::new(("new-task", list))),
+            0 => {
+                app.new_task = text.into();
+                focus(&ctx, &mut app, Id::new(("new-task", list)));
+            }
             1 => {
                 app.editing = Some((list, parent));
-                app.edit_text = "Editing the completed parent".into();
+                app.edit_text = text.into();
                 app.request_edit_focus = true;
+                idle(&ctx, &mut app);
+            }
+            2 => {
+                app.subtasks_for = Some((list, parent));
+                app.begin_subtask_edit(list, parent, child);
+                app.details.editor.as_mut().unwrap().text = text.into();
                 idle(&ctx, &mut app);
             }
             _ => {
                 app.subtasks_for = Some((list, parent));
-                app.begin_subtask_edit(list, parent, child);
-                idle(&ctx, &mut app);
+                app.new_subtask = text.into();
+                focus(&ctx, &mut app, Id::new(("new-subtask", list, parent)));
             }
         }
         assert!(ctx.text_edit_focused());
@@ -149,6 +169,67 @@ fn archive_shortcut_leaves_task_and_subtask_text_editors_untouched() {
         assert_eq!(saved.lists[0].data.archive[0].task.id, parent);
         cleanup(&app);
     }
+}
+
+#[test]
+fn archive_shortcut_works_in_empty_capture_after_open_add_and_child_capture() {
+    for scenario in 0..3 {
+        let (ctx, mut app) = test_app();
+        let list = app.lists[0].key;
+        let mut task = Task::new("Completed parent");
+        task.toggle();
+        let parent = task.id;
+        app.lists[0].data.tasks.push(task);
+        app.save_list_index(0);
+        app.open_list(list);
+        idle(&ctx, &mut app);
+        if scenario == 1 {
+            type_text(&ctx, &mut app, "New active task");
+            key(&ctx, &mut app, Key::Enter, Modifiers::NONE);
+            assert_eq!(app.lists[0].data.tasks.len(), 2);
+            assert!(app.new_task.is_empty());
+        } else if scenario == 2 {
+            app.subtasks_for = Some((list, parent));
+            focus(&ctx, &mut app, Id::new(("new-subtask", list, parent)));
+            assert!(app.new_subtask.is_empty());
+        }
+        assert!(ctx.text_edit_focused());
+        key(
+            &ctx,
+            &mut app,
+            Key::Backspace,
+            Modifiers::COMMAND | Modifiers::SHIFT,
+        );
+        assert!(app.clear_animation.is_some());
+        app.clear_animation.as_mut().unwrap().1 =
+            std::time::Instant::now() - std::time::Duration::from_secs(1);
+        idle(&ctx, &mut app);
+        let saved = storage::load_workspace(&app.workspace).unwrap();
+        assert_eq!(saved.lists[0].data.archive[0].task.id, parent);
+        assert_eq!(saved.lists[0].data.tasks.len(), usize::from(scenario == 1));
+        cleanup(&app);
+    }
+}
+
+#[test]
+fn text_before_archive_shortcut_in_one_frame_protects_the_capture_draft() {
+    let (ctx, mut app) = test_app();
+    let list = app.lists[0].key;
+    let mut task = Task::new("Keep completed task active");
+    task.toggle();
+    app.lists[0].data.tasks.push(task);
+    app.save_list_index(0);
+    focus(&ctx, &mut app, Id::new(("new-task", list)));
+    let mut events = vec![Event::Text("Typed before archive".into())];
+    events.extend(chord(Key::Backspace, Modifiers::COMMAND | Modifiers::SHIFT));
+    frame(&ctx, &mut app, events, 430.0);
+    assert_eq!(app.new_task, "Typed before archive");
+    assert!(app.clear_animation.is_none());
+    idle(&ctx, &mut app);
+    assert!(app.clear_animation.is_none());
+    assert_eq!(app.lists[0].data.tasks.len(), 1);
+    assert!(app.lists[0].data.archive.is_empty());
+    cleanup(&app);
 }
 
 #[test]

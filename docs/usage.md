@@ -62,7 +62,7 @@ Drag a task vertically to reorder it. Drag right past the threshold to complete 
 
 **List options -> Sort** selects Manual, Title, Newest, Oldest, or Incomplete first. In Manual order, new tasks appear at the top. Return to Manual to recover your arrangement and use dragging or reorder shortcuts. See [stored order](storage.md#file-layout) for how sorting affects list files.
 
-`Ctrl+Shift+Backspace`, outside a text editor, or **Archive completed** moves completed tasks into restorable History. With no completed tasks, it leaves the list file untouched.
+`Ctrl+Shift+Backspace` or **Archive completed** moves completed tasks into restorable History. The shortcut works from an empty task or subtask entry; nonempty fields and inline editors keep editing text. With no completed tasks, it leaves the list file untouched.
 
 Deleting a task or child shows **Undo**. Select it, or press `Ctrl+Z` outside a text editor, to restore the latest deletion with its contents, completion, and original position. This recovery is available for the current workspace until another deletion, dismissal, or workspace switch; it is not saved across restarts. Whole-list deletion uses its separate confirmation.
 
@@ -97,6 +97,8 @@ In Settings, use Up/Down to move between rows and Left/Right to move within a ro
 The header's `pin` control toggles always-on-top mode. Turn off **Show window title bar** to use the app's draggable title and visible `x` close control. Window size and position are saved for the next launch.
 
 Typography settings control proportional or monospace text, real regular or bold faces, content size, and row spacing. Task titles, children, editors, History, and Find scale together. Reduce row spacing to fit more tasks on screen.
+
+The text cursor blinks only while the window has keyboard focus.
 
 **Long titles** has two modes: **Scroll** (the default) keeps one line, uses an ellipsis at rest, and scrolls horizontally after a short hover delay; **Wrap** shows the full title across as many lines as needed. Scrolling stops at the end, or when you leave the title, edit, or drag. Leave and reenter the title to scroll again. Keyboard focus shows a truncated task title in a wrapped tooltip. In Wrap mode, hovering a card or task for two seconds shows its full title and basic information; context stays hidden.
 

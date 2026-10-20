@@ -28,6 +28,7 @@ fn needs_current_editor_input(event: &Event) -> bool {
             NEXT_LIST,
             PREVIOUS_LIST,
             BACK_TO_LISTS,
+            CLEAR_COMPLETED,
         ]
         .iter()
         .any(|binding| {
