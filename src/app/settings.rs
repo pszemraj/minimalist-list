@@ -249,6 +249,8 @@ impl MinimalistApp {
             if self.tray.is_some() {
                 let hint = if cfg!(target_os = "macos") {
                     "Close hides the window. Use the menu-bar icon to Show or Quit."
+                } else if cfg!(target_os = "linux") {
+                    "Close, Ctrl+W, or minimize hides the window to the tray. Some desktops, including GNOME, disable minimize for windows hidden from the taskbar. Use the tray menu to Show or Quit."
                 } else {
                     "Close or minimize hides the window. Use the tray menu to Show or Quit."
                 };
