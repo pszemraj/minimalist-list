@@ -509,11 +509,15 @@ pub fn sort_lists(lists: &mut [StoredList]) {
 ///
 /// Returns an error when the new list cannot be serialized, written, or installed.
 pub fn create_list(root: &Path, title: &str, accent: Accent) -> Result<StoredList, String> {
-    let data = TodoList::new(title, accent);
-    let path = root.join("lists").join(list_file_name(title, data.id));
+    save_new_list(root, TodoList::new(title, accent))
+}
+
+fn save_new_list(root: &Path, data: TodoList) -> Result<StoredList, String> {
     let stored = StoredList {
         key: data.id,
-        path,
+        path: root
+            .join("lists")
+            .join(list_file_name(&data.title, data.id)),
         data,
         stamp: Cell::new(None),
     };
@@ -591,16 +595,7 @@ pub fn create_local_copy(root: &Path, source: &StoredList) -> Result<StoredList,
             child.id = Uuid::new_v4();
         }
     }
-    let copy = StoredList {
-        key: data.id,
-        path: root
-            .join("lists")
-            .join(list_file_name(&data.title, data.id)),
-        data,
-        stamp: Cell::new(None),
-    };
-    save_list(&copy)?;
-    Ok(copy)
+    save_new_list(root, data)
 }
 
 fn filename_title(title: &str) -> String {
@@ -831,30 +826,7 @@ fn default_workspace_dir_from(
     platform: PathPlatform,
     lookup: &impl Fn(&str) -> Option<OsString>,
 ) -> PathBuf {
-    if let Some(root) = lookup("XDG_DATA_HOME").filter(|value| !value.is_empty()) {
-        return PathBuf::from(root).join(APP_DIR);
-    }
-    let root = match platform {
-        #[cfg(any(target_os = "windows", test))]
-        PathPlatform::Windows => lookup("LOCALAPPDATA")
-            .filter(|value| !value.is_empty())
-            .map(PathBuf::from)
-            .unwrap_or_else(|| home_dir_from(platform, lookup).join("AppData/Local")),
-        #[cfg(any(target_os = "macos", test))]
-        PathPlatform::Macos => home_dir_from(platform, lookup).join("Library/Application Support"),
-        #[cfg(any(not(any(target_os = "windows", target_os = "macos")), test))]
-        PathPlatform::Xdg => xdg_dir_from(lookup, "XDG_DATA_HOME", ".local/share"),
-    };
-    let preferred = root.join(APP_DIR);
-    match platform {
-        #[cfg(any(not(any(target_os = "windows", target_os = "macos")), test))]
-        PathPlatform::Xdg => preferred,
-        #[cfg(any(target_os = "windows", target_os = "macos", test))]
-        _ => prefer_existing_path(
-            preferred,
-            xdg_dir_from(lookup, "XDG_DATA_HOME", ".local/share").join(APP_DIR),
-        ),
-    }
+    local_path_from(platform, lookup, LocalPathKind::Workspace)
 }
 
 #[cfg(not(test))]
@@ -879,30 +851,59 @@ fn settings_path_from(
     platform: PathPlatform,
     lookup: &impl Fn(&str) -> Option<OsString>,
 ) -> PathBuf {
-    if let Some(root) = lookup("XDG_CONFIG_HOME").filter(|value| !value.is_empty()) {
-        return PathBuf::from(root).join(APP_DIR).join("settings.json");
+    local_path_from(platform, lookup, LocalPathKind::Settings)
+}
+
+#[derive(Clone, Copy)]
+enum LocalPathKind {
+    Workspace,
+    Settings,
+}
+
+fn local_path_from(
+    platform: PathPlatform,
+    lookup: &impl Fn(&str) -> Option<OsString>,
+    kind: LocalPathKind,
+) -> PathBuf {
+    let (xdg_variable, xdg_fallback) = match kind {
+        LocalPathKind::Workspace => ("XDG_DATA_HOME", ".local/share"),
+        LocalPathKind::Settings => ("XDG_CONFIG_HOME", ".config"),
+    };
+    let app_path = |root: PathBuf| {
+        let path = root.join(APP_DIR);
+        match kind {
+            LocalPathKind::Workspace => path,
+            LocalPathKind::Settings => path.join("settings.json"),
+        }
+    };
+    if let Some(root) = lookup(xdg_variable).filter(|value| !value.is_empty()) {
+        return app_path(PathBuf::from(root));
     }
     let root = match platform {
         #[cfg(any(target_os = "windows", test))]
-        PathPlatform::Windows => lookup("APPDATA")
-            .filter(|value| !value.is_empty())
-            .map(PathBuf::from)
-            .unwrap_or_else(|| home_dir_from(platform, lookup).join("AppData/Roaming")),
+        PathPlatform::Windows => {
+            let (variable, fallback) = match kind {
+                LocalPathKind::Workspace => ("LOCALAPPDATA", "AppData/Local"),
+                LocalPathKind::Settings => ("APPDATA", "AppData/Roaming"),
+            };
+            lookup(variable)
+                .filter(|value| !value.is_empty())
+                .map(PathBuf::from)
+                .unwrap_or_else(|| home_dir_from(platform, lookup).join(fallback))
+        }
         #[cfg(any(target_os = "macos", test))]
         PathPlatform::Macos => home_dir_from(platform, lookup).join("Library/Application Support"),
         #[cfg(any(not(any(target_os = "windows", target_os = "macos")), test))]
-        PathPlatform::Xdg => xdg_dir_from(lookup, "XDG_CONFIG_HOME", ".config"),
+        PathPlatform::Xdg => xdg_dir_from(lookup, xdg_variable, xdg_fallback),
     };
-    let preferred = root.join(APP_DIR).join("settings.json");
+    let preferred = app_path(root);
     match platform {
         #[cfg(any(not(any(target_os = "windows", target_os = "macos")), test))]
         PathPlatform::Xdg => preferred,
         #[cfg(any(target_os = "windows", target_os = "macos", test))]
         _ => prefer_existing_path(
             preferred,
-            xdg_dir_from(lookup, "XDG_CONFIG_HOME", ".config")
-                .join(APP_DIR)
-                .join("settings.json"),
+            app_path(xdg_dir_from(lookup, xdg_variable, xdg_fallback)),
         ),
     }
 }

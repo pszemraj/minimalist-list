@@ -11,16 +11,13 @@ use egui::{Event, Key, Modifiers};
 
 fn frame(ctx: &egui::Context, app: &mut MinimalistApp, events: Vec<Event>) {
     app.view_zoom = 1.0;
-    let input = egui::RawInput {
-        time: Some(ctx.input(|input| input.time) + 0.3),
-        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(520.0, 600.0))),
+    let input = crate::app::tests::frame_input(
+        Vec2::new(520.0, 600.0),
+        ctx.input(|input| input.time) + 0.3,
         events,
-        ..Default::default()
-    };
+    );
     app.update_motion(ctx);
-    crate::app::tests::run_frame(ctx, input, |ui| {
-        <MinimalistApp as eframe::App>::ui(app, ui, &mut eframe::Frame::_new_kittest());
-    });
+    crate::app::tests::run_app_frame(ctx, app, input);
 }
 
 fn idle(ctx: &egui::Context, app: &mut MinimalistApp) {

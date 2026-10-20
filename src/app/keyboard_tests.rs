@@ -11,21 +11,13 @@ fn frame(
     events: Vec<Event>,
     width: f32,
 ) -> egui::FullOutput {
-    let input = egui::RawInput {
-        time: Some(ctx.input(|input| input.time) + 0.3),
-        screen_rect: Some(egui::Rect::from_min_size(
-            egui::Pos2::ZERO,
-            egui::vec2(width, 500.0),
-        )),
+    let input = crate::app::tests::frame_input(
+        egui::vec2(width, 500.0),
+        ctx.input(|input| input.time) + 0.3,
         events,
-        ..Default::default()
-    };
+    );
     app.update_motion(ctx);
-    crate::app::tests::run_frame(ctx, input, |ui| {
-        // eframe provides this hidden constructor for headless App tests.
-        // Review its compatibility when upgrading the locked eframe version.
-        <MinimalistApp as eframe::App>::ui(app, ui, &mut eframe::Frame::_new_kittest());
-    })
+    crate::app::tests::run_app_frame(ctx, app, input)
 }
 
 fn idle(ctx: &egui::Context, app: &mut MinimalistApp) {

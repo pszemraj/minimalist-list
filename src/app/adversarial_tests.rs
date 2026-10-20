@@ -9,18 +9,12 @@ fn ui_frame(
     events: Vec<egui::Event>,
 ) -> egui::FullOutput {
     app.view_zoom = 1.0;
-    let input = egui::RawInput {
-        time: Some(ctx.input(|input| input.time) + 0.3),
-        screen_rect: Some(egui::Rect::from_min_size(
-            egui::Pos2::ZERO,
-            egui::vec2(520.0, 600.0),
-        )),
+    let input = crate::app::tests::frame_input(
+        egui::vec2(520.0, 600.0),
+        ctx.input(|input| input.time) + 0.3,
         events,
-        ..Default::default()
-    };
-    crate::app::tests::run_frame(ctx, input, |ui| {
-        <MinimalistApp as eframe::App>::ui(app, ui, &mut eframe::Frame::_new_kittest());
-    })
+    );
+    crate::app::tests::run_app_frame(ctx, app, input)
 }
 
 fn idle(ctx: &egui::Context, app: &mut MinimalistApp) {

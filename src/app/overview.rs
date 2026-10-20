@@ -181,18 +181,9 @@ impl MinimalistApp {
                             ui.add_space(4.0);
                             ui.horizontal_wrapped(|ui| {
                                 for accent in Accent::ALL {
-                                    let p = Palette::from_accent(accent);
                                     let selected = accent == self.new_list_accent;
-                                    let response = ui.add(
-                                        Button::new(self.rich(accent.label(), 13.0, p.text))
-                                            .selected(selected)
-                                            .fill(if selected { p.raised } else { p.surface })
-                                            .stroke(Stroke::new(
-                                                if selected { 2.0 } else { 0.0 },
-                                                p.accent,
-                                            ))
-                                            .corner_radius(12.0),
-                                    );
+                                    let response =
+                                        ui.add(self.accent_choice_button(accent, selected));
                                     self.keyboard.creation_choices.push(response.id);
                                     if response.clicked() {
                                         self.new_list_accent = accent;

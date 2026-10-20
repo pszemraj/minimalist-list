@@ -122,8 +122,8 @@ impl MinimalistApp {
         });
     }
 
-    /// Opens quick capture, preferring the hinted list when no saved destination applies.
-    pub(super) fn open_quick_capture(&mut self, hinted_list_id: Option<Uuid>) {
+    /// Saves the underlying editor and focus before opening capture or search.
+    fn prepare_capture_or_search(&mut self) {
         self.cancel_overview_drag();
         self.drag = None;
         if self.quick_capture.is_none() && self.find.is_none() {
@@ -131,6 +131,11 @@ impl MinimalistApp {
         }
         self.keyboard.pending = None;
         self.finish_inline_edit();
+    }
+
+    /// Opens quick capture, preferring the hinted list when no saved destination applies.
+    pub(super) fn open_quick_capture(&mut self, hinted_list_id: Option<Uuid>) {
+        self.prepare_capture_or_search();
         if self.find.is_some() {
             self.find_draft = self.find.take();
         }
@@ -166,13 +171,7 @@ impl MinimalistApp {
 
     /// Opens global search and requests focus for its query field.
     pub(super) fn open_find(&mut self) {
-        self.cancel_overview_drag();
-        self.drag = None;
-        if self.quick_capture.is_none() && self.find.is_none() {
-            self.keyboard.overlay_return = self.navigation_return_focus();
-        }
-        self.keyboard.pending = None;
-        self.finish_inline_edit();
+        self.prepare_capture_or_search();
         if self.quick_capture.is_some() {
             self.capture_draft = self.quick_capture.take();
         }
@@ -451,13 +450,9 @@ impl MinimalistApp {
                 let mut candidate = self.lists[index].clone();
                 let task_id = task.id;
                 candidate.data.tasks.insert(0, task);
-                self.prepare_list_for_save(&mut candidate);
-                match crate::storage::save_list(&candidate) {
+                let title = candidate.data.title.clone();
+                match self.save_list_candidate(index, candidate) {
                     Ok(()) => {
-                        let title = candidate.data.title.clone();
-                        self.lists[index] = candidate;
-                        self.apply_task_sorts();
-                        self.complete_list_save(index);
                         self.newest_task = Some((task_id, Instant::now()));
                         self.settings.last_capture_list_id = Some(list_id);
                         self.save_settings();
@@ -476,7 +471,6 @@ impl MinimalistApp {
                         return;
                     }
                     Err(error) => {
-                        self.record_save_conflict(&candidate);
                         self.status = Some(error.clone());
                         state.failure = Some(error);
                     }

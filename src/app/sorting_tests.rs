@@ -228,7 +228,9 @@ fn sorting_settings_return_to_the_same_task_identity() {
     app.keyboard.pending = Some(focus);
     let render = |app: &mut MinimalistApp| {
         app.view_zoom = 1.0;
-        let mut output = ctx.run_ui(
+        crate::app::tests::run_app_frame(
+            &ctx,
+            app,
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -236,9 +238,7 @@ fn sorting_settings_return_to_the_same_task_identity() {
                 )),
                 ..Default::default()
             },
-            |ui| <MinimalistApp as eframe::App>::ui(app, ui, &mut eframe::Frame::_new_kittest()),
         );
-        output.textures_delta.clear();
     };
     for _ in 0..3 {
         render(&mut app);

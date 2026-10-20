@@ -234,15 +234,11 @@ fn overlay_frame(
 ) -> Vec<String> {
     let output = crate::app::tests::run_frame(
         ctx,
-        egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(430.0, 500.0),
-            )),
-            time: Some(ctx.input(|input| input.time) + 0.3),
+        crate::app::tests::frame_input(
+            egui::vec2(430.0, 500.0),
+            ctx.input(|input| input.time) + 0.3,
             events,
-            ..Default::default()
-        },
+        ),
         |_| {
             app.handle_app_shortcuts(ctx);
             app.overlay_ui(ctx, app.palette());

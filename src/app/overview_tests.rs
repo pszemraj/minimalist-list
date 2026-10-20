@@ -8,15 +8,7 @@ fn grid_frame(
     time: f64,
     events: Vec<egui::Event>,
 ) -> egui::FullOutput {
-    let mut input = egui::RawInput {
-        screen_rect: Some(Rect::from_min_size(
-            egui::Pos2::ZERO,
-            egui::vec2(width, 760.0),
-        )),
-        time: Some(time),
-        events,
-        ..Default::default()
-    };
+    let mut input = crate::app::tests::frame_input(egui::vec2(width, 760.0), time, events);
     input
         .viewports
         .get_mut(&egui::ViewportId::ROOT)
@@ -42,18 +34,14 @@ fn pointer(point: egui::Pos2, pressed: bool) -> Vec<egui::Event> {
 
 fn root_frame(ctx: &egui::Context, app: &mut MinimalistApp, events: Vec<egui::Event>) {
     app.update_motion(ctx);
-    crate::app::tests::run_frame(
+    crate::app::tests::run_app_frame(
         ctx,
-        egui::RawInput {
-            screen_rect: Some(Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(520.0, 760.0),
-            )),
-            time: Some(ctx.input(|input| input.time) + 0.1),
+        app,
+        crate::app::tests::frame_input(
+            egui::vec2(520.0, 760.0),
+            ctx.input(|input| input.time) + 0.1,
             events,
-            ..Default::default()
-        },
-        |ui| <MinimalistApp as eframe::App>::ui(app, ui, &mut eframe::Frame::_new_kittest()),
+        ),
     );
 }
 
@@ -558,15 +546,11 @@ fn frame(
 ) -> egui::FullOutput {
     crate::app::tests::run_frame(
         ctx,
-        egui::RawInput {
-            screen_rect: Some(Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(320.0, 760.0),
-            )),
-            time: Some(ctx.input(|input| input.time) + 0.3),
+        crate::app::tests::frame_input(
+            egui::vec2(320.0, 760.0),
+            ctx.input(|input| input.time) + 0.3,
             events,
-            ..Default::default()
-        },
+        ),
         |ui| app.overview_ui(ui, app.palette()),
     )
 }

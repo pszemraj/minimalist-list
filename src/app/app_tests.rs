@@ -21,6 +21,45 @@ pub(super) fn run_frame(
     output
 }
 
+/// Builds frame input with an explicit viewport, clock, and event batch.
+///
+/// # Arguments
+/// - `size` - Logical viewport dimensions.
+/// - `time` - Monotonic test clock in seconds.
+/// - `events` - Input events delivered together during this frame.
+///
+/// # Returns
+/// Frame input whose other fields retain egui's defaults.
+pub(super) fn frame_input(size: egui::Vec2, time: f64, events: Vec<egui::Event>) -> egui::RawInput {
+    egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+        time: Some(time),
+        events,
+        ..Default::default()
+    }
+}
+
+/// Runs the application's complete UI through the shared headless renderer.
+///
+/// # Arguments
+/// - `ctx` - Context retaining focus and widget state between frames.
+/// - `app` - Application under test.
+/// - `input` - Scenario-specific viewport, clock, and input events.
+///
+/// # Returns
+/// The frame output without texture updates.
+pub(super) fn run_app_frame(
+    ctx: &egui::Context,
+    app: &mut MinimalistApp,
+    input: egui::RawInput,
+) -> egui::FullOutput {
+    run_frame(ctx, input, |ui| {
+        // eframe provides this hidden constructor for headless App tests.
+        // Review its compatibility when upgrading the locked eframe version.
+        <MinimalistApp as eframe::App>::ui(app, ui, &mut eframe::Frame::_new_kittest());
+    })
+}
+
 /// Creates press and release events for a key with the same modifiers.
 ///
 /// # Arguments

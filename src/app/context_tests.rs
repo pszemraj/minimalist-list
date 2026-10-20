@@ -124,20 +124,10 @@ fn app_frame(
     events: Vec<egui::Event>,
     time: f64,
 ) -> egui::FullOutput {
-    crate::app::tests::run_frame(
+    crate::app::tests::run_app_frame(
         ctx,
-        egui::RawInput {
-            time: Some(time),
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(520.0, 700.0),
-            )),
-            events,
-            ..Default::default()
-        },
-        |ui| {
-            <MinimalistApp as eframe::App>::ui(app, ui, &mut eframe::Frame::_new_kittest());
-        },
+        app,
+        crate::app::tests::frame_input(egui::vec2(520.0, 700.0), time, events),
     )
 }
 
@@ -592,7 +582,9 @@ fn native_copy_event_with_shift_copies_whole_task_and_plain_copy_keeps_selection
         chord(egui::Key::A, egui::Modifiers::COMMAND),
         1.3,
     );
-    let mut output = ctx.run_ui(
+    let output = crate::app::tests::run_app_frame(
+        &ctx,
+        &mut app,
         egui::RawInput {
             events: vec![
                 egui::Event::ModifiersChanged(egui::Modifiers {
@@ -603,9 +595,6 @@ fn native_copy_event_with_shift_copies_whole_task_and_plain_copy_keeps_selection
                 egui::Event::ModifiersChanged(egui::Modifiers::NONE),
             ],
             ..Default::default()
-        },
-        |ui| {
-            <MinimalistApp as eframe::App>::ui(&mut app, ui, &mut eframe::Frame::_new_kittest());
         },
     );
     assert_eq!(
@@ -621,8 +610,9 @@ fn native_copy_event_with_shift_copies_whole_task_and_plain_copy_keeps_selection
             .count(),
         1
     );
-    output.textures_delta.clear();
-    let mut output = ctx.run_ui(
+    let output = crate::app::tests::run_app_frame(
+        &ctx,
+        &mut app,
         egui::RawInput {
             events: vec![
                 egui::Event::ModifiersChanged(egui::Modifiers::COMMAND),
@@ -630,12 +620,8 @@ fn native_copy_event_with_shift_copies_whole_task_and_plain_copy_keeps_selection
             ],
             ..Default::default()
         },
-        |ui| {
-            <MinimalistApp as eframe::App>::ui(&mut app, ui, &mut eframe::Frame::_new_kittest());
-        },
     );
     assert_eq!(copied(&output), Some("Selected editor text"));
-    output.textures_delta.clear();
     let mut events = vec![egui::Event::Text("Latest selected title".into())];
     events.extend(chord(egui::Key::A, egui::Modifiers::COMMAND));
     events.extend([
@@ -792,7 +778,9 @@ fn context_presence_control_is_distinct_and_opens_exact_task_at_narrow_width() {
     app.view_zoom = 1.0;
     app.request_task_focus = false;
     let mut draw = |events| {
-        let mut output = ctx.run_ui(
+        crate::app::tests::run_app_frame(
+            &ctx,
+            &mut app,
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -801,16 +789,7 @@ fn context_presence_control_is_distinct_and_opens_exact_task_at_narrow_width() {
                 events,
                 ..Default::default()
             },
-            |ui| {
-                <MinimalistApp as eframe::App>::ui(
-                    &mut app,
-                    ui,
-                    &mut eframe::Frame::_new_kittest(),
-                );
-            },
-        );
-        output.textures_delta.clear();
-        output
+        )
     };
     draw(vec![]);
     let output = draw(vec![]);

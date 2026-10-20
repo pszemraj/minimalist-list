@@ -128,6 +128,36 @@ impl MinimalistApp {
         saved
     }
 
+    /// Writes a modal's candidate before adopting its changes in the loaded list.
+    ///
+    /// # Arguments
+    /// - `index` - Loaded list to replace after a successful write.
+    /// - `candidate` - Modified list, still independent of the loaded contents.
+    ///
+    /// # Returns
+    /// Success after adopting the candidate and restoring the selected view sort.
+    ///
+    /// # Errors
+    /// Returns the storage error and retains any external-change conflict snapshot.
+    ///
+    /// # Panics
+    /// Panics if the caller supplies an invalid loaded-list index.
+    pub(super) fn save_list_candidate(
+        &mut self,
+        index: usize,
+        mut candidate: StoredList,
+    ) -> Result<(), String> {
+        self.prepare_list_for_save(&mut candidate);
+        if let Err(error) = storage::save_list(&candidate) {
+            self.record_save_conflict(&candidate);
+            return Err(error);
+        }
+        self.lists[index] = candidate;
+        self.apply_task_sorts();
+        self.complete_list_save(index);
+        Ok(())
+    }
+
     /// Finishes a successful candidate write, including explicitly requested file renames.
     ///
     /// # Arguments

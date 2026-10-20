@@ -604,18 +604,12 @@ mod tests {
             if overlay {
                 app.open_quick_capture(None);
             }
-            let output = crate::app::tests::run_frame(
+            let output = crate::app::tests::run_app_frame(
                 &ctx,
+                &mut app,
                 egui::RawInput {
                     events: crate::app::tests::chord(egui::Key::W, egui::Modifiers::COMMAND),
                     ..Default::default()
-                },
-                |ui| {
-                    <MinimalistApp as eframe::App>::ui(
-                        &mut app,
-                        ui,
-                        &mut eframe::Frame::_new_kittest(),
-                    );
                 },
             );
             assert!(

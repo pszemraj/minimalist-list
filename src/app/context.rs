@@ -1,10 +1,7 @@
 //! Hidden task context, complete-task clipboard actions, and wrapped-row previews.
 
 use super::{MinimalistApp, keyboard::FocusItem, theme::Palette};
-use crate::{
-    model::{Task, TitleOverflow},
-    storage,
-};
+use crate::model::{Task, TitleOverflow};
 use eframe::egui::{self, Id, Sense, Stroke, Vec2};
 use uuid::Uuid;
 
@@ -107,17 +104,12 @@ impl MinimalistApp {
             return false;
         };
         task.context.clone_from(&editor.text);
-        self.prepare_list_for_save(&mut candidate);
-        match storage::save_list(&candidate) {
+        match self.save_list_candidate(index, candidate) {
             Ok(()) => {
-                self.lists[index] = candidate;
-                self.apply_task_sorts();
-                self.complete_list_save(index);
                 self.keyboard.pending = editor.return_focus;
                 true
             }
             Err(error) => {
-                self.record_save_conflict(&candidate);
                 editor.failure = Some(format!("Not saved. {error}"));
                 self.task_context = Some(editor);
                 false

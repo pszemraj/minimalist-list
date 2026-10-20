@@ -4,17 +4,14 @@ use super::*;
 use crate::app::tests::{chord, test_app};
 
 fn frame(ctx: &egui::Context, app: &mut MinimalistApp, width: f32, events: Vec<egui::Event>) {
-    crate::app::tests::run_frame(
+    crate::app::tests::run_app_frame(
         ctx,
-        egui::RawInput {
-            time: Some(ctx.input(|input| input.time) + 0.3),
-            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(width, 550.0))),
+        app,
+        crate::app::tests::frame_input(
+            Vec2::new(width, 550.0),
+            ctx.input(|input| input.time) + 0.3,
             events,
-            ..Default::default()
-        },
-        |ui| {
-            <MinimalistApp as eframe::App>::ui(app, ui, &mut eframe::Frame::_new_kittest());
-        },
+        ),
     );
 }
 
@@ -74,17 +71,15 @@ fn narrow_rows_recover_copy_space_and_still_copy_with_the_shortcut() {
     );
     app.keyboard.pending = Some(FocusItem::Task(list, id).id());
     frame(&ctx, &mut app, 320.0, vec![]);
-    let output = crate::app::tests::run_frame(
+    let output = crate::app::tests::run_app_frame(
         &ctx,
+        &mut app,
         egui::RawInput {
             events: chord(
                 egui::Key::C,
                 egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
             ),
             ..Default::default()
-        },
-        |ui| {
-            <MinimalistApp as eframe::App>::ui(&mut app, ui, &mut eframe::Frame::_new_kittest());
         },
     );
     assert!(output.platform_output.commands.iter().any(|command|

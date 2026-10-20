@@ -508,24 +508,10 @@ impl MinimalistApp {
             ui.horizontal_wrapped(|ui| {
                 let mut choices = Vec::new();
                 for accent in Accent::ALL {
-                    let accent_palette = Palette::from_accent(accent);
                     let selected = self
                         .list_index(list_id)
                         .is_some_and(|index| self.lists[index].data.accent == accent);
-                    let response = ui.add(
-                        Button::new(self.rich(accent.label(), 13.0, accent_palette.text))
-                            .selected(selected)
-                            .fill(if selected {
-                                accent_palette.raised
-                            } else {
-                                accent_palette.surface
-                            })
-                            .stroke(Stroke::new(
-                                if selected { 2.0 } else { 0.0 },
-                                accent_palette.accent,
-                            ))
-                            .corner_radius(12.0),
-                    );
+                    let response = ui.add(self.accent_choice_button(accent, selected));
                     choices.push(response.id);
                     if response.clicked() {
                         self.set_accent(list_id, accent);

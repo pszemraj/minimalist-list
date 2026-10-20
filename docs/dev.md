@@ -37,7 +37,7 @@ src/storage_io.rs           Atomic replacement and abandoned temporary-file clea
 src/tray.rs                 Native tray icon and menu actions
 ```
 
-Neighboring `*_tests.rs` files cover storage, real-widget keyboard and pointer journeys, failure recovery, launch coordination, and layout regressions. Reuse `app::tests::run_frame` and `app::tests::chord` for headless frames and key events; keep clocks, dimensions, DPI, and motion updates in the scenario helpers.
+Neighboring `*_tests.rs` files cover storage, interaction, recovery, launch, and layout regressions. Reuse `app::tests::{frame_input, run_app_frame, chord}` for application frames; `run_frame` also accepts isolated widgets. Keep clocks, dimensions, DPI, and motion updates in scenario helpers.
 
 ## Verification
 

@@ -362,6 +362,30 @@ impl MinimalistApp {
         response
     }
 
+    /// Builds the shared accent choice without allocating its widget identity.
+    ///
+    /// # Arguments
+    /// - `accent` - Accent represented by the button.
+    /// - `selected` - Whether this is the current accent.
+    ///
+    /// # Returns
+    /// A button for the caller to add in its existing control order.
+    pub(super) fn accent_choice_button(&self, accent: Accent, selected: bool) -> Button<'static> {
+        let palette = Palette::from_accent(accent);
+        Button::new(self.rich(accent.label(), 13.0, palette.text))
+            .selected(selected)
+            .fill(if selected {
+                palette.raised
+            } else {
+                palette.surface
+            })
+            .stroke(Stroke::new(
+                if selected { 2.0 } else { 0.0 },
+                palette.accent,
+            ))
+            .corner_radius(12.0)
+    }
+
     /// Renders content inside the shared rounded surface-card frame.
     ///
     /// # Arguments
