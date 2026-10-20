@@ -134,6 +134,8 @@ pub struct MinimalistApp {
     instance: Option<crate::instance::InstanceGuard>,
     global_shortcut: Option<crate::hotkey::GlobalShortcut>,
     global_shortcut_input: String,
+    /// Last shortcut failure shown, cleared by a later successful apply.
+    shortcut_error: Option<String>,
     task_context: Option<context::TaskContextEditor>,
     #[cfg(target_os = "macos")]
     reopen: Option<crate::macos::ReopenHandler>,
@@ -292,6 +294,7 @@ impl MinimalistApp {
             instance: None,
             global_shortcut: None,
             global_shortcut_input,
+            shortcut_error: None,
             task_context: None,
             #[cfg(target_os = "macos")]
             reopen: None,

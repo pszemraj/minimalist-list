@@ -16,8 +16,16 @@ impl MinimalistApp {
                 self.global_shortcut = Some(shortcut);
                 self.poll_global_shortcut(ctx);
             }
-            Err(error) => self.status = Some(format!("Global shortcut unavailable: {error}")),
+            Err(error) => {
+                self.report_shortcut_error(format!("Global shortcut unavailable: {error}"))
+            }
         }
+    }
+
+    /// Shows a shortcut failure that a later successful apply can clear.
+    fn report_shortcut_error(&mut self, error: String) {
+        self.shortcut_error = Some(error.clone());
+        self.status = Some(error);
     }
 
     /// Applies changed preferences and reveals the existing window on a global press.
@@ -28,6 +36,7 @@ impl MinimalistApp {
         if shortcut.attempted.as_deref() != Some(&self.settings.global_shortcut) {
             shortcut.attempted = Some(self.settings.global_shortcut.clone());
             if let Err(error) = shortcut.configure(&self.settings.global_shortcut) {
+                self.shortcut_error = Some(error.clone());
                 self.status = Some(error);
             }
         }
@@ -119,24 +128,29 @@ impl MinimalistApp {
     fn apply_global_shortcut(&mut self, ctx: &egui::Context) {
         let requested = self.global_shortcut_input.trim().to_owned();
         if let Err(error) = crate::hotkey::parse(&requested) {
-            self.status = Some(error);
+            self.report_shortcut_error(error);
             return;
         }
         if self.global_shortcut.is_none() && !requested.is_empty() {
             match crate::hotkey::GlobalShortcut::new(ctx) {
                 Ok(shortcut) => self.global_shortcut = Some(shortcut),
                 Err(error) => {
-                    self.status = Some(error);
+                    self.report_shortcut_error(error);
                     return;
                 }
             }
         }
         if let Some(shortcut) = self.global_shortcut.as_mut() {
             if let Err(error) = shortcut.configure(&requested) {
-                self.status = Some(error);
+                self.report_shortcut_error(error);
                 return;
             }
             shortcut.attempted = Some(requested.clone());
+        }
+        if let Some(error) = self.shortcut_error.take()
+            && self.status.as_ref() == Some(&error)
+        {
+            self.status = None;
         }
         self.settings.global_shortcut = requested;
         self.save_settings();
@@ -185,6 +199,24 @@ mod tests {
         assert_eq!(app.settings.global_shortcut, previous);
         assert!(app.global_shortcut.is_none());
         assert!(app.status.as_ref().unwrap().contains("modifier"));
+        std::fs::remove_dir_all(&app.workspace).unwrap();
+    }
+
+    #[test]
+    fn a_successful_apply_clears_only_the_resolved_shortcut_error() {
+        let (ctx, mut app) = crate::app::tests::test_app();
+        for unrelated in [None, Some("Unrelated save error")] {
+            app.global_shortcut_input = "KeyQ".into();
+            app.apply_global_shortcut(&ctx);
+            assert!(app.status.as_ref().unwrap().contains("modifier"));
+            if let Some(error) = unrelated {
+                app.status = Some(error.into());
+            }
+            // Disabling succeeds without native registration.
+            app.global_shortcut_input.clear();
+            app.apply_global_shortcut(&ctx);
+            assert_eq!(app.status.as_deref(), unrelated);
+        }
         std::fs::remove_dir_all(&app.workspace).unwrap();
     }
 }
