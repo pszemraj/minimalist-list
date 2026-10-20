@@ -292,6 +292,12 @@ impl MinimalistApp {
                             .iter()
                             .any(|existing| existing.task.id == task.id)
                 }) {
+                    // Keep Undo available so a stale or different duplicate can be resolved.
+                    self.details.deleted = Some(DeletedItem::Task {
+                        list,
+                        position,
+                        task,
+                    });
                     self.status = Some("The deleted task already exists in the workspace.".into());
                     return;
                 }

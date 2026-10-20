@@ -74,6 +74,38 @@ fn task_and_child_undo_restore_identity_content_completion_and_position() {
 }
 
 #[test]
+fn undo_keeps_a_deleted_task_whose_identity_reappears_elsewhere() {
+    let (_ctx, mut app) = test_app();
+    let list = app.lists[0].key;
+    let task = Task::new("Deleted here, stale elsewhere");
+    let id = task.id;
+    app.lists[0].data.tasks.push(task.clone());
+    app.remove_task(list, id);
+    let other = storage::create_list(&app.workspace, "Other", Accent::Sky).unwrap();
+    app.lists.push(other);
+    // A sync reload can bring back an older copy in another list.
+    app.lists[1].data.tasks.push(task);
+    app.undo_delete();
+    assert_eq!(
+        app.status.as_deref(),
+        Some("The deleted task already exists in the workspace.")
+    );
+    assert!(app.details.deleted.is_some(), "Undo must remain available");
+    app.lists[1].data.tasks.clear();
+    app.undo_delete();
+    assert!(app.details.deleted.is_none());
+    assert_eq!(
+        saved(&app, 0)
+            .tasks
+            .iter()
+            .map(|task| task.id)
+            .collect::<Vec<_>>(),
+        [id]
+    );
+    fs::remove_dir_all(&app.workspace).unwrap();
+}
+
+#[test]
 fn editing_completed_middle_child_preserves_identity_state_and_neighbors() {
     let (_ctx, mut app) = test_app();
     let list = app.lists[0].key;
