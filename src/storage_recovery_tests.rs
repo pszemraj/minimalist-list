@@ -507,6 +507,27 @@ fn a_deleted_list_is_kept_in_backups_and_restores_by_copying_it_back() {
 }
 
 #[test]
+fn delete_list_leaves_a_replacement_directory_in_the_workspace() {
+    let root = root();
+    let list = create_list(&root, "Tasks", Accent::Mint).unwrap();
+    fs::remove_file(&list.path).unwrap();
+    fs::create_dir(&list.path).unwrap();
+    let sentinel = list.path.join("other-data");
+    fs::write(&sentinel, "keep this").unwrap();
+
+    let result = delete_list(&root, &list);
+    let contents = fs::read_to_string(sentinel);
+    let backups = backups_dir(&root);
+    if backups.exists() {
+        fs::remove_dir_all(backups).unwrap();
+    }
+    fs::remove_dir_all(root).unwrap();
+
+    assert!(result.is_err(), "deletion accepted a directory");
+    assert_eq!(contents.unwrap(), "keep this");
+}
+
+#[test]
 fn deleted_uuid_only_list_restores_with_its_filename_identity() {
     let root = root();
     let keep = create_list(&root, "Keep", Accent::Mint).unwrap();

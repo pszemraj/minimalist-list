@@ -237,6 +237,13 @@ pub fn delete_list(workspace: &Path, list: &StoredList) -> Result<(), String> {
         .filter(|stem| Uuid::parse_str(stem).is_ok())
         .map(|_| list_file_name(&list.data.title, list.key));
     let name = descriptive_name.as_deref().map(OsStr::new).unwrap_or(name);
+    let source_type = fs::symlink_metadata(&list.path).map_err(fail)?.file_type();
+    if !source_type.is_file() && !source_type.is_symlink() {
+        return Err(fail(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "the list path is no longer a file",
+        )));
+    }
     let directory = backups_dir(workspace).join("deleted");
     fs::create_dir_all(&directory).map_err(fail)?;
     // Never replace an earlier deleted copy that shares the same second and name.
@@ -250,8 +257,7 @@ pub fn delete_list(workspace: &Path, list: &StoredList) -> Result<(), String> {
         }
         stamp += 1;
     };
-    let source_type = fs::symlink_metadata(&list.path).map_err(fail)?.file_type();
-    if !source_type.is_symlink() && fs::rename(&list.path, &kept).is_ok() {
+    if source_type.is_file() && fs::rename(&list.path, &kept).is_ok() {
         return Ok(());
     }
     // Copy the target of a symlink, or copy across volumes, before removing the workspace entry.
