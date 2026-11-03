@@ -94,6 +94,41 @@ fn unchanged_settings_keep_the_same_file_and_merge_other_instance_values() {
 }
 
 #[test]
+fn repairing_partial_settings_merges_local_edits_with_valid_newer_preferences() {
+    let root = root();
+    let path = root.join("settings.json");
+    let baseline = Settings::default();
+    write_json_atomic(&path, &baseline).unwrap();
+    let malformed = br#"{"font_size":26,"row_padding":"invalid"}"#;
+    fs::write(&path, malformed).unwrap();
+    let desired = Settings {
+        bold_text: true,
+        ..baseline.clone()
+    };
+
+    let merged = save_settings_changes_at(&path, &desired, &baseline).unwrap();
+    assert_eq!(merged.font_size, 26.0);
+    assert_eq!(merged.row_padding, baseline.row_padding);
+    assert!(merged.bold_text);
+    let (reloaded, warning) = load_settings_from(&path);
+    assert!(warning.is_none());
+    assert_eq!(reloaded.font_size, 26.0);
+    assert!(reloaded.bold_text);
+    let backup = fs::read_dir(&root)
+        .unwrap()
+        .flatten()
+        .find(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("settings.invalid-")
+        })
+        .unwrap();
+    assert_eq!(fs::read(backup.path()).unwrap(), malformed);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn malformed_settings_are_preserved_before_recovery_and_old_manual_ids_are_removed() {
     let root = root();
     fs::create_dir_all(&root).unwrap();

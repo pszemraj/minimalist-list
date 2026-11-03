@@ -136,7 +136,7 @@ fn load_settings_from(path: &Path) -> (Settings, Option<String>) {
     match serde_json::from_slice(&bytes) {
         Ok(settings) => (settings, None),
         Err(error) => {
-            let (settings, ignored) = recover_settings(&bytes);
+            let (settings, ignored) = recover_settings(&bytes).unwrap_or_default();
             let outcome = if ignored.is_empty() {
                 "using default preferences".to_owned()
             } else {
@@ -152,10 +152,10 @@ fn load_settings_from(path: &Path) -> (Settings, Option<String>) {
 ///
 /// # Returns
 ///
-/// The recovered settings and the names of stored preferences that were ignored.
-fn recover_settings(bytes: &[u8]) -> (Settings, Vec<String>) {
-    let Ok(serde_json::Value::Object(stored)) = serde_json::from_slice(bytes) else {
-        return (Settings::default(), Vec::new());
+/// The recovered settings and ignored preference names, or `None` for an unusable file.
+fn recover_settings(bytes: &[u8]) -> Option<(Settings, Vec<String>)> {
+    let serde_json::Value::Object(stored) = serde_json::from_slice(bytes).ok()? else {
+        return None;
     };
     let mut recovered = serde_json::to_value(Settings::default()).unwrap_or_default();
     let mut ignored = Vec::new();
@@ -170,10 +170,10 @@ fn recover_settings(bytes: &[u8]) -> (Settings, Vec<String>) {
             ignored.push(key);
         }
     }
-    (
+    Some((
         serde_json::from_value(recovered).unwrap_or_default(),
         ignored,
-    )
+    ))
 }
 
 /// Persists application settings atomically.
@@ -231,14 +231,17 @@ fn save_settings_changes_at(
     }
     let bytes =
         fs::read(path).map_err(|error| format!("could not read {}: {error}", path.display()))?;
-    let current: Settings = match serde_json::from_slice(&bytes) {
-        Ok(settings) => settings,
+    let (current, repairing): (Settings, bool) = match serde_json::from_slice(&bytes) {
+        Ok(settings) => (settings, false),
         Err(_) => {
             let backup = path.with_file_name(format!("settings.invalid-{}.json", Uuid::new_v4()));
             fs::copy(path, &backup)
                 .map_err(|error| format!("could not preserve {}: {error}", path.display()))?;
-            write_json_atomic(path, desired)?;
-            return Ok(desired.clone());
+            let Some((settings, _)) = recover_settings(&bytes) else {
+                write_json_atomic(path, desired)?;
+                return Ok(desired.clone());
+            };
+            (settings, true)
         }
     };
     let mut current = serde_json::to_value(current).map_err(|error| error.to_string())?;
@@ -286,7 +289,7 @@ fn save_settings_changes_at(
         .remove("manual_task_order");
     let changed = current != original;
     let merged: Settings = serde_json::from_value(current).map_err(|error| error.to_string())?;
-    if changed {
+    if changed || repairing {
         write_json_atomic(path, &merged)?;
     }
     Ok(merged)
