@@ -357,3 +357,42 @@ fn command_z_and_the_toast_undo_restore_the_original_position_in_every_sort() {
         }
     }
 }
+
+#[test]
+fn global_quick_add_keeps_move_return_focus() {
+    for source_survives in [true, false] {
+        let mut f = fixture(["A", "B", "C"]);
+        let source_task = f.tasks[1];
+        let source_row = FocusItem::Task(f.list, source_task).id();
+        focus(&f.ctx, &mut f.app, source_row);
+        frame(&f.ctx, &mut f.app, move_chord(), 430.0);
+        idle(&f.ctx, &mut f.app);
+        assert!(f.app.details.move_task.is_some());
+        assert_ne!(focused(&f.ctx), Some(source_row));
+
+        let return_focus = if source_survives {
+            Some(source_row)
+        } else {
+            let index = f.app.list_index(f.list).unwrap();
+            f.app.lists[index]
+                .data
+                .tasks
+                .retain(|task| task.id != source_task);
+            assert!(f.app.save_list_index(index));
+            f.app.default_focus()
+        };
+        let source_before = saved(&f.app, f.list);
+        let _ = f.ctx.run_logic(&Default::default(), |ctx| {
+            f.app.open_global_quick_add(ctx);
+        });
+        idle(&f.ctx, &mut f.app);
+        assert!(f.app.details.move_task.is_none());
+        assert_eq!(focused(&f.ctx), Some(Id::new("quick-capture-text")));
+        key(&f.ctx, &mut f.app, Key::Escape, Modifiers::NONE);
+        assert!(f.app.quick_capture.is_none());
+        assert_eq!(focused(&f.ctx), return_focus);
+        assert_eq!(titles(&saved(&f.app, f.list)), titles(&source_before));
+        assert!(saved(&f.app, f.other).tasks.is_empty());
+        cleanup(&f.app);
+    }
+}

@@ -194,13 +194,23 @@ impl MinimalistApp {
 
     /// Opens quick capture for a request from outside the window, above other transient layers.
     ///
-    /// The keyboard reference closes, returning focus to the control beneath it. The Move dialog
-    /// and open menus are dismissed. An already open Quick add keeps its draft and regains focus.
+    /// Dismissing the keyboard reference or Move keeps its return focus for Quick add. Open
+    /// menus are dismissed. An already open Quick add keeps its draft and regains focus.
     pub(super) fn open_global_quick_add(&mut self, ctx: &egui::Context) {
         if let Some(reference) = self.shortcuts.take() {
             self.keyboard.pending = reference.return_focus;
         }
-        self.details.move_task = None;
+        if let Some(dialog) = self.details.move_task.take() {
+            let source_exists = self.lists.iter().any(|list| {
+                list.key == dialog.source
+                    && list.data.tasks.iter().any(|task| task.id == dialog.task)
+            });
+            self.keyboard.pending = if source_exists {
+                Some(FocusItem::Task(dialog.source, dialog.task).id())
+            } else {
+                self.default_focus()
+            };
+        }
         egui::Popup::close_all(ctx);
         self.open_quick_add_here(ctx);
     }
