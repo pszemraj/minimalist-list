@@ -27,6 +27,14 @@ pub(super) struct QuickCaptureState {
     pub(super) selected_list_id: Option<Uuid>,
     request_focus: bool,
     pub(super) failure: Option<String>,
+    /// Parsed tasks waiting for a retry after a failed paste save.
+    pub(super) pending_batch: Vec<String>,
+}
+
+impl QuickCaptureState {
+    fn has_input(&self) -> bool {
+        !self.pending_batch.is_empty() || !self.text.trim().is_empty()
+    }
 }
 
 /// Holds the current global-search query and keyboard selection.
@@ -149,7 +157,7 @@ impl MinimalistApp {
         }
         if let Some(mut draft) = self.capture_draft.take() {
             draft.request_focus = true;
-            if draft.text.trim().is_empty() {
+            if !draft.has_input() {
                 draft.selected_list_id = capture_destination(
                     &self.lists,
                     self.settings.last_capture_list_id,
@@ -170,6 +178,7 @@ impl MinimalistApp {
             ),
             request_focus: true,
             failure: None,
+            pending_batch: Vec::new(),
         });
     }
 
@@ -332,7 +341,7 @@ impl MinimalistApp {
             .selected_list_id
             .is_none_or(|id| !choices.iter().any(|(candidate, _)| *candidate == id))
         {
-            state.selected_list_id = if state.text.trim().is_empty() {
+            state.selected_list_id = if !state.has_input() {
                 capture_destination(
                     &self.lists,
                     self.settings.last_capture_list_id,
@@ -414,7 +423,7 @@ impl MinimalistApp {
                             });
                     });
 
-                    if state.selected_list_id.is_none() && !state.text.trim().is_empty() {
+                    if state.selected_list_id.is_none() && state.has_input() {
                         ui.add(
                             egui::Label::new(self.rich(
                                 "Choose a destination list to save this draft.",
@@ -425,15 +434,16 @@ impl MinimalistApp {
                         );
                     }
                     if let Some(error) = &state.failure {
-                        ui.add(
-                            egui::Label::new(self.rich(
-                                "Not saved. Your draft is kept.",
-                                13.0,
-                                palette.text,
-                            ))
-                            .wrap(),
-                        )
-                        .on_hover_text(error);
+                        let message = if state.pending_batch.is_empty() {
+                            "Not saved. Your draft is kept.".to_owned()
+                        } else {
+                            format!(
+                                "Not saved. {} pasted tasks are kept for retry.",
+                                state.pending_batch.len()
+                            )
+                        };
+                        ui.add(egui::Label::new(self.rich(message, 13.0, palette.text)).wrap())
+                            .on_hover_text(error);
                     }
                     ui.add_space(8.0);
                     let conflicted = state
@@ -455,8 +465,7 @@ impl MinimalistApp {
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             submit |= ui
                                 .add_enabled(
-                                    state.selected_list_id.is_some()
-                                        && !state.text.trim().is_empty(),
+                                    state.selected_list_id.is_some() && state.has_input(),
                                     Button::new(self.rich(
                                         if state.failure.is_some() {
                                             "Retry save"
@@ -480,14 +489,24 @@ impl MinimalistApp {
 
         if submit {
             state.request_focus = true;
-            let text = state.text.trim().to_owned();
-            if !text.is_empty()
+            if state.has_input()
                 && let Some(list_id) = state.selected_list_id
             {
-                match self.save_capture(list_id, &[text], state.failure.as_deref()) {
+                let retry_batch = !state.pending_batch.is_empty();
+                let typed = state.text.trim().to_owned();
+                let items = if retry_batch {
+                    state.pending_batch.as_slice()
+                } else {
+                    std::slice::from_ref(&typed)
+                };
+                match self.save_capture(list_id, items, state.failure.as_deref()) {
                     Ok(()) => {
-                        self.restore_overlay_focus();
-                        return;
+                        if !retry_batch || typed.is_empty() {
+                            self.restore_overlay_focus();
+                            return;
+                        }
+                        state.pending_batch.clear();
+                        state.failure = None;
                     }
                     Err(error) => state.failure = Some(error),
                 }

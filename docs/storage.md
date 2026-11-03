@@ -89,7 +89,7 @@ If files contain the same list UUID, filenames with a recognized UUID take prece
 
 Before quitting or switching workspaces, the app saves inline edits, list title changes, open context drafts, and accepted archive/delete actions. Hiding also saves open editors and list names. A failed write retains changes in memory and keeps the window and workspace available. Restore folder access and choose **Retry save**.
 
-A failed Quick add keeps its draft and destination until retried or explicitly cancelled, including when Find hides it. Task context keeps its editor open with the draft. Retry actions appear for write failures; external-edit conflicts offer local-copy recovery instead. These failures block shutdown and workspace switching until saved or cancelled.
+A failed Quick add keeps its typed draft, any pasted batch, and destination until retried or explicitly cancelled, including when Find hides it. Task context keeps its editor open with the draft. Retry actions appear for write failures; external-edit conflicts offer local-copy recovery instead. These failures block shutdown and workspace switching until saved or cancelled.
 
 If another device changed the list, choose **Keep local copy and reload** in the save warning or failed editor. It saves the local contents in a separate **(local copy)** list with new list, task, and child IDs, then reloads the original. The copy includes current inline edits, editable context, active or suspended Quick add drafts, and an unfinished list-name change for that list. Both versions remain ordinary JSON files. Resolve each conflicting list before quitting or switching workspaces.
 

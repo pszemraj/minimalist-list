@@ -319,9 +319,9 @@ fn quick_add_paste_with_a_conflicted_destination_stays_in_the_draft() {
 }
 
 #[test]
-fn quick_add_paste_save_failure_shows_status_and_a_second_paste_saves_once() {
+fn quick_add_retries_a_failed_batch_without_resubmitting_the_typed_draft() {
     let mut f = fixture(&[]);
-    open_quick_add(&mut f, "");
+    open_quick_add(&mut f, "Unfinished");
     let (lists, offline) = (
         f.app.workspace.join("lists"),
         f.app.workspace.join("offline"),
@@ -330,16 +330,62 @@ fn quick_add_paste_save_failure_shows_status_and_a_second_paste_saves_once() {
     fs::write(&lists, "unavailable").unwrap();
     paste(&mut f, "One\nTwo");
     let state = f.app.quick_capture.as_ref().unwrap();
-    assert!(state.text.is_empty() && state.failure.is_none());
+    assert_eq!(state.text, "Unfinished");
+    assert!(state.failure.is_some());
     assert!(f.app.status.is_some(), "the storage error is shown");
     assert!(f.app.lists[0].data.tasks.is_empty());
     assert!(notice(&f).is_none());
+    f.app.open_find();
+    assert!(!f.app.finish_pending_changes());
+    assert!(f.app.quick_capture.is_some());
+
     fs::remove_file(&lists).unwrap();
     fs::rename(&offline, &lists).unwrap();
-    paste(&mut f, "One\nTwo");
-    assert!(f.app.quick_capture.is_none());
+    idle(&mut f);
+    frame(&mut f, chord(Key::Enter, Modifiers::NONE));
+    let state = f.app.quick_capture.as_ref().unwrap();
+    assert_eq!(state.text, "Unfinished");
+    assert!(state.failure.is_none());
     let reloaded = storage::load_workspace(&f.app.workspace).unwrap();
     assert_eq!(titles(&reloaded.lists[0].data.tasks), ["One", "Two"]);
+    idle(&mut f);
+    frame(&mut f, chord(Key::Enter, Modifiers::NONE));
+    assert!(f.app.quick_capture.is_none());
+    assert_eq!(titles(&saved(&f).tasks), ["Unfinished", "One", "Two"]);
+    cleanup(f);
+}
+
+#[test]
+fn quick_add_paste_conflict_recovery_keeps_the_batch_and_typed_draft_once() {
+    let mut f = fixture(&["Existing"]);
+    open_quick_add(&mut f, "Unfinished");
+    let mut remote = storage::load_workspace(&f.app.workspace)
+        .unwrap()
+        .lists
+        .remove(0);
+    remote.data.tasks.push(Task::new("Remote"));
+    storage::save_list(&remote).unwrap();
+
+    paste(&mut f, "One\nTwo");
+    assert!(f.app.has_save_conflict(f.list));
+    assert!(f.app.keep_local_copy_and_reload(f.list));
+    assert!(f.app.quick_capture.is_none());
+    let reloaded = storage::load_workspace(&f.app.workspace).unwrap();
+    let original = reloaded
+        .lists
+        .iter()
+        .find(|list| list.key == f.list)
+        .unwrap();
+    let copy = reloaded
+        .lists
+        .iter()
+        .find(|list| list.key != f.list)
+        .unwrap();
+    assert_eq!(titles(&original.data.tasks), ["Existing", "Remote"]);
+    assert_eq!(
+        titles(&copy.data.tasks),
+        ["One", "Two", "Unfinished", "Existing"]
+    );
     cleanup(f);
 }
 

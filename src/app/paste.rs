@@ -88,6 +88,7 @@ impl MinimalistApp {
                 .selected_list_id
                 .filter(|&list| {
                     focused == Id::new("quick-capture-text")
+                        && capture.pending_batch.is_empty()
                         && self.list_index(list).is_some()
                         && !self.has_save_conflict(list)
                 })
@@ -169,10 +170,18 @@ impl MinimalistApp {
                 };
                 let blank = draft.text.trim().is_empty();
                 let failure = draft.failure.clone();
-                // A failed save sets the status message and keeps the draft.
-                if self.save_capture(list, &items, failure.as_deref()).is_ok() && blank {
-                    self.quick_capture = None;
-                    self.restore_overlay_focus();
+                match self.save_capture(list, &items, failure.as_deref()) {
+                    Ok(()) if blank => {
+                        self.quick_capture = None;
+                        self.restore_overlay_focus();
+                    }
+                    Ok(()) => {}
+                    Err(error) => {
+                        if let Some(draft) = &mut self.quick_capture {
+                            draft.pending_batch = items;
+                            draft.failure = Some(error);
+                        }
+                    }
                 }
             }
         }

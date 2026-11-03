@@ -1,6 +1,6 @@
 //! Explicit recovery keeps local edits in an independent list before reloading sync changes.
 
-use crate::app::MinimalistApp;
+use crate::app::{MinimalistApp, paste::new_tasks};
 use crate::{
     model::Task,
     storage::{self, StoredList},
@@ -133,6 +133,10 @@ impl MinimalistApp {
             if !text.is_empty() {
                 candidate.data.tasks.insert(0, Task::new(text));
             }
+            candidate
+                .data
+                .tasks
+                .splice(0..0, new_tasks(&draft.pending_batch));
         }
         if self.settings_list_id == Some(list)
             && self.rename_input.trim() != self.rename_baseline.trim()
