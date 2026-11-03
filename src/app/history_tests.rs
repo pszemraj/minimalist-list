@@ -5,7 +5,7 @@ use crate::{
     app::{
         Screen,
         context::relative_age,
-        tests::{chord, frame_input, run_app_frame, test_app},
+        tests::{chord, frame_input, run_app_frame, snapshot_files, test_app},
     },
     model::{Subtask, TitleOverflow, TodoList},
     storage,
@@ -198,14 +198,9 @@ fn clearing_history_empties_the_archive_and_keeps_live_tasks() {
     fs::remove_dir_all(&app.workspace).unwrap();
 }
 
-/// Lists a list's snapshot files in name order, oldest first.
-fn snapshot_files(app: &MinimalistApp, list: Uuid) -> Vec<std::path::PathBuf> {
-    let directory = storage::backups_dir(&app.workspace)
-        .join("snapshots")
-        .join(list.to_string());
-    let mut files: Vec<_> = fs::read_dir(directory)
-        .map(|entries| entries.flatten().map(|entry| entry.path()).collect())
-        .unwrap_or_default();
+/// Orders the snapshots by their numeric timestamps, oldest first.
+fn snapshots_by_time(app: &MinimalistApp, list: Uuid) -> Vec<std::path::PathBuf> {
+    let mut files = snapshot_files(app, list);
     files.sort_by_key(|path| {
         path.file_stem()
             .and_then(|stem| stem.to_str()?.parse::<u64>().ok())
@@ -222,7 +217,7 @@ fn clearing_history_snapshots_the_archive_even_right_after_another_snapshot() {
     app.clear_history(list);
     assert!(app.status.is_none());
     assert!(saved(&app).archive.is_empty());
-    let files = snapshot_files(&app, list);
+    let files = snapshots_by_time(&app, list);
     // A same-second name is bumped into the future, so the save may add one more copy.
     assert!(files.len() >= 2);
     let kept: TodoList = serde_json::from_slice(&fs::read(files.last().unwrap()).unwrap()).unwrap();
@@ -264,7 +259,7 @@ fn clearing_history_keeps_newly_archived_tasks_recoverable_after_a_write_outage(
     assert!(app.lists[0].data.archive.is_empty());
     assert!(app.status.is_none());
     let kept: TodoList =
-        serde_json::from_slice(&fs::read(snapshot_files(&app, list).last().unwrap()).unwrap())
+        serde_json::from_slice(&fs::read(snapshots_by_time(&app, list).last().unwrap()).unwrap())
             .unwrap();
     assert_eq!(kept.archive[0].task.id, id);
 

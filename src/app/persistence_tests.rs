@@ -1,7 +1,7 @@
 //! Failure recovery, destination-bound drafts, and preference concurrency journeys.
 
 use super::{
-    tests::{run_frame, test_app},
+    tests::{run_frame, snapshot_files, test_app},
     *,
 };
 use crate::model::{Accent, Task};
@@ -497,15 +497,6 @@ fn scan_shows_recovery_when_synced_list_files_vanish() {
     assert!(app.persistence.workspace_failure.is_none());
     assert_eq!(app.lists.len(), 1);
     fs::remove_dir_all(&app.workspace).unwrap();
-}
-
-fn snapshot_files(app: &MinimalistApp, list: Uuid) -> Vec<std::path::PathBuf> {
-    let directory = storage::backups_dir(&app.workspace)
-        .join("snapshots")
-        .join(list.to_string());
-    fs::read_dir(directory)
-        .map(|entries| entries.flatten().map(|entry| entry.path()).collect())
-        .unwrap_or_default()
 }
 
 #[test]

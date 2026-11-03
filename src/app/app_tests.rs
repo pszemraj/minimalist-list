@@ -165,6 +165,23 @@ pub(super) fn test_app() -> (egui::Context, MinimalistApp) {
     (ctx, app)
 }
 
+/// Lists the files in a test list's snapshot directory.
+///
+/// # Arguments
+/// - `app` - Application providing the isolated workspace.
+/// - `list` - List identity.
+///
+/// # Returns
+/// Paths in directory order, or an empty vector if the directory cannot be read.
+pub(super) fn snapshot_files(app: &MinimalistApp, list: Uuid) -> Vec<PathBuf> {
+    let directory = storage::backups_dir(&app.workspace)
+        .join("snapshots")
+        .join(list.to_string());
+    std::fs::read_dir(directory)
+        .map(|entries| entries.flatten().map(|entry| entry.path()).collect())
+        .unwrap_or_default()
+}
+
 fn enter_events() -> Vec<egui::Event> {
     chord(egui::Key::Enter, egui::Modifiers::default())
 }
