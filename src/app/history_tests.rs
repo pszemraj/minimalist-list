@@ -231,13 +231,13 @@ fn clearing_history_empties_the_archive_and_keeps_live_tasks() {
     fs::remove_dir_all(&app.workspace).unwrap();
 }
 
-/// Orders the snapshots by their numeric timestamps, oldest first.
-fn snapshots_by_time(app: &MinimalistApp, list: Uuid) -> Vec<std::path::PathBuf> {
+/// Orders snapshots by creation sequence and older timestamp-only backups by time.
+fn snapshots_in_save_order(app: &MinimalistApp, list: Uuid) -> Vec<std::path::PathBuf> {
     let mut files = snapshot_files(app, list);
     files.sort_by_key(|path| {
         let stem = path.file_stem()?.to_str()?;
         let (time, sequence) = stem.split_once('-').unwrap_or((stem, "0"));
-        Some((time.parse::<u64>().ok()?, sequence.parse::<u64>().ok()?))
+        Some((sequence.parse::<u64>().ok()?, time.parse::<u64>().ok()?))
     });
     files
 }
@@ -251,7 +251,7 @@ fn clearing_history_snapshots_the_archive_even_right_after_another_snapshot() {
     app.clear_history(list);
     assert!(app.status.is_none());
     assert!(saved(&app).archive.is_empty());
-    let files = snapshots_by_time(&app, list);
+    let files = snapshots_in_save_order(&app, list);
     assert_eq!(files.len(), 2);
     let kept: TodoList = serde_json::from_slice(&fs::read(files.last().unwrap()).unwrap()).unwrap();
     assert_eq!(
@@ -324,9 +324,10 @@ fn clearing_history_keeps_newly_archived_tasks_recoverable_after_a_write_outage(
     assert!(saved(&app).archive.is_empty());
     assert!(app.lists[0].data.archive.is_empty());
     assert!(app.status.is_none());
-    let kept: TodoList =
-        serde_json::from_slice(&fs::read(snapshots_by_time(&app, list).last().unwrap()).unwrap())
-            .unwrap();
+    let kept: TodoList = serde_json::from_slice(
+        &fs::read(snapshots_in_save_order(&app, list).last().unwrap()).unwrap(),
+    )
+    .unwrap();
     assert_eq!(kept.archive[0].task.id, id);
 
     fs::remove_dir_all(storage::backups_dir(&app.workspace)).unwrap();

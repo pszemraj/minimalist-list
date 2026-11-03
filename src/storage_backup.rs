@@ -136,7 +136,7 @@ fn snapshot_files(directory: &Path) -> std::io::Result<Vec<Snapshot>> {
 }
 
 /// Writes one timestamped snapshot unless the newest is under an hour old and
-/// `force` is false, then prunes excess snapshots, starting with future-dated names.
+/// `force` is false, then prunes excess snapshots in creation order.
 /// Other files are untouched, and an existing snapshot is never replaced.
 ///
 /// # Arguments
@@ -161,36 +161,31 @@ pub(super) fn snapshot_into(
 ) -> std::io::Result<()> {
     fs::create_dir_all(directory)?;
     let existing = snapshot_files(directory)?;
+    let newest = existing
+        .iter()
+        .max_by_key(|snapshot| (snapshot.sequence, snapshot.time));
     // A newest snapshot dated in the future must not suppress backups.
     if !force
-        && existing
-            .iter()
-            .map(|snapshot| snapshot.time)
-            .max()
-            .is_some_and(|newest| newest <= now && now - newest < SNAPSHOT_INTERVAL_SECS)
+        && newest.is_some_and(|snapshot| {
+            snapshot.time <= now && now - snapshot.time < SNAPSHOT_INTERVAL_SECS
+        })
     {
         return Ok(());
     }
-    // Keep wall-clock time separate from the collision counter used in the name.
-    let mut sequence = existing
-        .iter()
-        .filter(|snapshot| snapshot.time == now)
-        .map(|snapshot| snapshot.sequence)
-        .max()
-        .map_or(0, |latest| latest.saturating_add(1));
+    // Sequence numbers preserve creation order across a wall-clock correction.
+    let next_sequence = |sequence: u64| {
+        sequence
+            .checked_add(1)
+            .ok_or_else(|| std::io::Error::other("snapshot sequence exhausted"))
+    };
+    let mut sequence = next_sequence(newest.map_or(0, |snapshot| snapshot.sequence))?;
     let (destination, temporary) = loop {
-        let name = if sequence == 0 {
-            format!("{now}.json")
-        } else {
-            format!("{now}-{sequence}.json")
-        };
+        let name = format!("{now}-{sequence}.json");
         let destination = directory.join(&name);
         if fs::symlink_metadata(&destination).is_err() {
             break (destination, directory.join(format!(".{name}.tmp")));
         }
-        sequence = sequence
-            .checked_add(1)
-            .ok_or_else(|| std::io::Error::other("snapshot sequence exhausted"))?;
+        sequence = next_sequence(sequence)?;
     };
     fs::write(&temporary, bytes)?;
     if let Err(error) = fs::rename(&temporary, &destination) {
@@ -198,14 +193,7 @@ pub(super) fn snapshot_into(
         return Err(error);
     }
     if let Ok(mut snapshots) = snapshot_files(directory) {
-        snapshots.sort_unstable_by_key(|snapshot| {
-            (
-                snapshot.path == destination,
-                snapshot.time <= now,
-                snapshot.time,
-                snapshot.sequence,
-            )
-        });
+        snapshots.sort_unstable_by_key(|snapshot| (snapshot.sequence, snapshot.time));
         for snapshot in snapshots
             .iter()
             .take(snapshots.len().saturating_sub(SNAPSHOT_LIMIT))
