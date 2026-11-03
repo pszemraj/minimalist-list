@@ -233,6 +233,39 @@ fn clearing_history_snapshots_the_archive_even_right_after_another_snapshot() {
 }
 
 #[test]
+fn clearing_history_keeps_its_snapshot_when_the_clock_has_moved_back() {
+    let (_ctx, mut app) = test_app();
+    let (list, ids) = open_history(&mut app, 1);
+    let original = snapshot_files(&app, list).pop().unwrap();
+    let directory = original.parent().unwrap();
+    let earlier_contents = fs::read(&original).unwrap();
+    fs::remove_file(&original).unwrap();
+    let future = now_unix_seconds() + 86_400;
+    for timestamp in future..future + 100 {
+        fs::write(
+            directory.join(format!("{timestamp}.json")),
+            &earlier_contents,
+        )
+        .unwrap();
+    }
+
+    app.clear_history(list);
+    assert!(saved(&app).archive.is_empty());
+    assert!(app.status.is_none());
+    app.lists[0].data.tasks.push(Task::new("Later edit"));
+    assert!(app.save_list_index(0));
+
+    let snapshots = snapshot_files(&app, list);
+    assert_eq!(snapshots.len(), 100);
+    assert!(snapshots.iter().any(|path| {
+        let backup: TodoList = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+        backup.archive.iter().any(|item| item.task.id == ids[0])
+    }));
+    fs::remove_dir_all(storage::backups_dir(&app.workspace)).unwrap();
+    fs::remove_dir_all(&app.workspace).unwrap();
+}
+
+#[test]
 fn clearing_history_keeps_newly_archived_tasks_recoverable_after_a_write_outage() {
     let (_ctx, mut app) = test_app();
     let list = app.lists[0].key;

@@ -130,7 +130,7 @@ fn snapshot_times(directory: &Path) -> std::io::Result<Vec<u64>> {
 }
 
 /// Writes one timestamped snapshot unless the newest is under an hour old and
-/// `force` is false, then removes the oldest numeric snapshots beyond the limit.
+/// `force` is false, then prunes excess snapshots, starting with future-dated names.
 /// Other files are untouched, and an existing snapshot is never replaced.
 ///
 /// # Arguments
@@ -174,7 +174,10 @@ pub(super) fn snapshot_into(
         let _ = fs::remove_file(&temporary);
         return Err(error);
     }
-    if let Ok(times) = snapshot_times(directory) {
+    if let Ok(mut times) = snapshot_times(directory) {
+        // After a clock rollback, future names must not crowd out new snapshots.
+        // Keep this write even if a filename collision pushed its timestamp forward.
+        times.sort_unstable_by_key(|&time| (time == stamp, time <= now, time));
         for time in times
             .iter()
             .take(times.len().saturating_sub(SNAPSHOT_LIMIT))
