@@ -5,7 +5,7 @@ Minimalist List is a native desktop task list built with `egui` and `eframe`, in
 <p align="center">
   <img src="assets/ui.png" alt="Minimalist List on Windows in the default Charcoal palette, showing tasks, subtasks, and completion" width="360">
   <br>
-  <sub>Charcoal theme on Windows: tasks and subtasks</sub>
+  <sub>Tasks and subtasks in the Charcoal theme on Windows</sub>
 </p>
 
 ## Install and run
@@ -52,7 +52,7 @@ bash scripts/install-macos.sh
 
 Windows and Linux add an app-menu shortcut. macOS installs `~/Applications/Minimalist List.app`. Quit before reinstalling. See [startup and system tray](docs/usage.md#startup-and-system-tray) for what the installers configure at sign-in.
 
-Verify the checkout with `cargo test --locked`; `cargo run --locked -- --version` checks the executable. The [development guide](docs/dev.md#verification) lists the full checks.
+Verify the checkout with `cargo test --locked`. Run `cargo run --locked -- --version` to check the executable. See the [development guide](docs/dev.md#verification) for the full checks.
 
 ## Start using it
 
@@ -66,4 +66,4 @@ Use [keyboard navigation](docs/usage.md#keyboard-shortcuts) to work without a mo
 - [Workspace folders, settings paths, and file sync](docs/storage.md)
 - [Source layout, checks, and GUI inspection](docs/dev.md)
 
-Bundled bold fonts: [sources](assets/fonts/SOURCES.txt), [Ubuntu Font Licence](assets/fonts/Ubuntu-LICENSE.txt), and [Hack licenses](assets/fonts/Hack-LICENSE.txt).
+See the bundled bold font [sources](assets/fonts/SOURCES.txt), the [Ubuntu Font Licence](assets/fonts/Ubuntu-LICENSE.txt), and the [Hack licenses](assets/fonts/Hack-LICENSE.txt).

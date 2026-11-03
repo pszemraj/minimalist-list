@@ -16,7 +16,7 @@ Press Backspace from an empty task entry or a focused task row to open the overv
 
 Open **List options** from a list header or card to rename, recolor, or remove the list or its History.
 
-- **Clear History** appears when the list has archived tasks. Review the count, then choose **Confirm clear History** or **Cancel**. Use a [local snapshot](storage.md#local-backups) to recover cleared entries.
+- **Clear History** appears when the list has archived tasks. Review the count, then choose **Confirm clear History** or **Cancel**. Recover cleared entries from a [local snapshot](storage.md#local-backups).
 - **Delete list** shows the list name and counts for active and archived tasks. Choose **Confirm delete list** or **Cancel deletion**. At least one list must remain. See [local backups](storage.md#local-backups) to recover a deleted list and [duplicate list files](storage.md#duplicate-list-files) if deletion is blocked.
 
 Each confirmation requires a separate press. Holding Enter or Space cannot confirm it.
@@ -27,7 +27,9 @@ In **Manual** order, drag overview tiles to rearrange them. **Sort lists** tempo
 
 ## Capture and edit tasks
 
-Type into the field above a list and press Enter to add a task. Task and subtask entry keep focus after Enter, including an empty submission. Pasting several lines into task entry, a checklist's add field, or Quick add creates one item per line, dropping leading bullets, numbers, and checkboxes, and keeps any text already typed in the field. Quick add saves to its chosen list and closes if its field was empty. Unfinished task and checklist entries stay with their originating workspace and list or task during navigation and after closing a checklist. These unsubmitted entries do not survive restart.
+Type into the field above a list and press Enter to add a task. Task and subtask entry keep focus after Enter, including an empty submission. Unfinished entries stay with their originating workspace and list or task during navigation and after closing a checklist. They last until the app quits.
+
+Paste a list into task entry, a checklist's add field, or [Quick add](#quick-add) to create one incomplete item per line. The app trims whitespace, strips leading bullets, numbers, and Markdown checkboxes, and skips blank items. A paste with fewer than two items goes into the field as ordinary text. A batch leaves separately typed text in the field. In Quick add a successful batch goes to the selected list and closes the overlay if the field was empty.
 
 Down from task entry focuses the first task. Up and Down move between task rows, including from their secondary controls; Home and End focus the first and last task. Up from the first task returns to entry.
 
@@ -35,9 +37,15 @@ Right opens a task's checklist and focuses its first child, or its add field whe
 
 Enable **Settings -> Appearance -> Show subtasks below tasks** to preview every task's children. Each task's chevron collapses or expands its preview independently; **Edit subtasks** opens the full checklist editor. With this preference off, the checklist opens only when requested.
 
-`Ctrl+N` or the header's `add` action opens Quick add. A new capture prefers the open list, then the last successful available destination. Choose a list and press Enter or **Add**. A successful capture names its destination. Switching between Quick add and Find preserves their drafts. Nonempty captures keep their destination while it exists. Choose another list if it was deleted. Empty drafts choose again when reopened. Escape cancels the capture. You can also open Quick add from the [tray](#startup-and-system-tray) or with its [global shortcut](#global-shortcuts).
-
 Click task or child text to edit it inline, or press Enter on a focused task row. Tab also reaches child text, where Enter or Space starts editing. Enter or leaving the editor saves; Escape cancels. Enter returns focus to the task row or child's completion control; clicking another field keeps focus there. Editing a child preserves its position and completion. The checklist and delete controls on the right become prominent on hover and remain keyboard-focusable.
+
+### Quick add
+
+Press `Ctrl+N` or select the header's `add` action. Quick add defaults to the open list. From outside a list, it tries the last successful capture destination, the last opened list, then the first available list. Choose a destination and press Enter or **Add**. The success message names the destination.
+
+Switching between Quick add and Find preserves their drafts. A nonempty capture keeps its destination until you change it or that list disappears. If the list disappears, choose another to save. An empty draft chooses a destination again when reopened. Escape cancels the capture. See [save recovery](storage.md#save-recovery) if a capture fails.
+
+You can also open Quick add from the [tray](#startup-and-system-tray) or with its [global shortcut](#global-shortcuts).
 
 ## Add task context
 
@@ -71,9 +79,11 @@ Drag a task vertically to reorder it. Drag right past the threshold to complete 
 
 Deleting a task, child, or History entry, or moving a task, shows **Undo**. Select it or press `Ctrl+Z` outside a text editor. Undo restores a deleted item with its contents, completion, and original position, including the archive time for a History entry. Undo returns a moved task to its original position in its source list.
 
-Undo applies to the latest deletion or move and lasts until the next deletion or move, dismissal, workspace switch, or restart. If the moved task or either list is gone, or the original list already holds the task, Undo explains why and stays available.
+Undo applies to the latest deletion or move and lasts until the next deletion or move, dismissal, workspace switch, or restart. If a moved task or either list is gone, or the original list already holds the task, Undo explains why and stays available.
 
-Right-click a task to choose **Move to list**, or press `Ctrl+Shift+M` with focus on a task row, one of its controls, a checklist item, or its title editor; typed edits are saved first. The destination picker starts focused on the list you last moved a task to this session, or on the first other list. Up and Down change the destination, Enter moves, and Escape cancels and returns focus to the task row. You can also select a destination and **Move**. The task's identity, completion, checklist, and unfinished checklist draft follow it, focus moves to the neighbouring row, and the notice names the destination and offers **Undo**.
+Right-click a task and choose **Move to list**, or press `Ctrl+Shift+M` with focus on a task row, one of its controls, a checklist item, or its title editor. The app saves inline edits first. The picker starts on the last destination used this session if it is still available, or the first other list. Use Up and Down to change the destination, Enter or **Move** to confirm, and Escape to return to the task. If the destination disappears while the picker is open, choose another.
+
+A moved task keeps its identity, completion, context, checklist, and unfinished checklist draft. It appears at the top in Manual order. Focus moves to the neighboring row, and the notice names the destination and offers **Undo**. See [save recovery](storage.md#save-recovery) for what happens if either write fails.
 
 Select **Show history** and activate an archived title to inspect its children without changing their state. Each archived task shows a muted "Archived 3 days ago" line under its title. **Restore** returns the parent as incomplete, with child completion unchanged. It appears at the bottom in Manual order; other sort modes determine its visible position.
 
@@ -83,7 +93,9 @@ Down from the last task reaches **Show history**, or Down from task entry when n
 
 ## Find and navigate
 
-`Ctrl+F` or the header's `find` action searches task titles, notes (context), and subtasks across every list, including completed tasks and History. Multiple words must all match within the same task or subtask, in its title or notes for a task. A notes match shows the matching line. Use Up and Down to select a result, Enter to open it, and Escape to close the overlay. The selected task scrolls into view and is briefly highlighted. Opening an archived child reveals its read-only History contents. Results show each child's own completion state, with History labeled separately. Reopening Find retains the query and selection; ordinary wheel or trackpad scrolling keeps its position.
+`Ctrl+F` or the header's `find` action searches task titles, notes (context), and subtasks across every list, including completed tasks and History. Search ignores case. All words must match the same result. A task can match across its title and notes, and the result shows a snippet when a word matches only in the notes.
+
+Use Up and Down to select a result, Enter to open it, and Escape to close Find. The selected task scrolls into view and is briefly highlighted. Opening an archived child reveals its read-only History contents. Results show each child's own completion state, with History labeled separately. Reopening Find retains the query and selection. Scrolling the results with a wheel or trackpad keeps the selection.
 
 <img src="../assets/find.png" alt="Find showing matching tasks from the Projects and Errands lists" width="360">
 
@@ -115,9 +127,13 @@ Choose folders and launch-time overrides through [workspace settings](storage.md
 
 ## Startup and system tray
 
-The sign-in entry created by the [installers](../README.md#install-and-run) passes `--start-hidden`; an ordinary launch opens the window. See [workspace overrides](storage.md#workspace-location) for selecting a folder at launch. If a usable tray is unavailable at startup, the window opens so the app remains accessible.
+The [installers](../README.md#install-and-run) add a sign-in entry with `--start-hidden`. An ordinary launch opens the window, as does a hidden launch without a usable tray. See [workspace overrides](storage.md#workspace-location) to select a folder at launch.
 
-`Ctrl+W` closes the window like its close button, including while an overlay is open. With a usable tray, closing the window hides it in the system tray (the menu bar on macOS); minimizing does the same on Windows and Linux. Some Linux desktops, including GNOME, disable minimize for windows hidden from the taskbar; use close or `Ctrl+W` to hide to the tray. Open the tray icon's menu and choose **Show Minimalist List** to restore it, **Quick add** to restore it with Quick add open, or **Quit** to exit. Activating the icon also restores the window on desktops that support it. [Workspace scans](storage.md#file-sync-behavior) continue while hidden. Launching the executable again for the same workspace and local settings asks the existing instance to show its window; duplicate `--start-hidden` launches stay quiet. Different workspaces can run separately. See [save recovery](storage.md#save-recovery) for pending edits.
+`Ctrl+W` closes the window like its close button, including while an overlay is open. With a usable tray, closing hides the window in the tray (the menu bar on macOS). Minimizing does the same on Windows and Linux. On desktops such as GNOME that disable minimize for windows hidden from the taskbar, use close or `Ctrl+W`.
+
+From the tray icon's menu, choose **Show Minimalist List** to restore the window, **Quick add** to open it with the capture field focused, or **Quit** to exit. Activating the icon also restores the window on desktops that support it. [Workspace scans](storage.md#file-sync-behavior) continue while hidden. See [save recovery](storage.md#save-recovery) for pending edits.
+
+Launching again with the same workspace and local settings shows the existing window. A duplicate `--start-hidden` launch leaves its visibility alone. Different workspaces can run separately.
 
 With a usable tray, Windows keeps the app out of the taskbar even while its window is open. X11 requests the same behavior through the desktop's skip-taskbar hint; window managers may ignore it. If the tray is unavailable or disappears, Windows and X11 restore the taskbar entry. Native Wayland leaves taskbar placement to the compositor.
 
@@ -131,4 +147,8 @@ To disable startup on Windows, remove **Minimalist List** from the Startup folde
 
 ### Global shortcuts
 
-Two shortcuts work while another application has focus. `Ctrl+Alt+Shift+L` shows the existing window and keeps it visible on repeated presses. `Ctrl+Alt+Shift+N` shows the window and opens Quick add for the open list, first closing the shortcut reference, the Move dialog, and any open menu; an open Quick add keeps its draft and regains focus. Change or disable each in **Settings -> Global shortcut** and **Settings -> Quick add shortcut**; a combination already used by the other shortcut is rejected, and registration conflicts are reported without replacing the previous shortcut. The app must be running. Native Wayland requires a desktop shortcut that launches the app; the built-in registration of both shortcuts uses X11.
+While the app is running, `Ctrl+Alt+Shift+L` shows its window and keeps it visible on repeated presses. `Ctrl+Alt+Shift+N` shows the window and opens [Quick add](#quick-add) with its text field focused. On macOS, use Command and Option for these defaults. The Quick add shortcut dismisses the shortcut reference, the Move dialog, and open menus. If Quick add is already open, the shortcut focuses the existing draft.
+
+In **Settings -> Global shortcut** or **Settings -> Quick add shortcut**, type a chord and choose **Apply shortcut**, or choose **Disable shortcut**. Use Ctrl or Command with another modifier and a letter, number, Space, or function key. Each action needs its own chord. If registration fails, the previous shortcut remains active.
+
+On Linux, built-in global shortcuts use X11. Without an X11 display, bind the app launcher in your desktop settings to open or reveal the window.

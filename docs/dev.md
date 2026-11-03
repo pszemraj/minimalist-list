@@ -29,7 +29,7 @@ src/app/desktop.rs          Global shortcut settings and workspace-folder openin
 src/app/settings.rs         Global preferences and separate List options, including Clear History
 src/app/task_details.rs     Measured checklists and read-only History with offscreen row skipping
 src/app/task_controls.rs    Task controls and optional collapsible child previews
-src/app/task_operations.rs  Child editing, Undo, and archival
+src/app/task_operations.rs  Inline edit completion, child operations, Undo, and archival
 src/app/task_move.rs        Move dialog, two-list transfer, and Move Undo
 src/app/task_text.rs        Title wrapping and hover scrolling
 src/app/theme.rs            Fonts, palettes, and shared rendering helpers
@@ -41,7 +41,7 @@ src/storage_backup.rs       Workspace keys, local list snapshots, and recoverabl
 src/tray.rs                 Native tray icon and menu actions
 ```
 
-Neighboring `*_tests.rs` files cover storage, interaction, recovery, launch, and layout regressions. Reuse `app::tests::{frame_input, run_app_frame, chord}` for application frames; `run_frame` also accepts isolated widgets. Keep clocks, dimensions, DPI, and motion updates in scenario helpers.
+Neighboring `*_tests.rs` files cover storage, interaction, recovery, launch, and layout regressions. Reuse `app::tests::{frame_input, run_app_frame, chord}` for application frames. Use `run_frame` for isolated widgets. Keep clocks, dimensions, DPI, and motion updates in scenario helpers.
 
 ## Verification
 
@@ -91,7 +91,7 @@ Start the application:
 cargo run --locked --features eframe/inspection -- --data-dir target/gui-check/workspace
 ```
 
-Attach the GUI inspector to port 5741. Use a distinct port for each instance and a separate `XDG_CONFIG_HOME` when testing two instances against one workspace. For repeated-launch behavior, see [startup and system tray](usage.md#startup-and-system-tray); for settings paths, see [platform paths](storage.md#default-directories).
+Attach the GUI inspector to port 5741. Use a distinct port for each instance and a separate `XDG_CONFIG_HOME` when testing two instances against one workspace. See [startup and system tray](usage.md#startup-and-system-tray) for repeated launches and [default directories](storage.md#default-directories) for settings paths.
 
 ### Running alongside an installed copy
 
