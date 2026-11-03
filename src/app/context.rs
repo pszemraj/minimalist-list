@@ -565,10 +565,10 @@ impl MinimalistApp {
                             ui.label(self.rich(
                                 format!(
                                     "{} · {done}/{total} subtasks",
-                                    if task.completed {
-                                        "Completed"
-                                    } else {
-                                        "Active"
+                                    match task.status() {
+                                        TaskStatus::NotStarted => "Not started",
+                                        TaskStatus::InProgress => "In progress",
+                                        TaskStatus::Done => "Done",
                                     }
                                 ),
                                 12.0,
