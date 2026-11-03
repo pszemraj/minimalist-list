@@ -220,6 +220,7 @@ impl MinimalistApp {
                 .iter()
                 .any(|item| item.key == list && item.data.completed_count() > 0)
         {
+            self.drag = None;
             self.revealed = None;
             self.clear_animation = Some((list, Instant::now()));
         }

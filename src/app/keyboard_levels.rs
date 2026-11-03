@@ -208,6 +208,9 @@ impl MinimalistApp {
             } else if take_key(ctx, Key::Space, Modifiers::NONE) {
                 self.apply_row_action(RowAction::Toggle(list, task.id));
             } else if take_shortcut(ctx, TOGGLE_STARTED) {
+                if self.drag.take().is_some() {
+                    ctx.stop_dragging();
+                }
                 self.apply_row_action(RowAction::ToggleStarted(list, task.id));
             } else if take_shortcut(ctx, DELETE_TASK) {
                 self.apply_row_action(RowAction::Delete(list, task.id));

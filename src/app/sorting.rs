@@ -1,6 +1,6 @@
 //! Task view sorting with a separately retained manual order on disk.
 
-use super::MinimalistApp;
+use super::{MinimalistApp, keyboard::FocusItem};
 use crate::{
     model::{Task, TaskSort},
     storage::StoredList,
@@ -125,6 +125,7 @@ impl MinimalistApp {
     pub(super) fn apply_task_sorts(&mut self) {
         for index in 0..self.lists.len() {
             let list = self.lists[index].key;
+            let mode = self.task_sort_mode(list);
             let previous = self
                 .manual_task_order
                 .get(&list)
@@ -137,10 +138,26 @@ impl MinimalistApp {
                         .map(|task| task.id)
                         .collect()
                 });
-            let manual = reconcile_order(&previous, &self.lists[index].data.tasks);
-            let mode = self.task_sort_mode(list);
-            apply_order(&mut self.lists[index].data.tasks, &manual, TaskSort::Manual);
-            apply_order(&mut self.lists[index].data.tasks, &manual, mode);
+            let tasks = &mut self.lists[index].data.tasks;
+            let manual = reconcile_order(&previous, tasks);
+            let focused = self.keyboard.anchor.and_then(|(id, owner)| match owner {
+                FocusItem::Task(owner_list, task) | FocusItem::Subtask(owner_list, task, _)
+                    if owner_list == list && mode == TaskSort::ByStatus =>
+                {
+                    tasks
+                        .iter()
+                        .position(|item| item.id == task)
+                        .map(|position| (id, task, position))
+                }
+                _ => None,
+            });
+            apply_order(tasks, &manual, TaskSort::Manual);
+            apply_order(tasks, &manual, mode);
+            if let Some((id, task, position)) = focused
+                && tasks[position].id != task
+            {
+                self.keyboard.scroll_after_sort = Some(id);
+            }
             self.manual_task_order.insert(list, manual);
         }
     }

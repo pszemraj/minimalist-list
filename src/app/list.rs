@@ -241,7 +241,14 @@ impl MinimalistApp {
                 }
                 // The fixed entry lives outside this scroller. Restoring its
                 // focus must not move the list's remembered scroll position.
-                if ui.ctx().memory(|memory| memory.focused()) != Some(create_response.id) {
+                let focused = ui.ctx().memory(|memory| memory.focused());
+                if let Some(id) = self.keyboard.scroll_after_sort.take()
+                    && focused == Some(id)
+                    && let Some(response) = ui.ctx().read_response(id)
+                {
+                    response.scroll_to_me(None);
+                }
+                if focused != Some(create_response.id) {
                     self.keyboard_focus_ui(ui, palette);
                 }
                 if let Some(drag) = self.drag.as_ref()
@@ -365,6 +372,11 @@ impl MinimalistApp {
         let response = parent_ui.interact(rect, FocusItem::Task(list_id, task_id).id(), sense);
         let needs_contents = parent_ui.is_rect_visible(rect)
             || self.drag.is_some()
+            || self.keyboard.anchor.is_some_and(|(id, item)| {
+                item == FocusItem::Task(list_id, task_id)
+                    && id != response.id
+                    && parent_ui.ctx().memory(|memory| memory.has_focus(id))
+            })
             || self.editing == Some((list_id, task_id))
             || self.subtasks_for == Some((list_id, task_id))
             || !task.subtasks.is_empty()
@@ -618,8 +630,27 @@ impl MinimalistApp {
                 &task.text,
             );
             self.track_focus(&completion, FocusItem::Task(list_id, task.id));
-            if completion.clicked() {
-                return Some(if ui.input(|input| input.modifiers.shift) {
+            let pointer_click = completion.clicked_by(egui::PointerButton::Primary);
+            // egui also activates a focused button for Shift+Space. That chord
+            // belongs to the task row, while Shift+Enter keeps its usual action.
+            let row_shortcut = completion.has_focus()
+                && take_key(ui.ctx(), egui::Key::Space, egui::Modifiers::SHIFT);
+            if pointer_click || (completion.clicked() && !row_shortcut) {
+                let shift_click = pointer_click
+                    && ui.input(|input| {
+                        input.events.iter().rev().find_map(|event| match event {
+                            egui::Event::PointerButton {
+                                pos,
+                                button: egui::PointerButton::Primary,
+                                pressed: false,
+                                modifiers,
+                            } if Some(*pos) == completion.interact_pointer_pos() => {
+                                Some(modifiers.shift)
+                            }
+                            _ => None,
+                        }) == Some(true)
+                    });
+                return Some(if shift_click {
                     RowAction::ToggleStarted(list_id, task.id)
                 } else {
                     RowAction::Toggle(list_id, task.id)

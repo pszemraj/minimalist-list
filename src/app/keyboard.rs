@@ -114,6 +114,7 @@ impl FocusItem {
 /// Pending focus requests, navigation return targets, and the last focused item.
 pub(super) struct KeyboardState {
     pub(super) pending: Option<Id>,
+    pub(super) scroll_after_sort: Option<Id>,
     requested: Option<Id>,
     missing_request: Option<(Id, u8)>,
     pub(super) last_focus: Option<Id>,
@@ -124,7 +125,7 @@ pub(super) struct KeyboardState {
     pub(super) settings_sections: Vec<usize>,
     pub(super) history_toggle: Option<Id>,
     pub(super) creation_choices: Vec<Id>,
-    anchor: Option<(Id, FocusItem)>,
+    pub(super) anchor: Option<(Id, FocusItem)>,
     pub(super) deferred_events: Vec<Event>,
     history_delete_held: bool,
 }
@@ -254,7 +255,10 @@ pub(super) fn shortcut_groups(show_window: String, quick_add: String) -> Vec<Sho
                     "Move the task up / down",
                     pair(MOVE_TASK_UP, MOVE_TASK_DOWN),
                 ),
-                ("Mark in progress / not started", shortcut(TOGGLE_STARTED)),
+                (
+                    "Mark in progress / not started (task row)",
+                    shortcut(TOGGLE_STARTED),
+                ),
                 ("Move to another list", shortcut(MOVE_TO_LIST)),
                 ("Edit task context", shortcut(TASK_CONTEXT)),
                 (
