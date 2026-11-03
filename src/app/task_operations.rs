@@ -198,9 +198,8 @@ impl MinimalistApp {
                 .tasks
                 .iter_mut()
                 .find(|item| item.id == task)
-            && let Some(position) = parent.subtasks.iter().position(|item| item.id == child)
+            && let Some((position, subtask)) = parent.remove_subtask(child)
         {
-            let subtask = parent.subtasks.remove(position);
             self.details.undo = Some(UndoItem::Subtask {
                 list,
                 task,
