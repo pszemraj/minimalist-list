@@ -45,16 +45,9 @@ Neighboring `*_tests.rs` files cover storage, interaction, recovery, launch, and
 
 ## Verification
 
-Isolate settings and temporary fixtures before running checks. These explicit XDG overrides apply on every platform:
+Use the [runtime checks and Bash test environment](../AGENTS.md#validation-before-runtime-commits). Put `rustdoc-checker` on `PATH` for the strict Rust documentation check.
 
-```bash
-mkdir -p target/agent-checks/tmp target/agent-checks/config target/agent-checks/data
-export TMPDIR="$PWD/target/agent-checks/tmp"
-export XDG_CONFIG_HOME="$PWD/target/agent-checks/config"
-export XDG_DATA_HOME="$PWD/target/agent-checks/data"
-```
-
-In PowerShell, use process-local variables and set both Windows temporary-directory variables:
+For the same isolated test environment in PowerShell, set both Windows temporary-directory variables.
 
 ```powershell
 $env:TMPDIR = Join-Path $PWD 'target/agent-checks/tmp'
@@ -65,20 +58,7 @@ $env:XDG_DATA_HOME = Join-Path $PWD 'target/agent-checks/data'
 New-Item -ItemType Directory -Force -Path $env:TMPDIR,$env:XDG_CONFIG_HOME,$env:XDG_DATA_HOME | Out-Null
 ```
 
-The strict Rust documentation check requires `rustdoc-checker` on `PATH`. For runtime changes, run the checks before committing:
-
-```bash
-cargo check --locked --workspace --all-targets --all-features
-cargo fmt --all --check
-cargo test --locked
-cargo test --locked --features eframe/inspection
-cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
-cargo build --locked --workspace --all-targets --all-features
-rustdoc-checker src --strict
-git diff --check
-```
-
-For documentation-only changes, check Markdown links and whitespace.
+For documentation-only changes, check Markdown links and run `git diff --check`.
 
 ## GUI inspection
 

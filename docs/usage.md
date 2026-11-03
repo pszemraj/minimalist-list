@@ -2,7 +2,7 @@
 
 ## Keyboard shortcuts
 
-Application shortcuts require keyboard focus in the app. On macOS, use Command for Ctrl and Option for Alt; Backspace is labeled Delete. List switching uses Control on every platform. Home and End are Fn+Left and Fn+Right on MacBook keyboards; Page Up and Page Down are Fn+Up and Fn+Down.
+Application shortcuts require keyboard focus in the app. On macOS, use Command for Ctrl except when [switching lists](#find-and-navigate), and Option for Alt. Backspace is labeled Delete. Home and End are Fn+Left and Fn+Right on MacBook keyboards. Page Up and Page Down are Fn+Up and Fn+Down.
 
 Press `Ctrl+/` to show the in-app keyboard shortcut reference. Keyboard layouts that require Shift to type `/` are supported. Use Up/Down, Page Up/Page Down, or Home/End to scroll it. Escape or **Close** dismisses it.
 
@@ -14,7 +14,12 @@ Press Backspace from an empty task entry or a focused task row to open the overv
 
 `Ctrl+Shift+N` opens list creation from Lists, a list, or Settings. You can also select **+ New list**. New lists default to Charcoal, a muted grey palette. Enter a name, optionally choose an accent, and press Enter or select **Create list**. **Cancel** or Escape closes the form. Down from the name focuses the selected accent; Left/Right moves between colors. Enter or Space chooses the color and returns to the name; the next Enter creates the list. Up returns from colors to the name without selecting.
 
-Open **List options** from a list header or card to rename, recolor, clear the History of, or delete that list. When the list has archived tasks, **Clear History** appears above **Delete list**: it asks "Remove all N archived tasks from History?" and removes them only after a separate **Confirm clear History** activation, while **Cancel** backs out and holding Enter or Space cannot confirm it. Clearing History cannot be undone in the app, but it first writes a [local snapshot](storage.md#local-backups) that holds the tasks, and History is kept if that snapshot cannot be written. **Delete list** shows its name and affected task and History counts, then requires a separate **Confirm delete list** activation. **Cancel deletion** backs out; holding Enter or Space cannot confirm it. Deleting moves the list file to [local backups](storage.md#local-backups) rather than erasing it. At least one list must remain. See [duplicate list files](storage.md#duplicate-list-files) if deletion is blocked by a conflicting identity.
+Open **List options** from a list header or card to rename, recolor, or remove the list or its History.
+
+- **Clear History** appears when the list has archived tasks. Review the count, then choose **Confirm clear History** or **Cancel**. Use a [local snapshot](storage.md#local-backups) to recover cleared entries.
+- **Delete list** shows the list name and counts for active and archived tasks. Choose **Confirm delete list** or **Cancel deletion**. At least one list must remain. See [local backups](storage.md#local-backups) to recover a deleted list and [duplicate list files](storage.md#duplicate-list-files) if deletion is blocked.
+
+Each confirmation requires a separate press. Holding Enter or Space cannot confirm it.
 
 In **Manual** order, drag overview tiles to rearrange them. **Sort lists** temporarily shows title, newest, or oldest order. Return to **Manual** to recover the arrangement.
 
@@ -30,7 +35,7 @@ Right opens a task's checklist and focuses its first child, or its add field whe
 
 Enable **Settings -> Appearance -> Show subtasks below tasks** to preview every task's children. Each task's chevron collapses or expands its preview independently; **Edit subtasks** opens the full checklist editor. With this preference off, the checklist opens only when requested.
 
-`Ctrl+N` or the header's `add` action opens Quick add. A new capture prefers the open list, then the last successful available destination. Choose a list and press Enter or **Add**; a successful capture names its destination. Switching between Quick add and Find preserves their drafts. Nonempty captures keep their destination while it exists; choose another list if it was deleted. Empty drafts choose again when reopened. Escape cancels the capture. From another application, the [global Quick add shortcut](#global-shortcuts) or the tray menu's **Quick add** item shows the window and opens Quick add with its text field focused.
+`Ctrl+N` or the header's `add` action opens Quick add. A new capture prefers the open list, then the last successful available destination. Choose a list and press Enter or **Add**. A successful capture names its destination. Switching between Quick add and Find preserves their drafts. Nonempty captures keep their destination while it exists. Choose another list if it was deleted. Empty drafts choose again when reopened. Escape cancels the capture. You can also open Quick add from the [tray](#startup-and-system-tray) or with its [global shortcut](#global-shortcuts).
 
 Click task or child text to edit it inline, or press Enter on a focused task row. Tab also reaches child text, where Enter or Space starts editing. Enter or leaving the editor saves; Escape cancels. Enter returns focus to the task row or child's completion control; clicking another field keeps focus there. Editing a child preserves its position and completion. The checklist and delete controls on the right become prominent on hover and remain keyboard-focusable.
 
@@ -54,9 +59,9 @@ Use **Copy complete task** in the task menu or press `Ctrl+Shift+C` while any pa
 
 ## Complete, reorder, and remove tasks
 
-Use the circle on the left to complete or reactivate a task. It is keyboard-focusable, so Space or Enter also toggles it.
+Use the circle on the left to complete or reactivate a task. With the circle focused, press Space or Enter. With the row focused, press Space.
 
-Space on a focused task row toggles completion. `Alt+Up` and `Alt+Down` move that task one position, keeping it focused. Moving past the first or last position leaves the list file untouched. Forward Delete on a focused task row removes it (`Fn+Delete` on Mac keyboards). These row commands do not apply while editing text.
+On a focused row, `Alt+Up` and `Alt+Down` move the task one position and keep it focused. Moving past the first or last position leaves the list file untouched. Forward Delete removes the task (`Fn+Delete` on Mac keyboards). These row commands apply outside text editors.
 
 Drag a task vertically to reorder it. Drag right past the threshold to complete or reactivate it. Drag left to reveal Edit and Delete, then drag right to close those actions. Opening Quick add, Find, or the shortcut reference cancels an unfinished drag.
 
@@ -64,7 +69,9 @@ Drag a task vertically to reorder it. Drag right past the threshold to complete 
 
 `Ctrl+Shift+Backspace` or **Archive completed** moves completed tasks into restorable History. The shortcut works from an empty task or subtask entry; nonempty fields and inline editors keep editing text. With no completed tasks, it leaves the list file untouched.
 
-Deleting a task, child, or History entry, or moving a task, shows **Undo**. Select it, or press `Ctrl+Z` outside a text editor, to restore the latest deletion with its contents, completion, and original position (a History entry returns to History with its original archive time), or to return the latest moved task to its original position in the list it came from. Only the latest deletion or move can be undone, and it stays available for the current workspace until another deletion or move, dismissal, or workspace switch; it is not saved across restarts. If the moved task or either list is gone, or the original list already holds the task, Undo explains why and stays available. Whole-list deletion uses its separate confirmation.
+Deleting a task, child, or History entry, or moving a task, shows **Undo**. Select it or press `Ctrl+Z` outside a text editor. Undo restores a deleted item with its contents, completion, and original position, including the archive time for a History entry. Undo returns a moved task to its original position in its source list.
+
+Undo applies to the latest deletion or move and lasts until the next deletion or move, dismissal, workspace switch, or restart. If the moved task or either list is gone, or the original list already holds the task, Undo explains why and stays available.
 
 Right-click a task to choose **Move to list**, or press `Ctrl+Shift+M` with focus on a task row, one of its controls, a checklist item, or its title editor; typed edits are saved first. The destination picker starts focused on the list you last moved a task to this session, or on the first other list. Up and Down change the destination, Enter moves, and Escape cancels and returns focus to the task row. You can also select a destination and **Move**. The task's identity, completion, checklist, and unfinished checklist draft follow it, focus moves to the neighbouring row, and the notice names the destination and offers **Undo**.
 

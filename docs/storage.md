@@ -4,7 +4,7 @@
 
 Select a folder through **Settings -> Workspace -> Choose folder**, or enter a path and press Enter or **Use typed path**. The active folder is shown above the field. Any writable folder works, including a temporary directory. Selecting a folder opens its lists without moving the previous workspace's files. A blank typed path does nothing. Pressing Enter without changing the path leaves the current list open; explicitly applying the folder reloads it. Pending edits follow [save recovery](#save-recovery).
 
-**Workspace -> Open workspace folder** opens the active folder in Finder, Explorer, or the system file manager. **Open backups folder** opens its [local backups](#local-backups).
+**Workspace -> Open workspace folder** opens the active folder in Finder, Explorer, or the system file manager.
 
 Paths beginning with `~/` are expanded. Relative paths are resolved from the process working directory and stored as absolute runtime paths. Without a saved selection, the app uses its [platform default](#default-directories).
 
@@ -31,9 +31,11 @@ Workspace selection follows this order:
 3. The path saved through Settings
 4. The platform default
 
-The flag and environment variable do not replace the saved setting. Choosing a folder in the application does. Run `cargo run --locked -- --help` for the command summary.
+Choosing a folder in the application saves it for the next launch. Run `cargo run --locked -- --help` for the command summary.
 
-If the selected workspace is temporarily unavailable at startup, its saved path is retained. A missing saved folder, or one whose `lists` subfolder is missing or has no list files, such as an unmounted or still-syncing folder, is neither recreated nor given a new list; only the platform default, `--data-dir`, `MINIMALIST_LIST_WORKSPACE`, and folders chosen in Settings are created when absent or start with a list when empty. If the open workspace's `lists` folder disappears, becomes unreadable, or loses all its list files while the app runs, the next scan shows the same recovery screen instead of creating a new list. The recovery screen offers **Retry workspace** or **Choose workspace...** without opening another workspace's lists. Restore access and retry to reopen it. Retrying a launch-only override does not replace the saved selection; choosing another folder does.
+If the selected workspace is unavailable at startup, the app offers **Retry workspace** and **Choose workspace...**. The same screen appears if the open workspace's `lists` folder disappears, becomes unreadable, or loses all its list files during a scan. Restore access and retry to reopen it with the current selection.
+
+The app creates missing folders and starts with a list when opening an empty platform default, launch override, or folder explicitly chosen in Settings. An unavailable or empty saved folder goes to recovery, which protects an unmounted or still-syncing workspace from accidental initialization.
 
 ## Default directories
 
@@ -49,7 +51,7 @@ When the Windows environment variables are absent or empty, paths fall back to `
 
 If the native defaults do not exist on macOS or Windows, the app uses an existing `~/.local/share/minimalist-list/` workspace or `~/.config/minimalist-list/settings.json` settings file. Each fallback is independent; the settings file is used for both loading and saving. These legacy paths use `HOME`, including on Windows. No files are copied or moved. Launch overrides and saved workspace selections keep the precedence shown above.
 
-`window.ron`, beside `settings.json`, stores native window geometry and framework state. Local `instances/` files coordinate [repeated launches](usage.md#startup-and-system-tray) for each workspace; they do not belong in a synced list folder. `backups/`, also beside `settings.json`, holds [local backups](#local-backups).
+`window.ron`, beside `settings.json`, stores native window geometry and framework state. Local `instances/` files coordinate [repeated launches](usage.md#startup-and-system-tray) for each workspace.
 
 `settings.lock` serializes local preference merges across running instances, preserving unrelated changes made by different workspaces.
 
@@ -97,13 +99,7 @@ Moving a task writes the destination before removing the source and attempts to 
 
 ## Local backups
 
-Saves, Clear History, and list deletion keep earlier list files in a `backups/` folder beside the [local settings file](#default-directories), never inside the workspace or its sync folder:
-
-- Linux: `~/.config/minimalist-list/backups/`
-- macOS: `~/Library/Application Support/minimalist-list/backups/`
-- Windows: `%APPDATA%\minimalist-list\backups\`
-
-An explicit `XDG_CONFIG_HOME` and the legacy settings location move `backups/` together with `settings.json`. Each workspace has its own subfolder named by a 16-digit hexadecimal key derived from its path. **Settings -> Workspace -> Open backups folder** opens the active workspace's subfolder, creating it if needed.
+Saves, Clear History, and list deletion keep earlier list files in `backups/` beside the [local settings file](#default-directories), outside the workspace. Each workspace has a subfolder named by a 16-digit hexadecimal key derived from its path. **Settings -> Workspace -> Open backups folder** opens the active workspace's subfolder, creating it if needed.
 
 ```text
 backups/<workspace key>/
