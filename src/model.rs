@@ -320,6 +320,25 @@ impl Task {
         true
     }
 
+    /// Removes a checklist item without losing progress inferred from it.
+    ///
+    /// # Arguments
+    /// - `child` - Checklist item identity.
+    ///
+    /// # Returns
+    /// The removed item and its former position, if it exists.
+    pub fn remove_subtask(&mut self, child: Uuid) -> Option<(usize, Subtask)> {
+        let position = self.subtasks.iter().position(|item| item.id == child)?;
+        let item = self.subtasks.remove(position);
+        if self.started.is_none()
+            && item.completed
+            && !self.subtasks.iter().any(|item| item.completed)
+        {
+            self.started = Some(true);
+        }
+        Some((position, item))
+    }
+
     /// Returns completed and total subtask counts when a checklist exists.
     ///
     /// # Returns

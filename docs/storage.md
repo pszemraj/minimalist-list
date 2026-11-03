@@ -70,7 +70,7 @@ minimalist-list/
 
 New filenames combine a safe, bounded list title with its stable UUID. Renaming a list saves its contents before updating its filename; name collisions never replace another file. If the filename update fails, the contents remain at the previous path with a warning. Quitting, switching workspaces, and reloads remain available. After resolving the filename problem, change the title again to retry; submitting an unchanged title does nothing. Existing UUID-only filenames remain readable and ordinary saves keep their paths. The filename UUID is authoritative.
 
-Default list order comes from `created_at_unix`, with the UUID as a stable tie-breaker. The app remembers tile order and the chosen list and task sort modes locally for each workspace. The `tasks` array keeps Manual order for [every sort mode](usage.md#complete-reorder-and-remove-tasks). Preferences for deleted lists are removed when that workspace is loaded.
+Default list order comes from `created_at_unix`, with the UUID as a stable tie-breaker. The app remembers tile order and the chosen list and task sort modes locally for each workspace. By status keeps the previous setting value `"IncompleteFirst"`. The `tasks` array keeps Manual order for [every sort mode](usage.md#complete-reorder-and-remove-tasks). Preferences for deleted lists are removed when that workspace is loaded.
 
 ## File-sync behavior
 
@@ -128,10 +128,12 @@ List files are pretty-printed and hand-editable. `format_version` is currently `
 | Object | Fields |
 | --- | --- |
 | List | `format_version`, `id`, `title`, `created_at_unix`, `accent`, `tasks`, `archive` |
-| Task | `id`, `text`, `completed`, `created_at_unix`, `completed_at_unix`, `subtasks`, optional `context` |
+| Task | `id`, `text`, `completed`, `created_at_unix`, `completed_at_unix`, `subtasks`, optional `context` and `started` |
 | Subtask | `id`, `text`, `completed` |
 | Archive entry | `task`, `archived_at_unix` |
 
 Timestamps are Unix seconds. `accent` is one of `Mint`, `Charcoal`, `Crimson`, `Sand`, `Sky`, or `Lavender`.
 
 Missing `context` loads as empty; an empty context is omitted when writing. Older versions without task-context support discard this field when rewriting a list. See [task context](usage.md#add-task-context) for editing and copying notes.
+
+`completed: true` marks a task Done. For an open task, `started: true` means In progress and `started: false` means Not started. If `started` is absent or null, any checked subtask implies In progress. The app omits the key when that value is unset. A string or number in `started` makes the list unreadable, as with other task fields of the wrong type.

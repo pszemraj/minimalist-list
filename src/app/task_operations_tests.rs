@@ -50,7 +50,7 @@ fn task_and_child_undo_restore_identity_content_completion_and_position() {
     middle.toggle();
     middle.subtasks = ["First", "Middle", "Last"].map(Subtask::new).to_vec();
     middle.subtasks[1].completed = true;
-    let original = serde_json::to_value(&middle).unwrap();
+    let mut original = serde_json::to_value(&middle).unwrap();
     let id = middle.id;
     let child = middle.subtasks[1].id;
     app.lists[0].data.tasks = vec![Task::new("Before"), middle, Task::new("After")];
@@ -64,6 +64,8 @@ fn task_and_child_undo_restore_identity_content_completion_and_position() {
     app.delete_subtask(list, id, child);
     assert_eq!(saved(&app, 0).tasks[1].subtasks.len(), 2);
     app.undo_last();
+    // Deleting the last checked child records the inferred start.
+    original["started"] = true.into();
     assert_eq!(
         serde_json::to_value(&saved(&app, 0).tasks[1]).unwrap(),
         original
@@ -647,7 +649,8 @@ fn child_undo_after_parent_archival_restores_content_without_restoring_parent() 
     task.toggle();
     task.subtasks = ["Before", "Deleted", "After"].map(Subtask::new).to_vec();
     task.subtasks[1].completed = true;
-    let original = serde_json::to_value(&task).unwrap();
+    let mut original = serde_json::to_value(&task).unwrap();
+    original["started"] = true.into();
     let task_id = task.id;
     let child = task.subtasks[1].id;
     app.lists[0].data.tasks.push(task);
@@ -932,4 +935,44 @@ fn restoring_history_keeps_the_previous_open_status() {
     let restored = &saved(&app, 0).tasks[0];
     assert_eq!(restored.status(), TaskStatus::InProgress);
     fs::remove_dir_all(&app.workspace).unwrap();
+}
+
+#[test]
+fn deleting_and_undoing_the_last_checked_child_preserves_the_parents_open_status() {
+    for started in [None, Some(false), Some(true)] {
+        for done in [false, true] {
+            let (_ctx, mut app) = test_app();
+            let list = app.lists[0].key;
+            let mut task = Task::new("Legacy parent");
+            let id = task.id;
+            let mut child = Subtask::new("Checked child");
+            let child_id = child.id;
+            child.completed = true;
+            task.subtasks.push(child);
+            task.started = started;
+            if done {
+                task.toggle();
+            }
+            let status = task.status();
+            let completed_at = task.completed_at_unix;
+            app.lists[0].data.tasks.push(task);
+            app.save_list_index(0);
+
+            app.delete_subtask(list, id, child_id);
+            let deleted = saved(&app, 0).tasks.remove(0);
+            assert!(deleted.subtasks.is_empty());
+            assert_eq!(deleted.status(), status);
+            assert_eq!(deleted.started, started.or(Some(true)));
+            assert_eq!(deleted.completed_at_unix, completed_at);
+
+            app.undo_last();
+            let restored = saved(&app, 0).tasks.remove(0);
+            assert_eq!(restored.status(), status);
+            assert_eq!(restored.started, deleted.started);
+            assert_eq!(restored.completed_at_unix, completed_at);
+            assert!(restored.subtasks[0].completed);
+            assert_eq!(restored.subtasks[0].id, child_id);
+            fs::remove_dir_all(&app.workspace).unwrap();
+        }
+    }
 }
