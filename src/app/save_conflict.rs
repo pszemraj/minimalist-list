@@ -38,6 +38,37 @@ impl MinimalistApp {
         self.persistence.conflicted_candidates.remove(&list);
     }
 
+    /// Copies the retained conflict snapshot so an abandoned write can restore it.
+    ///
+    /// # Arguments
+    /// - `list` - List identity.
+    ///
+    /// # Returns
+    /// The retained candidate, if this list has one.
+    pub(in crate::app) fn save_conflict_snapshot(&self, list: Uuid) -> Option<StoredList> {
+        self.persistence.conflicted_candidates.get(&list).cloned()
+    }
+
+    /// Replaces a list's conflict snapshot after an abandoned write recorded a new one.
+    ///
+    /// # Arguments
+    /// - `list` - List identity.
+    /// - `snapshot` - The earlier retained candidate, or `None` if there was none.
+    pub(in crate::app) fn restore_save_conflict(
+        &mut self,
+        list: Uuid,
+        snapshot: Option<StoredList>,
+    ) {
+        match snapshot {
+            Some(candidate) => {
+                self.persistence
+                    .conflicted_candidates
+                    .insert(list, candidate);
+            }
+            None => self.forget_save_conflict(list),
+        }
+    }
+
     /// Saves a local copy before adopting the independently changed original list.
     ///
     /// # Arguments

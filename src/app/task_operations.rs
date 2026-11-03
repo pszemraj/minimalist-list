@@ -4,10 +4,17 @@ use super::{DeletedItem, MinimalistApp, SubtaskEdit};
 use crate::{
     app::{CLEAR_ANIMATION_SECONDS, DELETE_ANIMATION_SECONDS, keyboard::FocusItem},
     model::{ArchivedTask, Subtask},
+    storage::StoredList,
 };
 use eframe::egui::{self, Id};
 use std::time::Instant;
 use uuid::Uuid;
+
+/// A list's manual order and conflict snapshot, kept in case a write is abandoned.
+struct WriteSnapshot {
+    order: Option<Vec<Uuid>>,
+    conflict: Option<StoredList>,
+}
 
 impl MinimalistApp {
     /// Adds the current checklist draft to its originating parent.
@@ -494,7 +501,7 @@ impl MinimalistApp {
         }
     }
 
-    /// Moves a task between ordinary list files, rolling back both lists on failure.
+    /// Moves a task between ordinary list files, leaving both lists unchanged on failure.
     fn move_task_to_list(&mut self, source: Uuid, task: Uuid, destination: Uuid) -> bool {
         if source == destination {
             return false;
@@ -503,14 +510,14 @@ impl MinimalistApp {
         let (Some(from), Some(to)) = (self.list_index(source), self.list_index(destination)) else {
             return false;
         };
-        let Some(position) = self.lists[from]
+        if !self.lists[from]
             .data
             .tasks
             .iter()
-            .position(|item| item.id == task)
-        else {
+            .any(|item| item.id == task)
+        {
             return false;
-        };
+        }
         if self.lists[to].data.tasks.iter().any(|item| item.id == task)
             || self.lists[to]
                 .data
@@ -525,46 +532,111 @@ impl MinimalistApp {
             return false;
         }
         let neighbors = self.focus_neighbors();
-        let manual_position = self.manual_task_position(source, task).unwrap_or(position);
-        let original_source = self.lists[from].data.clone();
-        let original_destination = self.lists[to].data.clone();
-        let moved = self.lists[from].data.tasks[position].clone();
-        self.lists[to].data.tasks.insert(0, moved);
-        let destination_saved = self.save_list_index(to);
-        if destination_saved
-            && let Some(position) = self.lists[from]
-                .data
-                .tasks
-                .iter()
-                .position(|item| item.id == task)
+        if let Err(error) = self.transfer_task(from, to, task, 0) {
+            self.status = Some(format!(
+                "Move did not finish; the task remains in its original list. {error}"
+            ));
+            return false;
+        }
+        self.move_subtask_draft(source, destination, task);
+        if let Some(DeletedItem::Subtask {
+            list, task: parent, ..
+        }) = &mut self.details.deleted
+            && *list == source
+            && *parent == task
         {
-            self.lists[from].data.tasks.remove(position);
-            if self.save_list_index(from) {
-                self.move_subtask_draft(source, destination, task);
-                if let Some(DeletedItem::Subtask {
-                    list, task: parent, ..
-                }) = &mut self.details.deleted
-                    && *list == source
-                    && *parent == task
-                {
-                    *list = destination;
-                }
-                self.repair_focus(&neighbors);
-                self.acknowledge(format!("Moved to {}", self.lists[to].data.title));
-                return true;
+            *list = destination;
+        }
+        self.repair_focus(&neighbors);
+        self.acknowledge(format!("Moved to {}", self.lists[to].data.title));
+        true
+    }
+
+    /// Captures state that a candidate write changes even when it fails.
+    fn write_snapshot(&self, list: Uuid) -> WriteSnapshot {
+        WriteSnapshot {
+            order: self.manual_task_order.get(&list).cloned(),
+            conflict: self.save_conflict_snapshot(list),
+        }
+    }
+
+    /// Restores the state captured by [`Self::write_snapshot`].
+    fn restore_write_snapshot(&mut self, list: Uuid, snapshot: WriteSnapshot) {
+        match snapshot.order {
+            Some(order) => {
+                self.manual_task_order.insert(list, order);
+            }
+            None => {
+                self.manual_task_order.remove(&list);
             }
         }
-        self.lists[from].data = original_source;
-        self.lists[to].data = original_destination;
-        self.restore_manual_task_position(source, task, manual_position);
-        let failure = self.status.clone();
-        self.save_list_index(from);
-        self.save_list_index(to);
-        self.status = Some(format!(
-            "Move did not finish; the task remains in its original list. {}",
-            failure.unwrap_or_default()
-        ));
-        false
+        self.restore_save_conflict(list, snapshot.conflict);
+    }
+
+    /// Writes a task into one list and then out of another, restoring both on failure.
+    ///
+    /// The destination is written first. A failed write adopts nothing, and an
+    /// unchanged list is neither marked dirty nor left holding a conflict snapshot,
+    /// so retries and external-change scans continue normally.
+    ///
+    /// # Arguments
+    ///
+    /// - `from` - Loaded index of the list that holds the task.
+    /// - `to` - Loaded index of the list that receives it.
+    /// - `task` - Task identity.
+    /// - `position` - Manual position in the destination, clamped to its length.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` once both lists are saved with the task in its new list.
+    ///
+    /// # Errors
+    ///
+    /// Returns the storage error of the failed write. If removing the task from the
+    /// source fails after the destination was written, the destination is saved again
+    /// without the task and stays dirty only if that write also fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if either index is invalid.
+    pub(in crate::app) fn transfer_task(
+        &mut self,
+        from: usize,
+        to: usize,
+        task: Uuid,
+        position: usize,
+    ) -> Result<(), String> {
+        let (source_id, destination_id) = (self.lists[from].key, self.lists[to].key);
+        let Some(moved) = self.lists[from]
+            .data
+            .tasks
+            .iter()
+            .find(|item| item.id == task)
+            .cloned()
+        else {
+            return Err("The task is no longer in its list.".into());
+        };
+        let source_before = self.write_snapshot(source_id);
+        let destination_before = self.write_snapshot(destination_id);
+        let previous_destination = self.lists[to].data.clone();
+        let mut candidate = self.lists[to].clone();
+        let position = position.min(candidate.data.tasks.len());
+        candidate.data.tasks.insert(position, moved);
+        self.restore_manual_task_position(destination_id, task, position);
+        if let Err(error) = self.save_list_candidate(to, candidate) {
+            self.restore_write_snapshot(destination_id, destination_before);
+            return Err(error);
+        }
+        let mut remaining = self.lists[from].clone();
+        remaining.data.tasks.retain(|item| item.id != task);
+        if let Err(error) = self.save_list_candidate(from, remaining) {
+            self.restore_write_snapshot(source_id, source_before);
+            self.lists[to].data = previous_destination;
+            self.restore_write_snapshot(destination_id, destination_before);
+            self.save_list_index(to);
+            return Err(error);
+        }
+        Ok(())
     }
 
     /// Renders one-step deletion recovery and the destination picker.

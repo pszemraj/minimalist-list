@@ -3,7 +3,7 @@
 use super::*;
 use crate::{
     app::tests::test_app,
-    model::{Accent, Task, TodoList},
+    model::{Accent, Task, TaskSort, TodoList},
     storage,
 };
 use std::{
@@ -334,6 +334,133 @@ fn failed_source_save_rolls_back_the_already_written_destination() {
     assert_eq!(saved(&app, 0).tasks[0].id, id);
     assert!(saved(&app, 1).tasks.is_empty());
     fs::remove_dir_all(&app.workspace).unwrap();
+}
+
+/// Adds a saved second list and a saved task in the first, returning both list keys and the task.
+fn move_fixture(app: &mut MinimalistApp) -> (Uuid, Uuid, Uuid) {
+    let source = app.lists[0].key;
+    let destination = storage::create_list(&app.workspace, "Destination", Accent::Mint).unwrap();
+    let destination_id = destination.key;
+    app.lists.push(destination);
+    let task = Task::new("Move across a changed file");
+    let id = task.id;
+    app.lists[0].data.tasks.push(task);
+    assert!(app.save_list_index(0));
+    (source, destination_id, id)
+}
+
+/// Replaces a list file as another instance would and returns the new bytes.
+fn edit_externally(app: &MinimalistApp, list: Uuid, edit: impl FnOnce(&mut TodoList)) -> Vec<u8> {
+    let mut remote = storage::load_workspace(&app.workspace)
+        .unwrap()
+        .lists
+        .into_iter()
+        .find(|stored| stored.key == list)
+        .unwrap();
+    edit(&mut remote.data);
+    storage::save_list(&remote).unwrap();
+    fs::read(&remote.path).unwrap()
+}
+
+fn assert_move_left_nothing_pending(app: &mut MinimalistApp, lists: [Uuid; 2]) {
+    assert!(app.persistence.dirty_lists.is_empty());
+    for list in lists {
+        assert!(!app.has_save_conflict(list));
+    }
+    assert!(app.retry_dirty_lists());
+    assert!(
+        app.status
+            .as_deref()
+            .unwrap()
+            .starts_with("Move did not finish")
+    );
+}
+
+fn titles(tasks: &[Task]) -> Vec<&str> {
+    tasks.iter().map(|task| task.text.as_str()).collect()
+}
+
+#[test]
+fn move_into_an_externally_changed_destination_leaves_both_lists_clean() {
+    let (_ctx, mut app) = test_app();
+    let (source, destination, id) = move_fixture(&mut app);
+    let source_bytes = fs::read(&app.lists[0].path).unwrap();
+    let remote_bytes = edit_externally(&app, destination, |data| {
+        data.tasks.push(Task::new("Added elsewhere"));
+    });
+    assert!(!app.move_task_to_list(source, id, destination));
+    assert_move_left_nothing_pending(&mut app, [source, destination]);
+    assert_eq!(fs::read(&app.lists[0].path).unwrap(), source_bytes);
+    assert_eq!(fs::read(&app.lists[1].path).unwrap(), remote_bytes);
+    assert_eq!(app.lists[0].data.tasks[0].id, id);
+    assert!(app.lists[1].data.tasks.is_empty());
+    app.next_scan = Instant::now();
+    app.scan_external_changes();
+    let reloaded = &app.lists[app.list_index(destination).unwrap()];
+    assert_eq!(titles(&reloaded.data.tasks), ["Added elsewhere"]);
+    fs::remove_dir_all(&app.workspace).unwrap();
+}
+
+#[test]
+fn move_out_of_an_externally_changed_source_removes_the_destination_copy() {
+    let (_ctx, mut app) = test_app();
+    let (source, destination, id) = move_fixture(&mut app);
+    let remote_bytes = edit_externally(&app, source, |data| {
+        data.tasks.push(Task::new("Added elsewhere"));
+    });
+    assert!(!app.move_task_to_list(source, id, destination));
+    assert_move_left_nothing_pending(&mut app, [source, destination]);
+    assert!(saved(&app, 1).tasks.is_empty());
+    assert!(app.lists[1].data.tasks.is_empty());
+    assert_eq!(fs::read(&app.lists[0].path).unwrap(), remote_bytes);
+    assert_eq!(
+        titles(&app.lists[0].data.tasks),
+        ["Move across a changed file"]
+    );
+    app.next_scan = Instant::now();
+    app.scan_external_changes();
+    let reloaded = &app.lists[app.list_index(source).unwrap()];
+    assert_eq!(
+        titles(&reloaded.data.tasks),
+        ["Move across a changed file", "Added elsewhere"]
+    );
+    fs::remove_dir_all(&app.workspace).unwrap();
+}
+
+#[test]
+fn failed_move_keeps_the_sorted_views_manual_order() {
+    for external_list in [0, 1] {
+        let (_ctx, mut app) = test_app();
+        let (source, destination, _) = move_fixture(&mut app);
+        let moved = Task::new("Middle");
+        let moved_id = moved.id;
+        app.lists[0].data.tasks = vec![Task::new("Zulu"), Task::new("Alpha"), moved];
+        app.lists[1].data.tasks.push(Task::new("Beta"));
+        assert!(app.save_list_index(0));
+        assert!(app.save_list_index(1));
+        for list in [source, destination] {
+            app.sort_tasks(list, TaskSort::Title);
+        }
+        let external = [source, destination][external_list];
+        edit_externally(&app, external, |data| {
+            data.title = "Renamed elsewhere".into()
+        });
+        assert!(!app.move_task_to_list(source, moved_id, destination));
+        assert_move_left_nothing_pending(&mut app, [source, destination]);
+        assert_eq!(
+            titles(&app.lists[0].data.tasks),
+            ["Alpha", "Middle", "Zulu"]
+        );
+        assert_eq!(titles(&app.lists[1].data.tasks), ["Beta"]);
+        for list in [source, destination] {
+            app.sort_tasks(list, TaskSort::Manual);
+        }
+        assert_eq!(
+            titles(&app.lists[0].data.tasks),
+            ["Zulu", "Alpha", "Middle"]
+        );
+        fs::remove_dir_all(&app.workspace).unwrap();
+    }
 }
 
 #[test]
