@@ -113,7 +113,7 @@ backups/<workspace key>/
 
 Before a save replaces a list file, its previous contents are copied to `snapshots/`. A save writes no snapshot while the newest one for that list is under an hour old, and the newest 100 snapshots per list are kept; other files in the folder are never removed. Each snapshot is the file as it was before a save, so edits that have not been saved yet are not captured, and the latest saved version is the list file itself. If a snapshot cannot be written, saving continues and the app warns once per session.
 
-**Clear History** always writes a snapshot of the list's last saved file first, even when the newest one is under an hour old, so the archived tasks stay recoverable; if that snapshot cannot be written, History is kept and the app says so.
+**Clear History** saves pending edits first, then takes a snapshot even when the newest one is under an hour old. If either step fails, the archived tasks stay in History.
 
 **Delete list** moves the list file to `deleted/` instead of erasing it. Deleted files are never pruned automatically; remove old backups by hand.
 

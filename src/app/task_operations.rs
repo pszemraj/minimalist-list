@@ -600,8 +600,8 @@ impl MinimalistApp {
 
     /// Empties a list's History without touching its active tasks.
     ///
-    /// The list's saved file is first kept as a local snapshot, whatever the age of
-    /// the newest one; if that fails, History is kept and the status says so.
+    /// Pending edits must reach disk before taking the forced snapshot, so it
+    /// includes every entry being cleared. Either failure leaves History intact.
     ///
     /// # Arguments
     ///
@@ -612,6 +612,9 @@ impl MinimalistApp {
     /// Panics if an internally resolved list index is invalid.
     pub(in crate::app) fn clear_history(&mut self, list: Uuid) {
         if let Some(index) = self.list_index(list) {
+            if self.persistence.dirty_lists.contains(&list) && !self.save_list_index(index) {
+                return;
+            }
             if let Err(error) = storage::snapshot_list_now(&self.workspace, &self.lists[index]) {
                 self.status = Some(format!(
                     "History was kept because no backup could be written: {error}"
@@ -624,6 +627,7 @@ impl MinimalistApp {
                 .retain(|(parent, _)| *parent != list);
             self.history_open = false;
             self.save_list_index(index);
+            self.clear_resolved_save_error();
         }
     }
 

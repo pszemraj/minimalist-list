@@ -246,6 +246,14 @@ impl MinimalistApp {
         if self.persistence.settings_dirty || self.persistence.settings_save_after.is_some() {
             self.save_settings();
         }
+        self.clear_resolved_save_error()
+    }
+
+    /// Clears the matching retry warning once no saves are pending.
+    ///
+    /// # Returns
+    /// Whether there are no pending list or preference writes.
+    pub(super) fn clear_resolved_save_error(&mut self) -> bool {
         let saved = self.persistence.dirty_lists.is_empty()
             && self.persistence.pending_filenames.is_empty()
             && !self.persistence.settings_dirty;

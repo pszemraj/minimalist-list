@@ -238,6 +238,41 @@ fn clearing_history_snapshots_the_archive_even_right_after_another_snapshot() {
 }
 
 #[test]
+fn clearing_history_keeps_newly_archived_tasks_recoverable_after_a_write_outage() {
+    let (_ctx, mut app) = test_app();
+    let list = app.lists[0].key;
+    let lists = app.workspace.join("lists");
+    let offline = app.workspace.join("offline");
+    fs::rename(&lists, &offline).unwrap();
+    fs::write(&lists, "a file blocks the folder").unwrap();
+
+    let mut task = Task::new("Archived while offline");
+    let id = task.id;
+    task.completed = true;
+    app.lists[0].data.tasks.push(task);
+    app.archive_completed(list);
+    assert!(app.persistence.dirty_lists.contains(&list));
+    assert_eq!(app.lists[0].data.archive[0].task.id, id);
+    app.clear_history(list);
+    assert_eq!(app.lists[0].data.archive[0].task.id, id);
+
+    fs::remove_file(&lists).unwrap();
+    fs::rename(&offline, &lists).unwrap();
+    assert!(saved(&app).archive.is_empty());
+    app.clear_history(list);
+    assert!(saved(&app).archive.is_empty());
+    assert!(app.lists[0].data.archive.is_empty());
+    assert!(app.status.is_none());
+    let kept: TodoList =
+        serde_json::from_slice(&fs::read(snapshot_files(&app, list).last().unwrap()).unwrap())
+            .unwrap();
+    assert_eq!(kept.archive[0].task.id, id);
+
+    fs::remove_dir_all(storage::backups_dir(&app.workspace)).unwrap();
+    fs::remove_dir_all(&app.workspace).unwrap();
+}
+
+#[test]
 fn clearing_history_is_refused_when_no_backup_can_be_written() {
     let (_ctx, mut app) = test_app();
     let (list, ids) = open_history(&mut app, 3);
