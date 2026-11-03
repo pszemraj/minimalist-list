@@ -253,15 +253,12 @@ impl MinimalistApp {
         position: usize,
     ) -> Result<(), String> {
         let (source_id, destination_id) = (self.lists[from].key, self.lists[to].key);
-        let Some(moved) = self.lists[from]
-            .data
-            .tasks
-            .iter()
-            .find(|item| item.id == task)
-            .cloned()
+        let mut remaining = self.lists[from].clone();
+        let Some(source_position) = remaining.data.tasks.iter().position(|item| item.id == task)
         else {
             return Err("The task is no longer in its list.".into());
         };
+        let moved = remaining.data.tasks.remove(source_position);
         let source_before = self.write_snapshot(source_id);
         let destination_before = self.write_snapshot(destination_id);
         let previous_destination = self.lists[to].data.clone();
@@ -273,8 +270,6 @@ impl MinimalistApp {
             self.restore_write_snapshot(destination_id, destination_before);
             return Err(error);
         }
-        let mut remaining = self.lists[from].clone();
-        remaining.data.tasks.retain(|item| item.id != task);
         if let Err(error) = self.save_list_candidate(from, remaining) {
             self.restore_write_snapshot(source_id, source_before);
             self.lists[to].data = previous_destination;

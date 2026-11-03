@@ -188,6 +188,31 @@ fn move_keeps_one_copy_and_preserves_entire_task() {
 }
 
 #[test]
+fn move_leaves_other_rows_with_the_same_saved_id_in_the_source() {
+    let (ctx, mut app) = test_app();
+    let source = app.lists[0].key;
+    let destination = storage::create_list(&app.workspace, "Destination", Accent::Sky)
+        .unwrap()
+        .key;
+    let first = Task::new("First duplicate");
+    let id = first.id;
+    let mut second = first.clone();
+    second.text = "Second duplicate".into();
+    app.lists[0].data.tasks = vec![Task::new("Before"), first, second, Task::new("After")];
+    storage::save_list(&app.lists[0]).unwrap();
+
+    let mut app = MinimalistApp::new(&ctx, app.settings, None, None);
+    assert!(app.move_task_to_list(source, id, destination));
+    let source = saved(&app, app.list_index(source).unwrap());
+    let destination = saved(&app, app.list_index(destination).unwrap());
+    let titles: Vec<_> = source.tasks.iter().map(|task| task.text.as_str()).collect();
+    assert_eq!(titles, ["Before", "Second duplicate", "After"]);
+    assert_eq!(destination.tasks.len(), 1);
+    assert_eq!(destination.tasks[0].text, "First duplicate");
+    fs::remove_dir_all(&app.workspace).unwrap();
+}
+
+#[test]
 fn unavailable_move_destination_keeps_source_and_retry_does_not_duplicate() {
     let (_ctx, mut app) = test_app();
     let source = app.lists[0].key;
