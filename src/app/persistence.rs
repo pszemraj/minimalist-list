@@ -20,6 +20,7 @@ pub(super) struct PersistenceState {
     pub(super) settings_dirty: bool,
     settings_save_after: Option<Instant>,
     pub(super) notice: Option<(String, Instant)>,
+    backup_warned: bool,
 }
 
 #[cfg(test)]
@@ -46,6 +47,7 @@ impl PersistenceState {
             settings_dirty: false,
             settings_save_after: None,
             notice: None,
+            backup_warned: false,
         }
     }
 }
@@ -100,6 +102,23 @@ impl MinimalistApp {
         }
     }
 
+    /// Writes a list after keeping its previous file contents in local backups.
+    ///
+    /// A backup failure warns once per session and never blocks the save.
+    fn write_list(&mut self, list: &StoredList) -> Result<(), String> {
+        if let Err(error) = storage::snapshot_list(&self.workspace, list)
+            && !self.persistence.backup_warned
+        {
+            self.persistence.backup_warned = true;
+            let message = format!("Local backup unavailable: {error}");
+            self.status = Some(match self.status.take() {
+                Some(status) => format!("{status}\n{message}"),
+                None => message,
+            });
+        }
+        storage::save_list(list)
+    }
+
     /// Saves one list and retains failed content for explicit retry.
     ///
     /// # Returns
@@ -110,7 +129,7 @@ impl MinimalistApp {
     pub(super) fn save_list_index(&mut self, index: usize) -> bool {
         let list = self.list_for_save(index);
         let id = list.key;
-        let saved = match storage::save_list(&list) {
+        let saved = match self.write_list(&list) {
             Ok(()) => {
                 self.lists[index].stamp.set(list.stamp.get());
                 self.lists[index]
@@ -151,7 +170,7 @@ impl MinimalistApp {
         mut candidate: StoredList,
     ) -> Result<(), String> {
         self.prepare_list_for_save(&mut candidate);
-        if let Err(error) = storage::save_list(&candidate) {
+        if let Err(error) = self.write_list(&candidate) {
             self.record_save_conflict(&candidate);
             return Err(error);
         }

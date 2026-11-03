@@ -227,7 +227,7 @@ fn temporary_startup_failure_preserves_selected_path_and_retry_recovers_it() {
     app.go_to_overview();
     app.save_settings();
     assert_eq!(
-        storage::load_settings().unwrap().workspace_path,
+        storage::load_settings().0.workspace_path,
         settings.workspace_path
     );
     fs::remove_file(&selected).unwrap();
@@ -245,7 +245,7 @@ fn stale_instance_navigation_preserves_newer_appearance_preferences() {
     let (_, mut first) = test_app();
     first.save_settings();
     let (_, mut stale) = test_app();
-    stale.settings = storage::load_settings().unwrap();
+    stale.settings = storage::load_settings().0;
     stale.persistence = persistence::PersistenceState::new(stale.settings.clone(), None);
     first.settings.bold_text = true;
     first.settings.always_on_top = true;
@@ -253,7 +253,7 @@ fn stale_instance_navigation_preserves_newer_appearance_preferences() {
     first.save_settings();
     stale.settings.last_list_id = Some(stale.lists[0].key);
     stale.save_settings();
-    let saved = storage::load_settings().unwrap();
+    let saved = storage::load_settings().0;
     assert!(saved.bold_text && saved.always_on_top);
     assert_eq!(saved.background_opacity, 0.4);
     assert_eq!(saved.last_list_id, Some(stale.lists[0].key));
@@ -496,5 +496,82 @@ fn scan_shows_recovery_when_synced_list_files_vanish() {
     app.open_workspace(&path, false);
     assert!(app.persistence.workspace_failure.is_none());
     assert_eq!(app.lists.len(), 1);
+    fs::remove_dir_all(&app.workspace).unwrap();
+}
+
+fn snapshot_files(app: &MinimalistApp, list: Uuid) -> Vec<std::path::PathBuf> {
+    let directory = storage::backups_dir(&app.workspace)
+        .join("snapshots")
+        .join(list.to_string());
+    fs::read_dir(directory)
+        .map(|entries| entries.flatten().map(|entry| entry.path()).collect())
+        .unwrap_or_default()
+}
+
+#[test]
+fn a_save_keeps_the_replaced_bytes_in_local_backups_not_the_workspace() {
+    let (_ctx, mut app) = test_app();
+    let id = app.lists[0].key;
+    let before = fs::read(&app.lists[0].path).unwrap();
+    app.lists[0].data.tasks.push(Task::new("Changed"));
+    assert!(app.save_list_index(0));
+    let files = snapshot_files(&app, id);
+    assert_eq!(files.len(), 1);
+    assert_eq!(fs::read(&files[0]).unwrap(), before);
+    // A later save within the hour adds nothing.
+    app.lists[0].data.tasks.push(Task::new("Again"));
+    assert!(app.save_list_index(0));
+    assert_eq!(snapshot_files(&app, id).len(), 1);
+    let entries = fs::read_dir(&app.workspace)
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.file_name())
+        .collect::<Vec<_>>();
+    assert_eq!(entries, ["lists"]);
+    assert_eq!(
+        fs::read_dir(app.workspace.join("lists")).unwrap().count(),
+        1
+    );
+    assert!(app.status.is_none());
+    fs::remove_dir_all(storage::backups_dir(&app.workspace)).unwrap();
+    fs::remove_dir_all(&app.workspace).unwrap();
+}
+
+#[test]
+fn a_modal_candidate_save_also_keeps_the_replaced_bytes() {
+    let (_ctx, mut app) = test_app();
+    let id = app.lists[0].key;
+    let before = fs::read(&app.lists[0].path).unwrap();
+    let mut candidate = app.lists[0].clone();
+    candidate.data.tasks.push(Task::new("From a dialog"));
+    app.save_list_candidate(0, candidate).unwrap();
+    let files = snapshot_files(&app, id);
+    assert_eq!(files.len(), 1);
+    assert_eq!(fs::read(&files[0]).unwrap(), before);
+    fs::remove_dir_all(storage::backups_dir(&app.workspace)).unwrap();
+    fs::remove_dir_all(&app.workspace).unwrap();
+}
+
+#[test]
+fn a_backup_failure_warns_once_and_never_blocks_the_save() {
+    let (_ctx, mut app) = test_app();
+    let backups = storage::backups_dir(&app.workspace);
+    fs::create_dir_all(&backups).unwrap();
+    fs::write(backups.join("snapshots"), "a file blocks the folder").unwrap();
+    app.lists[0].data.tasks.push(Task::new("First"));
+    assert!(app.save_list_index(0));
+    assert!(
+        app.status
+            .as_deref()
+            .unwrap()
+            .contains("Local backup unavailable")
+    );
+    app.status = None;
+    app.lists[0].data.tasks.push(Task::new("Second"));
+    assert!(app.save_list_index(0));
+    assert!(app.status.is_none());
+    let saved = storage::load_workspace(&app.workspace).unwrap();
+    assert_eq!(saved.lists[0].data.tasks.len(), 2);
+    fs::remove_dir_all(backups).unwrap();
     fs::remove_dir_all(&app.workspace).unwrap();
 }

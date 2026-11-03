@@ -81,7 +81,7 @@ fn view_mode_and_manual_order_survive_restart() {
     let (_, mut app, list, manual) = fixture();
     app.sort_tasks(list, TaskSort::Title);
     let sorted = ids(&app);
-    let settings = storage::load_settings().unwrap();
+    let settings = storage::load_settings().0;
     let ctx = egui::Context::default();
     let mut restarted = MinimalistApp::new(&ctx, settings, None, None);
     assert_eq!(restarted.task_sort_mode(list), TaskSort::Title);

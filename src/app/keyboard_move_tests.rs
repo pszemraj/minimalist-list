@@ -234,7 +234,7 @@ fn the_move_button_moves_and_the_last_destination_is_preselected() {
     key(&f.ctx, &mut f.app, Key::Escape, Modifiers::NONE);
     // A deleted last destination falls back to the first other list.
     let removed = f.app.lists.remove(f.app.list_index(f.third).unwrap());
-    storage::delete_list(&removed).unwrap();
+    storage::delete_list(&f.app.workspace, &removed).unwrap();
     focus(&f.ctx, &mut f.app, FocusItem::Task(f.list, f.tasks[0]).id());
     key(
         &f.ctx,

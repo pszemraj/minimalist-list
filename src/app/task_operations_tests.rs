@@ -716,7 +716,7 @@ fn undoing_a_move_that_cannot_apply_explains_why_and_keeps_both_lists() {
             1 => {
                 // The destination list was deleted.
                 let removed = app.lists.remove(1);
-                storage::delete_list(&removed).unwrap();
+                storage::delete_list(&app.workspace, &removed).unwrap();
             }
             _ => {
                 // The source already holds the identity, as after a sync conflict.

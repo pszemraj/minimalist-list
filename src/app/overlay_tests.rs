@@ -593,7 +593,7 @@ fn deleting_a_capture_destination_requires_an_explicit_replacement_for_its_draft
     app.open_quick_capture(Some(first));
     app.quick_capture.as_mut().unwrap().text = "Keep this draft in its intended destination".into();
     overlay_frame(&ctx, &mut app, vec![]);
-    crate::storage::delete_list(&app.lists[0]).unwrap();
+    crate::storage::delete_list(&app.workspace, &app.lists[0]).unwrap();
     app.next_scan = Instant::now();
     app.scan_external_changes();
     assert!(app.list_index(first).is_none());

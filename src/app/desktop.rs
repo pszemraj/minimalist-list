@@ -53,6 +53,15 @@ impl MinimalistApp {
         }
     }
 
+    /// Shows this workspace's local backups in the system file manager, creating the folder first.
+    pub(super) fn open_backups_folder(&mut self) {
+        let path = crate::storage::backups_dir(&self.workspace);
+        match std::fs::create_dir_all(&path).and_then(|()| folder_command(&path).spawn()) {
+            Ok(_) => self.acknowledge("Opened backups folder".into()),
+            Err(error) => self.status = Some(format!("Could not open backups folder: {error}")),
+        }
+    }
+
     /// Renders an editable, explicitly applied global reveal shortcut.
     ///
     /// # Arguments

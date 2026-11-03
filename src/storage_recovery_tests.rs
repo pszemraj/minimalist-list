@@ -295,3 +295,181 @@ fn metadata_only_first_check_does_not_bypass_the_final_content_check() {
     assert_eq!(fs::read_dir(root.join("lists")).unwrap().count(), 1);
     fs::remove_dir_all(root).unwrap();
 }
+
+fn numeric_snapshots(directory: &Path) -> Vec<u64> {
+    let mut times = fs::read_dir(directory)
+        .unwrap()
+        .flatten()
+        .filter(|entry| entry.path().is_file())
+        .filter_map(|entry| {
+            entry
+                .file_name()
+                .to_str()?
+                .strip_suffix(".json")?
+                .parse()
+                .ok()
+        })
+        .collect::<Vec<u64>>();
+    times.sort_unstable();
+    times
+}
+
+#[test]
+fn workspace_keys_stay_byte_identical_across_releases() {
+    assert_eq!(
+        workspace_key(Path::new("/Users/test/workspace")),
+        "81ba70295b23e18d"
+    );
+    assert_eq!(
+        workspace_key(Path::new("/tmp/Minimalist List/lists ü")),
+        "42a036088b230b2c"
+    );
+}
+
+#[test]
+fn snapshots_are_written_at_most_hourly_even_when_the_clock_moves_back() {
+    let directory = root();
+    let base = 1_700_000_000;
+    backup::snapshot_into(&directory, b"first", base).unwrap();
+    backup::snapshot_into(&directory, b"too soon", base + 3_599).unwrap();
+    assert_eq!(numeric_snapshots(&directory), [base]);
+    assert_eq!(
+        fs::read(directory.join(format!("{base}.json"))).unwrap(),
+        b"first"
+    );
+    backup::snapshot_into(&directory, b"second", base + 3_600).unwrap();
+    assert_eq!(numeric_snapshots(&directory), [base, base + 3_600]);
+    // A newest snapshot dated after the current time cannot suppress backups.
+    backup::snapshot_into(&directory, b"earlier clock", base + 10).unwrap();
+    assert_eq!(
+        numeric_snapshots(&directory),
+        [base, base + 10, base + 3_600]
+    );
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn snapshots_are_capped_at_one_hundred_and_other_files_are_untouched() {
+    let directory = root();
+    fs::create_dir_all(directory.join("7.json")).unwrap();
+    let foreign = [
+        "notes.txt",
+        "backup.json",
+        "12ab.json",
+        "5.json.bak",
+        ".5.json.tmp",
+    ];
+    for name in foreign {
+        fs::write(directory.join(name), name).unwrap();
+    }
+    let base = 1_700_000_000;
+    for index in 0..105 {
+        backup::snapshot_into(&directory, b"{}", base + index * 3_600).unwrap();
+    }
+    let kept = numeric_snapshots(&directory);
+    assert_eq!(kept.len(), 100);
+    assert_eq!(kept[0], base + 5 * 3_600);
+    assert_eq!(kept[99], base + 104 * 3_600);
+    for name in foreign {
+        assert_eq!(fs::read_to_string(directory.join(name)).unwrap(), name);
+    }
+    assert!(directory.join("7.json").is_dir());
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn a_deleted_list_is_kept_in_backups_and_restores_by_copying_it_back() {
+    let root = root();
+    create_list(&root, "Keep", Accent::Mint).unwrap();
+    let doomed = create_list(&root, "Errands", Accent::Sky).unwrap();
+    let backups = backups_dir(&root);
+    let contents = fs::read(&doomed.path).unwrap();
+    delete_list(&root, &doomed).unwrap();
+    assert!(!doomed.path.exists());
+    assert_eq!(load_workspace(&root).unwrap().lists.len(), 1);
+    let deleted = backups.join("deleted");
+    let kept = fs::read_dir(&deleted)
+        .unwrap()
+        .flatten()
+        .collect::<Vec<_>>();
+    assert_eq!(kept.len(), 1);
+    let name = kept[0].file_name().into_string().unwrap();
+    let (stamp, original_name) = name.split_once('-').unwrap();
+    assert!(stamp.parse::<u64>().is_ok());
+    assert_eq!(original_name, doomed.path.file_name().unwrap());
+    assert_eq!(fs::read(kept[0].path()).unwrap(), contents);
+    // The copy loads with its original identity, with or without its timestamp prefix.
+    let lists = root.join("lists");
+    fs::copy(kept[0].path(), lists.join(&name)).unwrap();
+    let loaded = load_workspace(&root).unwrap();
+    let restored = loaded.lists.iter().find(|item| item.key == doomed.key);
+    assert_eq!(restored.unwrap().data.title, "Errands");
+    fs::remove_file(lists.join(&name)).unwrap();
+    fs::copy(kept[0].path(), &doomed.path).unwrap();
+    let loaded = load_workspace(&root).unwrap();
+    let restored = loaded
+        .lists
+        .iter()
+        .find(|item| item.key == doomed.key)
+        .unwrap();
+    assert_eq!(restored.path, doomed.path);
+    // Deleting it again never replaces the earlier copy.
+    delete_list(&root, restored).unwrap();
+    assert_eq!(fs::read_dir(&deleted).unwrap().count(), 2);
+    assert_eq!(fs::read(kept[0].path()).unwrap(), contents);
+    fs::remove_dir_all(backups).unwrap();
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn one_malformed_setting_keeps_every_other_preference() {
+    let root = root();
+    fs::create_dir_all(&root).unwrap();
+    let path = root.join("settings.json");
+    let stored = r#"{"workspace_path":"/kept/workspace","font_size":"huge","bold_text":true,"always_on_top":true,"global_shortcut":"","extra":1}"#;
+    fs::write(&path, stored).unwrap();
+    let (settings, warning) = load_settings_from(&path);
+    assert_eq!(settings.workspace_path, "/kept/workspace");
+    assert_eq!(settings.font_size, Settings::default().font_size);
+    assert!(settings.bold_text && settings.always_on_top);
+    assert!(settings.global_shortcut.is_empty());
+    let warning = warning.unwrap();
+    assert!(warning.contains("could not parse") && warning.contains("font_size"));
+    // The next preference save still preserves the original file before replacing it.
+    let mut desired = settings.clone();
+    desired.row_padding = 9.0;
+    save_settings_changes_at(&path, &desired, &settings).unwrap();
+    let preserved = fs::read_dir(&root)
+        .unwrap()
+        .flatten()
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("settings.invalid-")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(preserved.len(), 1);
+    assert_eq!(fs::read_to_string(preserved[0].path()).unwrap(), stored);
+    let (saved, warning) = load_settings_from(&path);
+    assert!(warning.is_none());
+    assert_eq!(saved.workspace_path, "/kept/workspace");
+    assert_eq!(saved.row_padding, 9.0);
+    assert!(saved.bold_text);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn unparseable_settings_load_defaults_with_a_warning() {
+    let root = root();
+    fs::create_dir_all(&root).unwrap();
+    let path = root.join("settings.json");
+    let defaults = serde_json::to_value(Settings::default()).unwrap();
+    for stored in ["{ broken", "[1, 2]", "null", ""] {
+        fs::write(&path, stored).unwrap();
+        let (settings, warning) = load_settings_from(&path);
+        assert_eq!(serde_json::to_value(settings).unwrap(), defaults);
+        assert!(warning.unwrap().contains("could not parse"));
+    }
+    fs::remove_dir_all(root).unwrap();
+}

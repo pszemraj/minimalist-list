@@ -253,7 +253,7 @@ fn dragging_a_card_moves_its_identity_and_restores_order_after_restart() {
         expected
     );
     assert!(matches!(app.screen, super::super::Screen::Overview));
-    let settings = storage::load_settings().unwrap();
+    let settings = storage::load_settings().0;
     assert_eq!(
         settings.list_order[app.workspace.to_string_lossy().as_ref()],
         expected
@@ -407,7 +407,7 @@ fn manual_tile_order_is_independent_for_each_workspace() {
         app.lists.iter().map(|list| list.key).collect::<Vec<_>>(),
         second_order
     );
-    let settings = storage::load_settings().unwrap();
+    let settings = storage::load_settings().0;
     assert_eq!(
         settings.list_order[original.to_string_lossy().as_ref()],
         first_order
@@ -488,7 +488,7 @@ fn list_sort_views_preserve_manual_order_and_stable_ties_across_restart() {
         assert_eq!(app.keyboard.pending, Some(FocusItem::Card(ids[0]).id()));
         let restarted = MinimalistApp::new(
             &egui::Context::default(),
-            storage::load_settings().unwrap(),
+            storage::load_settings().0,
             None,
             None,
         );

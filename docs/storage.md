@@ -4,7 +4,7 @@
 
 Select a folder through **Settings -> Workspace -> Choose folder**, or enter a path and press Enter or **Use typed path**. The active folder is shown above the field. Any writable folder works, including a temporary directory. Selecting a folder opens its lists without moving the previous workspace's files. A blank typed path does nothing. Pressing Enter without changing the path leaves the current list open; explicitly applying the folder reloads it. Pending edits follow [save recovery](#save-recovery).
 
-**Workspace -> Open workspace folder** opens the active folder in Finder, Explorer, or the system file manager.
+**Workspace -> Open workspace folder** opens the active folder in Finder, Explorer, or the system file manager. **Open backups folder** opens its [local backups](#local-backups).
 
 Paths beginning with `~/` are expanded. Relative paths are resolved from the process working directory and stored as absolute runtime paths. Without a saved selection, the app uses its [platform default](#default-directories).
 
@@ -49,11 +49,11 @@ When the Windows environment variables are absent or empty, paths fall back to `
 
 If the native defaults do not exist on macOS or Windows, the app uses an existing `~/.local/share/minimalist-list/` workspace or `~/.config/minimalist-list/settings.json` settings file. Each fallback is independent; the settings file is used for both loading and saving. These legacy paths use `HOME`, including on Windows. No files are copied or moved. Launch overrides and saved workspace selections keep the precedence shown above.
 
-`window.ron`, beside `settings.json`, stores native window geometry and framework state. Local `instances/` files coordinate [repeated launches](usage.md#startup-and-system-tray) for each workspace; they do not belong in a synced list folder.
+`window.ron`, beside `settings.json`, stores native window geometry and framework state. Local `instances/` files coordinate [repeated launches](usage.md#startup-and-system-tray) for each workspace; they do not belong in a synced list folder. `backups/`, also beside `settings.json`, holds [local backups](#local-backups).
 
 `settings.lock` serializes local preference merges across running instances, preserving unrelated changes made by different workspaces.
 
-Malformed settings show a startup warning and use defaults. Before replacing them, a preference save preserves the original bytes beside the file as `settings.invalid-<UUID>.json`. File read errors remain save errors. Unchanged preferences leave the settings file untouched; continuous appearance adjustments save after a short pause and flush when leaving the application.
+Malformed settings show a startup warning. Each preference that still parses is kept and any malformed one uses its default; a file that is unreadable or not a JSON object uses all defaults. Before replacing the file, a preference save preserves the original bytes beside it as `settings.invalid-<UUID>.json`. File read errors remain save errors. Unchanged preferences leave the settings file untouched; continuous appearance adjustments save after a short pause and flush when leaving the application.
 
 ## File layout
 
@@ -94,6 +94,30 @@ A failed Quick add keeps its draft and destination until retried or explicitly c
 If another device changed the list, choose **Keep local copy and reload** in the save warning or failed editor. It saves the local contents in a separate **(local copy)** list with new list, task, and child IDs, then reloads the original. The copy includes current inline edits, editable context, active or suspended Quick add drafts, and an unfinished list-name change for that list. Both versions remain ordinary JSON files. Resolve each conflicting list before quitting or switching workspaces.
 
 Moving a task writes the destination before removing the source and attempts to roll back both lists if either write fails; the two list files are not a single atomic transaction.
+
+## Local backups
+
+Saves and list deletion keep earlier list files in a `backups/` folder beside the [local settings file](#default-directories), never inside the workspace or its sync folder:
+
+- Linux: `~/.config/minimalist-list/backups/`
+- macOS: `~/Library/Application Support/minimalist-list/backups/`
+- Windows: `%APPDATA%\minimalist-list\backups\`
+
+An explicit `XDG_CONFIG_HOME` and the legacy settings location move `backups/` together with `settings.json`. Each workspace has its own subfolder named by a 16-digit hexadecimal key derived from its path. **Settings -> Workspace -> Open backups folder** opens the active workspace's subfolder, creating it if needed.
+
+```text
+backups/<workspace key>/
++-- snapshots/<list UUID>/<unix seconds>.json
++-- deleted/<unix seconds>-<original filename>
+```
+
+Before a save replaces a list file, its previous contents are copied to `snapshots/`. A save writes no snapshot while the newest one for that list is under an hour old, and the newest 100 snapshots per list are kept; other files in the folder are never removed. Each snapshot is the file as it was before a save, so edits that have not been saved yet are not captured, and the latest saved version is the list file itself. If a snapshot cannot be written, saving continues and the app warns once per session.
+
+**Delete list** moves the list file to `deleted/` instead of erasing it. Deleted files are never pruned automatically; remove old backups by hand.
+
+To restore a snapshot, quit if that list has unsaved changes, then overwrite the list's current `lists/…--<UUID>.json` file with the snapshot's contents, keeping the list file's name. A `<unix seconds>.json` name placed in `lists/` is read as another copy of the same list and ignored as a duplicate.
+
+To restore a deleted list, copy its file from `deleted/` back into the workspace's `lists/` folder. The list returns with its original identity at the next scan, whether or not the leading `<unix seconds>-` is removed from the name.
 
 ## JSON format
 

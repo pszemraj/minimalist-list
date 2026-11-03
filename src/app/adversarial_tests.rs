@@ -446,7 +446,7 @@ fn opening_quick_capture_and_typing_in_one_frame_reaches_only_capture() {
 fn repeated_stale_instance_saves_preserve_a_newer_workspace_preference() {
     let (_, mut first) = tests::test_app();
     first.save_settings();
-    let settings = storage::load_settings().unwrap();
+    let settings = storage::load_settings().0;
     let ctx = egui::Context::default();
     let mut stale = MinimalistApp::new(&ctx, settings, None, None);
     let original = first.workspace.clone();
@@ -455,10 +455,7 @@ fn repeated_stale_instance_saves_preserve_a_newer_workspace_preference() {
     let newer_selection = first.workspace.to_string_lossy().into_owned();
     for _ in 0..3 {
         stale.open_list(original_list);
-        assert_eq!(
-            storage::load_settings().unwrap().workspace_path,
-            newer_selection
-        );
+        assert_eq!(storage::load_settings().0.workspace_path, newer_selection);
     }
     std::fs::remove_dir_all(original).unwrap();
 }

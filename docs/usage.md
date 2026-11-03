@@ -14,7 +14,7 @@ Press Backspace from an empty task entry or a focused task row to open the overv
 
 `Ctrl+Shift+N` opens list creation from Lists, a list, or Settings. You can also select **+ New list**. New lists default to Charcoal, a muted grey palette. Enter a name, optionally choose an accent, and press Enter or select **Create list**. **Cancel** or Escape closes the form. Down from the name focuses the selected accent; Left/Right moves between colors. Enter or Space chooses the color and returns to the name; the next Enter creates the list. Up returns from colors to the name without selecting.
 
-Open **List options** from a list header or card to rename, recolor, or delete that list. **Delete list** shows its name and affected task and History counts, then requires a separate **Confirm delete list** activation. **Cancel deletion** backs out; holding Enter or Space cannot confirm it. At least one list must remain. See [duplicate list files](storage.md#duplicate-list-files) if deletion is blocked by a conflicting identity.
+Open **List options** from a list header or card to rename, recolor, or delete that list. **Delete list** shows its name and affected task and History counts, then requires a separate **Confirm delete list** activation. **Cancel deletion** backs out; holding Enter or Space cannot confirm it. Deleting moves the list file to [local backups](storage.md#local-backups) rather than erasing it. At least one list must remain. See [duplicate list files](storage.md#duplicate-list-files) if deletion is blocked by a conflicting identity.
 
 In **Manual** order, drag overview tiles to rearrange them. **Sort lists** temporarily shows title, newest, or oldest order. Return to **Manual** to recover the arrangement.
 

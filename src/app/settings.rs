@@ -175,13 +175,18 @@ impl MinimalistApp {
                     Button::new(self.rich("Use typed path", 15.0, palette.muted)).frame(false),
                 );
                 let open_folder = ui.button("Open workspace folder");
+                let open_backups = ui.button("Open backups folder");
                 self.keyboard.settings_rows.push(vec![
                     choose_folder.id,
                     use_folder.id,
                     open_folder.id,
+                    open_backups.id,
                 ]);
                 if open_folder.clicked() {
                     self.open_workspace_folder();
+                }
+                if open_backups.clicked() {
+                    self.open_backups_folder();
                 }
                 ui.label(self.rich("Enter applies", 12.0, palette.muted));
                 let (submit, _) = text_input_shortcuts(ui, &workspace_response);
@@ -528,7 +533,7 @@ impl MinimalistApp {
                 let data = &self.lists[index].data;
                 ui.add(
                     Label::new(self.rich(
-                        format!("Permanently delete “{}”?", data.title),
+                        format!("Delete “{}”?", data.title),
                         15.0,
                         palette.danger,
                     ))
@@ -540,7 +545,7 @@ impl MinimalistApp {
                     .chain(data.archive.iter().map(|item| &item.task))
                     .map(|task| task.subtasks.len())
                     .sum::<usize>();
-                ui.add(Label::new(self.rich(format!("{} active tasks, {} completed tasks, {} archived tasks, and {children} subtasks will be removed.", data.active_count(), data.completed_count(), data.archive.len()), 13.0, palette.text)).wrap());
+                ui.add(Label::new(self.rich(format!("{} active tasks, {} completed tasks, {} archived tasks, and {children} subtasks will be removed. A copy is kept in local backups.", data.active_count(), data.completed_count(), data.archive.len()), 13.0, palette.text)).wrap());
             }
             let text = if self.delete_armed {
                 "Confirm delete list"
@@ -615,7 +620,7 @@ impl MinimalistApp {
         if let Some(index) = self.list_index(list_id) {
             let neighbors = self.focus_neighbors();
             let list = self.lists.remove(index);
-            match storage::delete_list(&list) {
+            match storage::delete_list(&self.workspace, &list) {
                 Ok(()) => {
                     self.forget_save_conflict(list_id);
                     self.persistence.dirty_lists.remove(&list_id);
@@ -875,10 +880,9 @@ mod tests {
         let text = settings_frame(&ctx, &mut app, Vec::new());
         assert!(
             text.iter()
-                .any(|(text, _)| text
-                    == &format!("Permanently delete “{}”?", app.lists[0].data.title))
+                .any(|(text, _)| text == &format!("Delete “{}”?", app.lists[0].data.title))
         );
-        assert!(text.iter().any(|(text, _)| text == "1 active tasks, 1 completed tasks, 1 archived tasks, and 2 subtasks will be removed."));
+        assert!(text.iter().any(|(text, _)| text == "1 active tasks, 1 completed tasks, 1 archived tasks, and 2 subtasks will be removed. A copy is kept in local backups."));
         assert!(text.iter().any(|(text, _)| text == "Cancel deletion"));
         std::fs::remove_dir_all(&app.workspace).unwrap();
     }

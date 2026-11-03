@@ -248,7 +248,7 @@ fn omitted_shortcut_uses_default_while_explicit_empty_remains_disabled() {
     let disabled: Settings = serde_json::from_str(r#"{"global_shortcut":""}"#).unwrap();
     assert!(disabled.global_shortcut.is_empty());
     save_settings(&disabled).unwrap();
-    assert!(load_settings().unwrap().global_shortcut.is_empty());
+    assert!(load_settings().0.global_shortcut.is_empty());
 }
 
 #[test]
@@ -264,7 +264,7 @@ fn show_subtasks_defaults_off_and_merges_as_a_global_preference() {
     let merged = save_settings_changes(&second, &baseline).unwrap();
     assert!(merged.show_subtasks);
     assert_eq!(merged.font_size, 24.0);
-    assert!(load_settings().unwrap().show_subtasks);
+    assert!(load_settings().0.show_subtasks);
     let disabled = Settings {
         show_subtasks: false,
         ..merged.clone()
@@ -283,18 +283,16 @@ fn invalid_settings_json_recovers_on_preference_save() {
         fs::create_dir_all(&root).unwrap();
         let path = root.join("settings.json");
         fs::write(&path, invalid).unwrap();
-        assert!(
-            load_settings_from(&path)
-                .unwrap_err()
-                .contains("could not parse")
-        );
+        let (loaded, warning) = load_settings_from(&path);
+        assert!(warning.unwrap().contains("could not parse"));
+        assert_eq!(loaded.font_size, Settings::default().font_size);
         let baseline = Settings::default();
         let mut desired = baseline.clone();
         desired.font_size = 28.0;
         desired.global_shortcut.clear();
         desired.workspace_path = root.join("selected").to_string_lossy().into_owned();
         let merged = save_settings_changes_at(&path, &desired, &baseline).unwrap();
-        let saved = load_settings_from(&path).unwrap();
+        let saved = load_settings_from(&path).0;
         for recovered in [merged, saved] {
             assert_eq!(
                 serde_json::to_value(recovered).unwrap(),
@@ -366,7 +364,7 @@ fn settings_merge_waits_for_lock_before_reading_newer_preferences() {
     drop(lock);
     let merged = early.unwrap_or_else(|_| result.recv().unwrap()).unwrap();
     worker.join().unwrap();
-    let saved = load_settings_from(&path).unwrap();
+    let saved = load_settings_from(&path).0;
     fs::remove_dir_all(root).unwrap();
     assert!(waited, "settings merge ignored another writer's lock");
     for settings in [merged, saved] {

@@ -23,6 +23,10 @@ use io::write_json_atomic_checked;
 use io::{cleanup_stale_temps, write_json_atomic};
 pub use io::{list_changed_on_disk, save_list};
 
+#[path = "storage_backup.rs"]
+mod backup;
+pub use backup::{backups_dir, delete_list, snapshot_list, workspace_key};
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 /// User preferences persisted outside the task workspace.
@@ -103,30 +107,71 @@ pub struct WorkspaceSnapshot {
     pub failed_paths: Vec<PathBuf>,
 }
 
-/// Loads persisted settings, or defaults when no settings file exists.
+/// Loads persisted settings, keeping every valid preference from a damaged file.
 ///
 /// # Returns
 ///
-/// Persisted settings, or defaults when the settings file is absent.
-///
-/// # Errors
-///
-/// Returns an error when the settings file cannot be read or parsed.
-pub fn load_settings() -> Result<Settings, String> {
+/// Persisted settings, or defaults when the file is absent or unusable, and a
+/// warning when the file could not be read or parsed completely.
+pub fn load_settings() -> (Settings, Option<String>) {
     load_settings_from(&settings_path())
 }
 
-fn load_settings_from(path: &Path) -> Result<Settings, String> {
+fn load_settings_from(path: &Path) -> (Settings, Option<String>) {
     if let Some(parent) = path.parent() {
         cleanup_stale_temps(parent);
     }
     if !path.exists() {
-        return Ok(Settings::default());
+        return (Settings::default(), None);
     }
-    let bytes =
-        fs::read(path).map_err(|error| format!("could not read {}: {error}", path.display()))?;
-    serde_json::from_slice(&bytes)
-        .map_err(|error| format!("could not parse {}: {error}", path.display()))
+    let bytes = match fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            let warning = format!("could not read {}: {error}", path.display());
+            return (Settings::default(), Some(warning));
+        }
+    };
+    match serde_json::from_slice(&bytes) {
+        Ok(settings) => (settings, None),
+        Err(error) => {
+            let (settings, ignored) = recover_settings(&bytes);
+            let outcome = if ignored.is_empty() {
+                "using default preferences".to_owned()
+            } else {
+                format!("using defaults for {}", ignored.join(", "))
+            };
+            let warning = format!("could not parse {}: {error}; {outcome}", path.display());
+            (settings, Some(warning))
+        }
+    }
+}
+
+/// Starts from defaults and keeps each stored value that parses on its own.
+///
+/// # Returns
+///
+/// The recovered settings and the names of stored preferences that were ignored.
+fn recover_settings(bytes: &[u8]) -> (Settings, Vec<String>) {
+    let Ok(serde_json::Value::Object(stored)) = serde_json::from_slice(bytes) else {
+        return (Settings::default(), Vec::new());
+    };
+    let mut recovered = serde_json::to_value(Settings::default()).unwrap_or_default();
+    let mut ignored = Vec::new();
+    for (key, value) in stored {
+        let mut candidate = recovered.clone();
+        if let Some(map) = candidate.as_object_mut() {
+            map.insert(key.clone(), value);
+        }
+        if serde_json::from_value::<Settings>(candidate.clone()).is_ok() {
+            recovered = candidate;
+        } else {
+            ignored.push(key);
+        }
+    }
+    (
+        serde_json::from_value(recovered).unwrap_or_default(),
+        ignored,
+    )
 }
 
 /// Persists application settings atomically.
@@ -660,38 +705,6 @@ pub fn rename_list_file(list: &mut StoredList) -> Result<(), String> {
     })?;
     list.path = destination;
     Ok(())
-}
-
-/// Deletes a list's associated file.
-///
-/// # Returns
-///
-/// `Ok(())` after the file is removed.
-///
-/// # Errors
-///
-/// Returns an error when another readable file has the same identity or the file cannot be removed.
-pub fn delete_list(list: &StoredList) -> Result<(), String> {
-    if let Some(directory) = list.path.parent() {
-        for entry in fs::read_dir(directory)
-            .map_err(|error| format!("could not read {}: {error}", directory.display()))?
-            .filter_map(Result::ok)
-        {
-            let path = entry.path();
-            if path != list.path
-                && path.extension().and_then(|extension| extension.to_str()) == Some("json")
-                && let Ok((other, _)) = read_list(&path)
-                && other.key == list.key
-            {
-                return Err(format!(
-                    "could not delete list: duplicate list identity in {}; resolve the duplicate files first",
-                    path.display()
-                ));
-            }
-        }
-    }
-    fs::remove_file(&list.path)
-        .map_err(|error| format!("could not delete {}: {error}", list.path.display()))
 }
 
 /// Collects change-detection metadata for every list file in a workspace.
