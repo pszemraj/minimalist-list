@@ -432,7 +432,12 @@ impl MinimalistApp {
                 spotlight.archived && spotlight.list_id == list && spotlight.task_id == id
             });
         if !needs_contents {
-            let response = ui.interact(restore_rect, restore_item.id(), Sense::click());
+            let response = Self::history_restore_button(
+                ui,
+                restore_rect,
+                restore_item.id(),
+                &self.lists[index].data.archive[position].task.text,
+            );
             self.track_focus(&response, restore_item);
             // A key that focuses an unbuilt row and presses Enter in one frame still activates it.
             if response.clicked() {
@@ -490,7 +495,8 @@ impl MinimalistApp {
             .truncate(),
         );
         self.task_copy_control(ui, copy_rect, (list, id, true), palette);
-        let response = ui.interact(restore_rect, restore_item.id(), Sense::click());
+        let response =
+            Self::history_restore_button(ui, restore_rect, restore_item.id(), &task.text);
         ui.painter().text(
             restore_rect.center(),
             egui::Align2::CENTER_CENTER,
@@ -498,13 +504,6 @@ impl MinimalistApp {
             self.font_id(13.0),
             palette.accent,
         );
-        response.widget_info(|| {
-            egui::WidgetInfo::labeled(
-                egui::WidgetType::Button,
-                true,
-                format!("Restore: {}", task.text),
-            )
-        });
         self.track_focus(&response, restore_item);
         if response.clicked() {
             self.restore_archived(list, id);
@@ -526,6 +525,15 @@ impl MinimalistApp {
             });
         }
         true
+    }
+
+    /// Registers the same Restore button for visible and skipped History rows.
+    fn history_restore_button(ui: &egui::Ui, rect: Rect, id: Id, title: &str) -> egui::Response {
+        let response = ui.interact(rect, id, Sense::click());
+        response.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Restore: {title}"))
+        });
+        response
     }
 
     fn detail_spotlight(

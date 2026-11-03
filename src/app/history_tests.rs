@@ -423,6 +423,37 @@ fn offscreen_history_rows_skip_titles_but_keyboard_navigation_reaches_them() {
 }
 
 #[test]
+fn offscreen_history_restore_keeps_its_accessible_name_and_role() {
+    let (ctx, mut app) = test_app();
+    ctx.enable_accesskit();
+    let (list, ids) = open_history(&mut app, 40);
+    idle(&ctx, &mut app);
+    let time = ctx.input(|input| input.time) + 0.3;
+    let output = run_app_frame(
+        &ctx,
+        &mut app,
+        frame_input(egui::vec2(430.0, 550.0), time, Vec::new()),
+    );
+    assert!(ctx.read_response(history_title_id(list, ids[0])).is_some());
+    assert!(ctx.read_response(history_title_id(list, ids[39])).is_none());
+    let tree = output.platform_output.accesskit_update.unwrap();
+    fs::remove_dir_all(&app.workspace).unwrap();
+    for position in [0, 39] {
+        let id = FocusItem::Archived(list, ids[position]).id().accesskit_id();
+        let (_, node) = tree
+            .nodes
+            .iter()
+            .find(|(node_id, _)| *node_id == id)
+            .unwrap();
+        assert_eq!(node.role(), egui::accesskit::Role::Button);
+        assert_eq!(
+            node.label(),
+            Some(format!("Restore: Archived {position}").as_str())
+        );
+    }
+}
+
+#[test]
 fn enter_on_an_offscreen_history_row_in_the_frame_that_focuses_it_restores_it() {
     let (ctx, mut app) = test_app();
     let (list, ids) = open_history(&mut app, 400);
