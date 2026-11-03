@@ -74,7 +74,7 @@ Down from the last task reaches **Show history**, or Down from task entry when n
 
 ## Find and navigate
 
-`Ctrl+F` or the header's `find` action searches task and subtask text across every list, including completed tasks and History. Use Up and Down to select a result, Enter to open it, and Escape to close the overlay. The selected task scrolls into view and is briefly highlighted. Opening an archived child reveals its read-only History contents. Results show each child's own completion state, with History labeled separately. Reopening Find retains the query and selection; ordinary wheel or trackpad scrolling keeps its position.
+`Ctrl+F` or the header's `find` action searches task titles, notes (context), and subtasks across every list, including completed tasks and History. Multiple words must all match within the same task or subtask, in its title or notes for a task. A notes match shows the matching line. Use Up and Down to select a result, Enter to open it, and Escape to close the overlay. The selected task scrolls into view and is briefly highlighted. Opening an archived child reveals its read-only History contents. Results show each child's own completion state, with History labeled separately. Reopening Find retains the query and selection; ordinary wheel or trackpad scrolling keeps its position.
 
 <img src="../assets/find.png" alt="Find showing matching tasks from the Projects and Errands lists" width="360">
 

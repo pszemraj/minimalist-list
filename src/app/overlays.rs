@@ -74,6 +74,8 @@ struct SearchHit {
     subtask_text: Option<String>,
     state: HitState,
     completed: bool,
+    /// The first notes line holding a term absent from the title.
+    context_snippet: Option<String>,
 }
 
 impl SearchHit {
@@ -579,7 +581,11 @@ impl MinimalistApp {
 
                     ui.add_space(8.0);
                     if state.query.trim().is_empty() {
-                        ui.label(self.rich("Type part of a task or subtask.", 13.0, palette.muted));
+                        ui.label(self.rich(
+                            "Type part of a task, note, or subtask.",
+                            13.0,
+                            palette.muted,
+                        ));
                     } else if hits.is_empty() {
                         ui.label(self.rich("No matches.", 14.0, palette.muted));
                     } else {
@@ -619,8 +625,20 @@ impl MinimalistApp {
                                             ..Default::default()
                                         },
                                     );
+                                    if let Some(snippet) = &hit.context_snippet {
+                                        label.append(
+                                            &format!("\nin notes: {snippet}"),
+                                            0.0,
+                                            egui::TextFormat {
+                                                font_id: self.content_font_id(12.0),
+                                                color: palette.muted,
+                                                ..Default::default()
+                                            },
+                                        );
+                                    }
                                     label.wrap.max_width = (ui.available_width() - 24.0).max(1.0);
-                                    label.wrap.max_rows = 3;
+                                    label.wrap.max_rows =
+                                        3 + usize::from(hit.context_snippet.is_some());
                                     label.wrap.break_anywhere = true;
                                     let height = ui
                                         .fonts_mut(|fonts| fonts.layout_job(label.clone()))
@@ -726,8 +744,9 @@ fn capture_destination(
 }
 
 fn search_hits(lists: &[StoredList], query: &str) -> Vec<SearchHit> {
-    let query = query.trim().to_lowercase();
-    if query.is_empty() {
+    let query = query.to_lowercase();
+    let terms: Vec<&str> = query.split_whitespace().collect();
+    if terms.is_empty() {
         return Vec::new();
     }
 
@@ -739,23 +758,34 @@ fn search_hits(lists: &[StoredList], query: &str) -> Vec<SearchHit> {
             } else {
                 HitState::Active
             };
-            collect_task_hits(&mut hits, list, task, state, &query);
+            collect_task_hits(&mut hits, list, task, state, &terms);
         }
         for archived in &list.data.archive {
-            collect_task_hits(&mut hits, list, &archived.task, HitState::Archived, &query);
+            collect_task_hits(&mut hits, list, &archived.task, HitState::Archived, &terms);
         }
     }
     hits
 }
 
+/// Adds a hit when every term is in the task's title or notes, plus one per matching child.
 fn collect_task_hits(
     hits: &mut Vec<SearchHit>,
     list: &StoredList,
     task: &Task,
     state: HitState,
-    query: &str,
+    terms: &[&str],
 ) {
-    if task.text.to_lowercase().contains(query) {
+    let title = task.text.to_lowercase();
+    let context = task.context.to_lowercase();
+    if terms
+        .iter()
+        .all(|term| title.contains(term) || context.contains(term))
+    {
+        let context_only: Vec<&str> = terms
+            .iter()
+            .copied()
+            .filter(|term| !title.contains(term))
+            .collect();
         hits.push(SearchHit {
             list_id: list.key,
             task_id: task.id,
@@ -765,13 +795,31 @@ fn collect_task_hits(
             subtask_text: None,
             state,
             completed: task.completed,
+            context_snippet: context_snippet(&task.context, &context_only),
         });
     }
     for subtask in &task.subtasks {
-        if subtask.text.to_lowercase().contains(query) {
+        let text = subtask.text.to_lowercase();
+        if terms.iter().all(|term| text.contains(term)) {
             hits.push(subtask_hit(list, task, subtask, state));
         }
     }
+}
+
+/// Returns the first trimmed notes line containing any term, capped at 120 characters.
+fn context_snippet(context: &str, terms: &[&str]) -> Option<String> {
+    let line = context
+        .lines()
+        .find(|line| {
+            let line = line.to_lowercase();
+            terms.iter().any(|term| line.contains(term))
+        })?
+        .trim();
+    let mut snippet: String = line.chars().take(120).collect();
+    if line.chars().nth(120).is_some() {
+        snippet.push('…');
+    }
+    Some(snippet)
 }
 
 fn subtask_hit(list: &StoredList, task: &Task, subtask: &Subtask, state: HitState) -> SearchHit {
@@ -790,6 +838,7 @@ fn subtask_hit(list: &StoredList, task: &Task, subtask: &Subtask, state: HitStat
             HitState::Active
         },
         completed: subtask.completed,
+        context_snippet: None,
     }
 }
 

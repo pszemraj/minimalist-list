@@ -209,6 +209,71 @@ fn empty_search_has_no_results() {
     assert!(search_hits(&[stored_list("Tasks")], "  ").is_empty());
 }
 
+fn noted_task(title: &str, context: &str) -> Task {
+    let mut task = Task::new(title);
+    task.context = context.into();
+    task
+}
+
+#[test]
+fn multi_word_query_requires_every_term_in_one_item() {
+    let mut list = stored_list("Work");
+    list.data.tasks.push(Task::new("Book flights"));
+    list.data.tasks.push(noted_task("Other", "hotel in Lisbon"));
+    assert!(search_hits(&[list.clone()], "flights hotel").is_empty());
+
+    list.data
+        .tasks
+        .push(noted_task("Plan trip", "Lisbon hotel"));
+    let hits = search_hits(&[list], "TRIP  hotel");
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].task_text, "Plan trip");
+    assert_eq!(hits[0].context_snippet.as_deref(), Some("Lisbon hotel"));
+}
+
+#[test]
+fn context_only_match_reports_its_line() {
+    let mut list = stored_list("Work");
+    let long = format!("passport {}", "x".repeat(200));
+    list.data.tasks.push(noted_task(
+        "Plan trip",
+        &format!("first line\n   Hotel: Lisbon   \nlater hotel\n{long}"),
+    ));
+    let hits = search_hits(&[list.clone()], "hotel");
+    assert_eq!(hits[0].context_snippet.as_deref(), Some("Hotel: Lisbon"));
+
+    let hits = search_hits(&[list], "trip passport");
+    let snippet = hits[0].context_snippet.as_deref().unwrap();
+    assert_eq!(snippet.chars().count(), 121);
+    assert!(snippet.starts_with("passport xxx") && snippet.ends_with('…'));
+}
+
+#[test]
+fn title_match_has_no_notes_snippet() {
+    let mut list = stored_list("Work");
+    list.data
+        .tasks
+        .push(noted_task("Hotel booking", "hotel in Lisbon"));
+    let hits = search_hits(&[list], "hotel");
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].context_snippet, None);
+}
+
+#[test]
+fn archived_context_is_searched_and_children_ignore_parent_context() {
+    let mut list = stored_list("Work");
+    let mut archived = noted_task("Old trip", "visa deadline");
+    archived.subtasks.push(Subtask::new("Pack bag"));
+    list.data.archive.push(ArchivedTask::new(archived));
+    let hits = search_hits(&[list.clone()], "visa");
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].state, HitState::Archived);
+    assert_eq!(hits[0].context_snippet.as_deref(), Some("visa deadline"));
+
+    let hits = search_hits(&[list], "pack visa");
+    assert!(hits.is_empty());
+}
+
 #[test]
 fn capture_destination_prefers_context_then_last_successful_valid_list() {
     let first = stored_list("First");
