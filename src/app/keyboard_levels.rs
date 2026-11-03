@@ -1,8 +1,8 @@
 //! Directional navigation through task, checklist, History, and creation levels.
 
 use super::{
-    DELETE_TASK, FocusItem, MOVE_TASK_DOWN, MOVE_TASK_UP, MinimalistApp, RowAction, take_key,
-    take_shortcut,
+    DELETE_TASK, FocusItem, MOVE_TASK_DOWN, MOVE_TASK_UP, MinimalistApp, RowAction, TOGGLE_STARTED,
+    take_key, take_shortcut,
 };
 use crate::app::task_details::history_title_id;
 use eframe::egui::{self, Event, Id, Key, Modifiers};
@@ -207,6 +207,8 @@ impl MinimalistApp {
                 self.apply_row_action(RowAction::BeginEdit(list, task.id, task.text));
             } else if take_key(ctx, Key::Space, Modifiers::NONE) {
                 self.apply_row_action(RowAction::Toggle(list, task.id));
+            } else if take_shortcut(ctx, TOGGLE_STARTED) {
+                self.apply_row_action(RowAction::ToggleStarted(list, task.id));
             } else if take_shortcut(ctx, DELETE_TASK) {
                 self.apply_row_action(RowAction::Delete(list, task.id));
             }

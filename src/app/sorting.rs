@@ -6,7 +6,10 @@ use crate::{
     storage::StoredList,
 };
 use eframe::egui;
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    ops::RangeInclusive,
+};
 use uuid::Uuid;
 
 fn reconcile_order(previous: &[Uuid], tasks: &[Task]) -> Vec<Uuid> {
@@ -32,7 +35,34 @@ fn apply_order(tasks: &mut [Task], manual: &[Uuid], mode: TaskSort) {
         TaskSort::Newest => tasks.sort_by_key(|task| std::cmp::Reverse(task.created_at_unix)),
         TaskSort::Oldest => tasks.sort_by_key(|task| task.created_at_unix),
         TaskSort::Title => tasks.sort_by_cached_key(|task| task.text.to_lowercase()),
-        TaskSort::IncompleteFirst => tasks.sort_by_key(|task| task.completed),
+        TaskSort::ByStatus => tasks.sort_by_key(Task::status),
+    }
+}
+
+/// Returns the visible positions a task may move to in the current view.
+///
+/// # Arguments
+/// - `mode` - Selected view mode.
+/// - `tasks` - Tasks in visible order.
+/// - `source` - Visible position of the moving task.
+///
+/// # Returns
+/// The whole list in Manual order, the task's status group in By status, otherwise `None`.
+pub(super) fn reorder_range(
+    mode: TaskSort,
+    tasks: &[Task],
+    source: usize,
+) -> Option<RangeInclusive<usize>> {
+    let status = tasks.get(source)?.status();
+    let same = |task: &&Task| task.status() == status;
+    match mode {
+        TaskSort::Manual => Some(0..=tasks.len().saturating_sub(1)),
+        TaskSort::ByStatus => {
+            let before = tasks.iter().take(source).rev().take_while(same).count();
+            let after = tasks.iter().skip(source + 1).take_while(same).count();
+            Some(source - before..=source + after)
+        }
+        _ => None,
     }
 }
 
@@ -207,6 +237,54 @@ impl MinimalistApp {
         let order = self.manual_task_order.entry(list).or_insert(fallback);
         order.retain(|id| *id != task);
         order.insert(position.min(order.len()), task);
+    }
+
+    /// Moves a task to a visible position, keeping By status moves inside its group.
+    ///
+    /// # Arguments
+    /// - `list` - List identity.
+    /// - `task` - Moving task identity.
+    /// - `target` - Requested visible position.
+    ///
+    /// # Panics
+    /// Panics if an internally resolved list index becomes invalid.
+    pub(super) fn reorder_task(&mut self, list: Uuid, task: Uuid, target: usize) {
+        let mode = self.task_sort_mode(list);
+        let Some(index) = self.list_index(list) else {
+            return;
+        };
+        let tasks = &mut self.lists[index].data.tasks;
+        let Some(source) = tasks.iter().position(|item| item.id == task) else {
+            return;
+        };
+        let Some(range) = reorder_range(mode, tasks, source) else {
+            return;
+        };
+        let target = target.clamp(*range.start(), *range.end());
+        if source == target {
+            return;
+        }
+        let moved = tasks.remove(source);
+        tasks.insert(target, moved);
+        if mode == TaskSort::ByStatus {
+            // Files keep Manual order, so place the task beside its new group neighbour there.
+            let (anchor, after) = if target < *range.end() {
+                (tasks[target + 1].id, 0)
+            } else {
+                (tasks[target - 1].id, 1)
+            };
+            if let Some(order) = self.manual_task_order.get_mut(&list)
+                && let Some(from) = order.iter().position(|id| *id == task)
+            {
+                order.remove(from);
+                let to = order
+                    .iter()
+                    .position(|id| *id == anchor)
+                    .map_or(from, |position| position + after);
+                order.insert(to, task);
+            }
+        }
+        self.save_list_index(index);
     }
 
     /// Renders the task view mode selector, including restoration of Manual order.

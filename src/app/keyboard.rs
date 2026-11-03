@@ -81,6 +81,9 @@ pub(super) const MOVE_TASK_UP: KeyboardShortcut =
 /// Moves a focused task down one position.
 pub(super) const MOVE_TASK_DOWN: KeyboardShortcut =
     KeyboardShortcut::new(Modifiers::ALT, Key::ArrowDown);
+/// Marks the focused task in progress or not started.
+pub(super) const TOGGLE_STARTED: KeyboardShortcut =
+    KeyboardShortcut::new(Modifiers::SHIFT, Key::Space);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 /// A logical item whose keyboard focus survives movement and file reloads.
@@ -251,6 +254,7 @@ pub(super) fn shortcut_groups(show_window: String, quick_add: String) -> Vec<Sho
                     "Move the task up / down",
                     pair(MOVE_TASK_UP, MOVE_TASK_DOWN),
                 ),
+                ("Mark in progress / not started", shortcut(TOGGLE_STARTED)),
                 ("Move to another list", shortcut(MOVE_TO_LIST)),
                 ("Edit task context", shortcut(TASK_CONTEXT)),
                 (

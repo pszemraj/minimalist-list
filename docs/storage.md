@@ -151,6 +151,8 @@ Saving an unsupported in-memory list is also refused. If another app replaces an
 
 Within the supported format, unknown JSON fields are retained on lists, tasks, subtasks, and archive entries. Editing, moving, or archiving a task keeps those fields with the objects that survive the operation. Deleting an object removes its fields too; restoring a task from History removes its archive entry, including fields belonging only to that entry.
 
+A task's [In progress](usage.md#complete-reorder-and-remove-tasks) mark is saved as an optional `started` field. Version 0.4.0 keeps that field without showing it, and versions before 0.4.0 drop it when they save the list, so update every device that shares a workspace.
+
 Files containing the JSON key `$serde_json::private::Number` remain on disk with a warning because the JSON parser can interpret objects with that key as numbers.
 
 Optional additions with defaults can keep the same format when existing editing behavior remains valid. Changes to field types, required structure, or behavior that older writers must understand require a new format and an explicit conversion from supported older formats. This includes new values for closed enums such as `accent`, since older readers reject unknown values. There is currently no older list format to migrate. Opening a workspace does not upgrade or rewrite all of its files. See [file-sync rules](#file-sync-behavior) for simultaneous edits.

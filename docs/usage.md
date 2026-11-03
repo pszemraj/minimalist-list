@@ -69,11 +69,13 @@ Use **Copy complete task** in the task menu or press `Ctrl+Shift+C` while any pa
 
 Use the circle on the left to complete or reactivate a task. With the circle focused, press Space or Enter. With the row focused, press Space.
 
+A task is **Not started**, **In progress**, or **Done**. To mark it in progress, Shift+click its circle, press `Shift+Space` on the focused row, or choose **Mark in progress** from its menu. The same actions return an in-progress task to **Not started**; on a done task they reopen it in progress. A half-filled circle marks a task in progress. Checking a subtask starts its parent, and a parent with checked subtasks from an earlier version starts in progress. Unchecking subtasks or checking the last one leaves the parent's status alone. Completing and reopening a task keeps whether it was started.
+
 On a focused row, `Alt+Up` and `Alt+Down` move the task one position and keep it focused. Moving past the first or last position leaves the list file untouched. Forward Delete removes the task (`Fn+Delete` on Mac keyboards). These row commands apply outside text editors.
 
 Drag a task vertically to reorder it. Drag right past the threshold to complete or reactivate it. Drag left to reveal Edit and Delete, then drag right to close those actions. Opening Quick add, Find, or the shortcut reference cancels an unfinished drag.
 
-**List options -> Sort** selects Manual, Title, Newest, Oldest, or Incomplete first. In Manual order, new tasks appear at the top. Return to Manual to recover your arrangement and use dragging or reorder shortcuts. See [stored order](storage.md#file-layout) for how sorting affects list files.
+**List options -> Sort** selects Manual, Title, Newest, Oldest, or By status. By status shows tasks in progress, then not started, then done, each in Manual order. In Manual order, new tasks appear at the top. Drag tasks or use the reorder shortcuts in Manual order, or within a status group in By status. Return to Manual to recover your arrangement. See [stored order](storage.md#file-layout) for how sorting affects list files.
 
 `Ctrl+Shift+Backspace` or **Archive N completed** moves the displayed count of completed tasks into restorable History. The shortcut works from an empty task or subtask entry; nonempty fields and inline editors keep editing text. With no completed tasks, it leaves the list file untouched.
 
@@ -87,7 +89,7 @@ A moved task keeps its identity, completion, context, checklist, and unfinished 
 
 <img src="../assets/move.png" alt="Move to list on Linux with Projects selected as the destination for Plan the week" width="360">
 
-Select **Show history** and activate an archived title to inspect its children without changing their state. Each archived task shows a muted "Archived 3 days ago" line under its title. **Restore** returns the parent as incomplete, with child completion unchanged. It appears at the bottom in Manual order; other sort modes determine its visible position.
+Select **Show history** and activate an archived title to inspect its children without changing their state. Each archived task shows a muted "Archived 3 days ago" line under its title. **Restore** returns the parent to its previous open status, with child completion unchanged. It appears at the bottom in Manual order; other sort modes determine its visible position.
 
 Right-click an archived task and choose **Delete permanently**, or press forward Delete (`Fn+Delete` on Mac keyboards) while its title or **Restore** is focused, to remove just that task. The notice offers **Undo**, and focus moves to the neighboring archived task. To empty a whole History, use **Clear History** in [List options](#manage-lists).
 

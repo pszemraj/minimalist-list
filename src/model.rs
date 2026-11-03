@@ -71,7 +71,9 @@ pub enum TaskSort {
     Newest,
     Oldest,
     Title,
-    IncompleteFirst,
+    /// Saved under its former name so existing settings keep this mode.
+    #[serde(rename = "IncompleteFirst")]
+    ByStatus,
 }
 
 impl TaskSort {
@@ -81,7 +83,7 @@ impl TaskSort {
         Self::Newest,
         Self::Oldest,
         Self::Title,
-        Self::IncompleteFirst,
+        Self::ByStatus,
     ];
 
     /// Returns the menu label for this ordering mode.
@@ -95,8 +97,17 @@ impl TaskSort {
             Self::Newest => "Newest first",
             Self::Oldest => "Oldest first",
             Self::Title => "Title A–Z",
-            Self::IncompleteFirst => "Incomplete first",
+            Self::ByStatus => "By status",
         }
+    }
+
+    /// Returns whether dragging and move shortcuts can rearrange tasks in this view.
+    ///
+    /// # Returns
+    ///
+    /// True for Manual order and By status, which reorders within a status group.
+    pub const fn allows_reorder(self) -> bool {
+        matches!(self, Self::Manual | Self::ByStatus)
     }
 }
 
@@ -189,6 +200,14 @@ impl TodoList {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+/// A task's displayed state, ordered as the By status view groups it.
+pub enum TaskStatus {
+    InProgress,
+    NotStarted,
+    Done,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 /// A top-level task and its optional checklist.
 pub struct Task {
@@ -198,6 +217,9 @@ pub struct Task {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub context: String,
     pub completed: bool,
+    /// Whether work has begun; when absent, a checked subtask implies it has.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started: Option<bool>,
     pub created_at_unix: u64,
     pub completed_at_unix: Option<u64>,
     #[serde(default)]
@@ -219,6 +241,7 @@ impl Task {
             text: text.into(),
             context: String::new(),
             completed: false,
+            started: None,
             created_at_unix: now_unix_seconds(),
             completed_at_unix: None,
             subtasks: Vec::new(),
@@ -254,6 +277,56 @@ impl Task {
     pub fn toggle(&mut self) {
         self.completed = !self.completed;
         self.completed_at_unix = self.completed.then(now_unix_seconds);
+    }
+
+    /// Returns whether the task is done, in progress, or not started.
+    ///
+    /// # Returns
+    ///
+    /// The saved state, inferring In progress from a checked subtask when unset.
+    pub fn status(&self) -> TaskStatus {
+        if self.completed {
+            TaskStatus::Done
+        } else if self
+            .started
+            .unwrap_or_else(|| self.subtasks.iter().any(|item| item.completed))
+        {
+            TaskStatus::InProgress
+        } else {
+            TaskStatus::NotStarted
+        }
+    }
+
+    /// Marks an in-progress task not started, or starts any other task.
+    ///
+    /// Starting a completed task reopens it.
+    pub fn toggle_started(&mut self) {
+        let start = self.status() != TaskStatus::InProgress;
+        self.started = Some(start);
+        if start && self.completed {
+            self.toggle();
+        }
+    }
+
+    /// Flips one checklist item and records that work on the task has begun.
+    ///
+    /// # Arguments
+    ///
+    /// - `child` - Checklist item identity.
+    ///
+    /// # Returns
+    ///
+    /// Whether the item exists.
+    pub fn toggle_subtask(&mut self, child: Uuid) -> bool {
+        let Some(item) = self.subtasks.iter_mut().find(|item| item.id == child) else {
+            return false;
+        };
+        item.completed = !item.completed;
+        // Unchecking keeps an inferred start, since the item was checked before.
+        if item.completed || self.started.is_none() {
+            self.started = Some(true);
+        }
+        true
     }
 
     /// Returns completed and total subtask counts when a checklist exists.
