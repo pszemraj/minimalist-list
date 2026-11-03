@@ -181,6 +181,39 @@ fn delete_key_on_history_controls_removes_one_row_per_physical_press() {
 }
 
 #[test]
+fn held_history_delete_leaves_the_task_entry_draft_intact() {
+    let (ctx, mut app) = test_app();
+    let (list, ids) = open_history(&mut app, 1);
+    let entry = Id::new(("new-task", list));
+    focus(&ctx, &mut app, entry);
+    frame(&ctx, &mut app, vec![Event::Text("Keep this draft".into())]);
+    let mut editor = egui::TextEdit::load_state(&ctx, entry).unwrap();
+    editor
+        .cursor
+        .set_char_range(Some(egui::text::CCursorRange::one(
+            egui::text::CCursor::new(0),
+        )));
+    editor.store(&ctx, entry);
+    focus(&ctx, &mut app, FocusItem::Archived(list, ids[0]).id());
+
+    key_edge(&ctx, &mut app, Key::Delete, true);
+    idle(&ctx, &mut app);
+    assert!(saved(&app).archive.is_empty());
+    assert_eq!(ctx.memory(|memory| memory.focused()), Some(entry));
+    for _ in 0..5 {
+        key_edge(&ctx, &mut app, Key::Delete, true);
+    }
+    key_edge(&ctx, &mut app, Key::Delete, false);
+    assert_eq!(app.new_task, "Keep this draft");
+
+    key_edge(&ctx, &mut app, Key::Delete, true);
+    key_edge(&ctx, &mut app, Key::Delete, true);
+    key_edge(&ctx, &mut app, Key::Delete, false);
+    assert_eq!(app.new_task, "ep this draft");
+    fs::remove_dir_all(&app.workspace).unwrap();
+}
+
+#[test]
 fn clearing_history_empties_the_archive_and_keeps_live_tasks() {
     let (_ctx, mut app) = test_app();
     let (list, ids) = open_history(&mut app, 3);

@@ -10,13 +10,19 @@ use uuid::Uuid;
 
 /// Drops auto-repeated Delete presses so one physical press removes one item.
 ///
-/// Held navigation keys keep their normal repeat.
-fn drop_repeated_delete(ctx: &egui::Context) {
+/// # Arguments
+/// - `ctx` - Context holding the current input events.
+pub(super) fn drop_repeated_delete(ctx: &egui::Context) {
     ctx.input_mut(|input| {
         input.events.retain(|event| {
-            !matches!(event,
-                Event::Key { key: Key::Delete, pressed: true, repeat: true, modifiers, .. }
-                if modifiers.matches_exact(Modifiers::NONE)
+            !matches!(
+                event,
+                Event::Key {
+                    key: Key::Delete,
+                    pressed: true,
+                    repeat: true,
+                    ..
+                }
             )
         });
     });
@@ -102,6 +108,7 @@ impl MinimalistApp {
         {
             drop_repeated_delete(ctx);
             if take_shortcut(ctx, DELETE_TASK) {
+                self.keyboard.history_delete_held = ctx.input(|input| input.key_down(Key::Delete));
                 self.delete_archived(list, task);
                 return;
             }

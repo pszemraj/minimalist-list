@@ -123,6 +123,7 @@ pub(super) struct KeyboardState {
     pub(super) creation_choices: Vec<Id>,
     anchor: Option<(Id, FocusItem)>,
     deferred_events: Vec<Event>,
+    history_delete_held: bool,
 }
 
 /// Consumes an exact chord, including its platform-independent command modifier.
@@ -320,6 +321,11 @@ impl MinimalistApp {
     /// Routes app commands before rendering widgets so one key has one effect.
     pub(super) fn handle_app_shortcuts(&mut self, ctx: &egui::Context) {
         self.prepare_editor_event_order(ctx);
+        // The last archived row can hand focus back to a text field while Delete is still held.
+        if self.keyboard.history_delete_held {
+            levels::drop_repeated_delete(ctx);
+            self.keyboard.history_delete_held = ctx.input(|input| input.key_down(Key::Delete));
+        }
         self.route_app_shortcuts(ctx);
         // A shortcut can replace the screen and queue a different input during
         // this frame. Focus it before its widget consumes accompanying text.
