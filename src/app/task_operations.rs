@@ -21,21 +21,41 @@ impl MinimalistApp {
     ///
     /// Panics if an internally resolved list index is invalid.
     pub(super) fn add_subtask(&mut self, list: Uuid, task: Uuid) {
-        let text = self.new_subtask.trim();
-        if text.is_empty() {
-            return;
-        }
-        if let Some(index) = self.list_index(list)
-            && let Some(parent) = self.lists[index]
-                .data
-                .tasks
-                .iter_mut()
-                .find(|item| item.id == task)
-        {
-            parent.subtasks.push(Subtask::new(text));
+        let text = self.new_subtask.trim().to_owned();
+        if !text.is_empty() && self.add_subtasks(list, task, &[text]).is_some() {
             self.new_subtask.clear();
-            self.save_list_index(index);
         }
+    }
+
+    /// Appends checklist items to a parent task in one save, keeping their given order.
+    ///
+    /// # Arguments
+    ///
+    /// - `list` - Parent list identity.
+    /// - `task` - Parent task identity.
+    /// - `texts` - Item titles in top-to-bottom order.
+    ///
+    /// # Returns
+    ///
+    /// `None` if the parent is missing; otherwise whether the list reached disk.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an internally resolved list index is invalid.
+    pub(in crate::app) fn add_subtasks(
+        &mut self,
+        list: Uuid,
+        task: Uuid,
+        texts: &[String],
+    ) -> Option<bool> {
+        let index = self.list_index(list)?;
+        let parent = self.lists[index]
+            .data
+            .tasks
+            .iter_mut()
+            .find(|item| item.id == task)?;
+        parent.subtasks.extend(texts.iter().map(Subtask::new));
+        Some(self.save_list_index(index))
     }
 
     /// Toggles a checklist completion state and saves its parent list.

@@ -22,6 +22,7 @@ src/app/list.rs             Task entry, rows, editing, gestures, and ordering
 src/app/overlays.rs         Quick add, Find, and keyboard reference
 src/app/overview.rs         List cards and list creation
 src/app/overview_order.rs   Manual tile order and native drag event handling
+src/app/paste.rs            Multi-line paste into task, checklist, and Quick add entry
 src/app/sorting.rs          Task view sorting and preserved manual storage order
 src/app/context.rs          Task context editor and complete-task clipboard copy
 src/app/desktop.rs          Global shortcut settings and workspace-folder opening

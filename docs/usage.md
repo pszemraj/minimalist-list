@@ -22,7 +22,7 @@ In **Manual** order, drag overview tiles to rearrange them. **Sort lists** tempo
 
 ## Capture and edit tasks
 
-Type into the field above a list and press Enter to add a task. Task and subtask entry keep focus after Enter, including an empty submission. Unfinished task and checklist entries stay with their originating workspace and list or task during navigation and after closing a checklist. These unsubmitted entries do not survive restart.
+Type into the field above a list and press Enter to add a task. Task and subtask entry keep focus after Enter, including an empty submission. Pasting several lines into task entry, a checklist's add field, or Quick add creates one item per line, dropping leading bullets, numbers, and checkboxes, and keeps any text already typed in the field. Quick add saves to its chosen list and closes if its field was empty. Unfinished task and checklist entries stay with their originating workspace and list or task during navigation and after closing a checklist. These unsubmitted entries do not survive restart.
 
 Down from task entry focuses the first task. Up and Down move between task rows, including from their secondary controls; Home and End focus the first and last task. Up from the first task returns to entry.
 

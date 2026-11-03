@@ -3,6 +3,7 @@
 use super::{
     MinimalistApp, Screen,
     keyboard::{FocusItem, shortcut_groups, take_key},
+    paste::new_tasks,
     text_input_shortcuts,
     theme::Palette,
 };
@@ -479,39 +480,16 @@ impl MinimalistApp {
 
         if submit {
             state.request_focus = true;
-            let text = state.text.trim();
+            let text = state.text.trim().to_owned();
             if !text.is_empty()
                 && let Some(list_id) = state.selected_list_id
-                && let Some(index) = self.list_index(list_id)
             {
-                let task = Task::new(text);
-                let mut candidate = self.lists[index].clone();
-                let task_id = task.id;
-                candidate.data.tasks.insert(0, task);
-                let title = candidate.data.title.clone();
-                match self.save_list_candidate(index, candidate) {
+                match self.save_capture(list_id, &[text], state.failure.as_deref()) {
                     Ok(()) => {
-                        self.newest_task = Some((task_id, Instant::now()));
-                        self.settings.last_capture_list_id = Some(list_id);
-                        self.save_settings();
-                        if !self.persistence.settings_dirty
-                            && self.persistence.dirty_lists.is_empty()
-                            && self.persistence.pending_filenames.is_empty()
-                            && state
-                                .failure
-                                .as_ref()
-                                .is_some_and(|error| self.status.as_ref() == Some(error))
-                        {
-                            self.status = None;
-                        }
-                        self.acknowledge(format!("Added to {title}"));
                         self.restore_overlay_focus();
                         return;
                     }
-                    Err(error) => {
-                        self.status = Some(error.clone());
-                        state.failure = Some(error);
-                    }
+                    Err(error) => state.failure = Some(error),
                 }
             }
         }
@@ -532,6 +510,58 @@ impl MinimalistApp {
             }
             self.restore_overlay_focus();
         }
+    }
+
+    /// Saves captured tasks at the top of a list in one write and acknowledges them.
+    ///
+    /// # Arguments
+    /// - `list_id` - Destination list identity.
+    /// - `items` - Task titles in top-to-bottom order.
+    /// - `earlier_failure` - The failed save this retries, whose status message a success clears.
+    ///
+    /// # Returns
+    /// Success after the list, last destination, and acknowledgement are updated.
+    ///
+    /// # Errors
+    /// Returns the storage error after showing it as the status message.
+    ///
+    /// # Panics
+    /// Panics if an internally resolved list index is invalid.
+    pub(super) fn save_capture(
+        &mut self,
+        list_id: Uuid,
+        items: &[String],
+        earlier_failure: Option<&str>,
+    ) -> Result<(), String> {
+        let Some(index) = self.list_index(list_id) else {
+            let error = "The destination list is no longer available.".to_owned();
+            self.status = Some(error.clone());
+            return Err(error);
+        };
+        let tasks = new_tasks(items);
+        let newest = tasks.first().map(|task| task.id);
+        let mut candidate = self.lists[index].clone();
+        candidate.data.tasks.splice(0..0, tasks);
+        let title = candidate.data.title.clone();
+        if let Err(error) = self.save_list_candidate(index, candidate) {
+            self.status = Some(error.clone());
+            return Err(error);
+        }
+        self.newest_task = newest.map(|id| (id, Instant::now()));
+        self.settings.last_capture_list_id = Some(list_id);
+        self.save_settings();
+        if !self.persistence.settings_dirty
+            && self.persistence.dirty_lists.is_empty()
+            && self.persistence.pending_filenames.is_empty()
+            && earlier_failure.is_some_and(|error| self.status.as_deref() == Some(error))
+        {
+            self.status = None;
+        }
+        self.acknowledge(match items {
+            [_] => format!("Added to {title}"),
+            _ => format!("Added {} tasks to {title}", items.len()),
+        });
+        Ok(())
     }
 
     fn find_ui(&mut self, ctx: &egui::Context, palette: Palette) {

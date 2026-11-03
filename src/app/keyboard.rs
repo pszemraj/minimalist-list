@@ -328,6 +328,8 @@ impl MinimalistApp {
         {
             self.focus_now(ctx, target);
         }
+        // Last, so focus is what the entry fields will see this frame.
+        self.take_multiline_paste(ctx);
     }
 
     fn route_app_shortcuts(&mut self, ctx: &egui::Context) {

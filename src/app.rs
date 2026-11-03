@@ -9,6 +9,7 @@ mod keyboard;
 mod list;
 mod overlays;
 mod overview;
+mod paste;
 mod persistence;
 #[cfg(test)]
 mod persistence_tests;
