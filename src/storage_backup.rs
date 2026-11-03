@@ -1,10 +1,11 @@
 //! Local list snapshots and recoverable list deletion, kept beside the settings file.
 
-use super::{StoredList, read_list, settings_path};
-use std::ffi::OsString;
+use super::{StoredList, list_file_name, read_list, settings_path};
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
+use uuid::Uuid;
 
 /// Minimum age of the newest snapshot before another one is written.
 const SNAPSHOT_INTERVAL_SECS: u64 = 3600;
@@ -187,7 +188,7 @@ pub(super) fn snapshot_into(
 /// # Arguments
 ///
 /// - `workspace` - Workspace that owns the list.
-/// - `list` - List whose file is moved to `backups/<key>/deleted/<unix>-<filename>`.
+/// - `list` - List whose contents are kept in `backups/<key>/deleted/<unix>-<filename>`.
 ///
 /// # Returns
 ///
@@ -228,6 +229,14 @@ pub fn delete_list(workspace: &Path, list: &StoredList) -> Result<(), String> {
             list.path.display()
         )
     })?;
+    // A timestamp prefix would hide a UUID-only name from the workspace reader.
+    let descriptive_name = list
+        .path
+        .file_stem()
+        .and_then(OsStr::to_str)
+        .filter(|stem| Uuid::parse_str(stem).is_ok())
+        .map(|_| list_file_name(&list.data.title, list.key));
+    let name = descriptive_name.as_deref().map(OsStr::new).unwrap_or(name);
     let directory = backups_dir(workspace).join("deleted");
     fs::create_dir_all(&directory).map_err(fail)?;
     // Never replace an earlier deleted copy that shares the same second and name.
@@ -241,10 +250,11 @@ pub fn delete_list(workspace: &Path, list: &StoredList) -> Result<(), String> {
         }
         stamp += 1;
     };
-    if fs::rename(&list.path, &kept).is_ok() {
+    let source_type = fs::symlink_metadata(&list.path).map_err(fail)?.file_type();
+    if !source_type.is_symlink() && fs::rename(&list.path, &kept).is_ok() {
         return Ok(());
     }
-    // Renaming fails across volumes; copy first so the list is never lost.
+    // Copy the target of a symlink, or copy across volumes, before removing the workspace entry.
     let moved = fs::copy(&list.path, &kept).and_then(|_| fs::remove_file(&list.path));
     if let Err(error) = moved {
         let _ = fs::remove_file(&kept);

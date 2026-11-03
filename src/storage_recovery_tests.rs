@@ -472,6 +472,84 @@ fn a_deleted_list_is_kept_in_backups_and_restores_by_copying_it_back() {
 }
 
 #[test]
+fn deleted_uuid_only_list_restores_with_its_filename_identity() {
+    let root = root();
+    let keep = create_list(&root, "Keep", Accent::Mint).unwrap();
+    let mut list = create_list(&root, "Legacy", Accent::Sky).unwrap();
+    let legacy_path = list.path.with_file_name(format!("{}.json", list.key));
+    fs::rename(&list.path, &legacy_path).unwrap();
+    list.path = legacy_path;
+    list.data.id = keep.key;
+    save_list(&list).unwrap();
+    let contents = fs::read(&list.path).unwrap();
+    let (loaded, _) = read_list(&list.path).unwrap();
+    assert_eq!(loaded.key, list.key);
+    delete_list(&root, &loaded).unwrap();
+
+    let backups = backups_dir(&root);
+    let backup = fs::read_dir(backups.join("deleted"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap();
+    let backup_name = backup.file_name().into_string().unwrap();
+    let (_, descriptive_name) = backup_name.split_once('-').unwrap();
+    assert_eq!(fs::read(backup.path()).unwrap(), contents);
+    assert!(!list.path.exists());
+    for name in [backup_name.as_str(), descriptive_name] {
+        let restored_path = root.join("lists").join(name);
+        fs::copy(backup.path(), &restored_path).unwrap();
+        let snapshot = load_workspace(&root).unwrap();
+        assert!(snapshot.warnings.is_empty(), "{:?}", snapshot.warnings);
+        let restored = snapshot
+            .lists
+            .iter()
+            .find(|entry| entry.path == restored_path)
+            .unwrap();
+        assert_eq!(restored.key, list.key);
+        assert_eq!(restored.data.title, "Legacy");
+        fs::remove_file(restored_path).unwrap();
+    }
+    fs::remove_dir_all(backups).unwrap();
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn deleted_relative_symlink_leaves_a_readable_backup_and_preserves_the_target() {
+    let root = root();
+    create_list(&root, "Keep", Accent::Mint).unwrap();
+    let list = create_list(&root, "Linked", Accent::Sky).unwrap();
+    let target = root.join("linked.json");
+    fs::rename(&list.path, &target).unwrap();
+    std::os::unix::fs::symlink("../linked.json", &list.path).unwrap();
+    let contents = fs::read(&target).unwrap();
+    let (loaded, _) = read_list(&list.path).unwrap();
+    delete_list(&root, &loaded).unwrap();
+
+    let backups = backups_dir(&root);
+    let backup = fs::read_dir(backups.join("deleted"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap();
+    assert!(backup.file_type().unwrap().is_file());
+    assert_eq!(fs::read(backup.path()).unwrap(), contents);
+    assert!(fs::symlink_metadata(&list.path).is_err());
+    assert_eq!(fs::read(&target).unwrap(), contents);
+    fs::copy(backup.path(), root.join("lists").join(backup.file_name())).unwrap();
+    let restored = load_workspace(&root)
+        .unwrap()
+        .lists
+        .into_iter()
+        .find(|entry| entry.key == list.key)
+        .unwrap();
+    assert_eq!(restored.data.title, "Linked");
+    fs::remove_dir_all(backups).unwrap();
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn one_malformed_setting_keeps_every_other_preference() {
     let root = root();
     fs::create_dir_all(&root).unwrap();

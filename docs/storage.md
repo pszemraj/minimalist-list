@@ -108,18 +108,18 @@ An explicit `XDG_CONFIG_HOME` and the legacy settings location move `backups/` t
 ```text
 backups/<workspace key>/
 +-- snapshots/<list UUID>/<unix seconds>.json
-+-- deleted/<unix seconds>-<original filename>
++-- deleted/<unix seconds>-<list filename>
 ```
 
 Before a save replaces a list file, its previous contents are copied to `snapshots/`. A save writes no snapshot while the newest one for that list is under an hour old, and the newest 100 snapshots per list are kept; other files in the folder are never removed. Each snapshot is the file as it was before a save, so edits that have not been saved yet are not captured, and the latest saved version is the list file itself. If a snapshot cannot be written, saving continues and the app warns once per session.
 
 **Clear History** saves pending edits first, then takes a snapshot even when the newest one is under an hour old. If either step fails, the archived tasks stay in History.
 
-**Delete list** moves the list file to `deleted/` instead of erasing it. Deleted files are never pruned automatically; remove old backups by hand.
+**Delete list** moves the list file to `deleted/`. Backups of legacy UUID-only files use a descriptive filename to preserve the filename UUID. For a list opened through a symbolic link, the app saves a regular copy of its target and removes the link from the workspace. The app retains each deleted backup until you remove it.
 
 To restore a snapshot, quit if that list has unsaved changes, then overwrite the list's current `lists/…--<UUID>.json` file with the snapshot's contents, keeping the list file's name. A `<unix seconds>.json` name placed in `lists/` is read as another copy of the same list and ignored as a duplicate.
 
-To restore a deleted list, copy its file from `deleted/` back into the workspace's `lists/` folder. The list returns with its original identity at the next scan, whether or not the leading `<unix seconds>-` is removed from the name.
+To restore a deleted list, copy its file from `deleted/` back into the workspace's `lists/` folder. The list returns with its original identity at the next scan. You can remove the leading `<unix seconds>-` from the filename. If an older backup has a `<unix seconds>-<UUID>.json` filename, remove the timestamp prefix so the filename UUID is used.
 
 ## JSON format
 
