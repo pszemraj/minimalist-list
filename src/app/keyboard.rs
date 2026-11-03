@@ -70,6 +70,8 @@ pub(super) const MOVE_TO_LIST: KeyboardShortcut = KeyboardShortcut::new(
     },
     Key::M,
 );
+/// Opens the focused task's context editor, or its read-only view in History.
+pub(super) const TASK_CONTEXT: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::I);
 /// Deletes a focused task using forward Delete.
 pub(super) const DELETE_TASK: KeyboardShortcut =
     KeyboardShortcut::new(Modifiers::NONE, Key::Delete);
@@ -249,6 +251,7 @@ pub(super) fn shortcut_groups() -> Vec<ShortcutGroup> {
                     pair(MOVE_TASK_UP, MOVE_TASK_DOWN),
                 ),
                 ("Move to another list", shortcut(MOVE_TO_LIST)),
+                ("Edit task context", shortcut(TASK_CONTEXT)),
                 (
                     "Undo deletion or move",
                     shortcut(KeyboardShortcut::new(Modifiers::COMMAND, Key::Z)),
@@ -440,6 +443,12 @@ impl MinimalistApp {
             && take_shortcut(ctx, MOVE_TO_LIST)
         {
             self.begin_move_task(list, task);
+            return;
+        }
+        if let Some((list, task, archived)) = self.focused_task(ctx)
+            && take_shortcut(ctx, TASK_CONTEXT)
+        {
+            self.open_task_context(list, task, archived);
             return;
         }
         // Like '/', a logical comma may require Shift on the user's layout.

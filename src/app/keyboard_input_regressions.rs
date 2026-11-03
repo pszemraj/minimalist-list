@@ -421,3 +421,136 @@ fn scrolled_settings_focus_outline_stays_in_the_visible_region() {
     }
     cleanup(&app);
 }
+
+fn context_fixture() -> (egui::Context, MinimalistApp, Uuid, Vec<Uuid>) {
+    let (ctx, mut app) = test_app();
+    let list = app.lists[0].key;
+    app.lists[0].data.tasks = ["A", "B", "C"].map(Task::new).to_vec();
+    app.lists[0].data.tasks[1]
+        .subtasks
+        .push(crate::model::Subtask::new("Child"));
+    let tasks = app.lists[0].data.tasks.iter().map(|task| task.id).collect();
+    assert!(app.save_list_index(0));
+    app.request_task_focus = false;
+    idle(&ctx, &mut app);
+    (ctx, app, list, tasks)
+}
+
+fn saved_tasks(app: &MinimalistApp) -> Vec<Task> {
+    storage::load_workspace(&app.workspace).unwrap().lists[0]
+        .data
+        .tasks
+        .clone()
+}
+
+#[test]
+fn task_context_shortcut_opens_the_focused_row_editor_and_saves() {
+    let (ctx, mut app, list, tasks) = context_fixture();
+    let row = FocusItem::Task(list, tasks[1]).id();
+    focus(&ctx, &mut app, row);
+    key(&ctx, &mut app, Key::I, Modifiers::COMMAND);
+    let editor = app.task_context.as_ref().unwrap();
+    assert_eq!(
+        (editor.list, editor.task, editor.archived),
+        (list, tasks[1], false)
+    );
+    assert!(editor.text.is_empty(), "the shortcut inserts no text");
+    assert_eq!(
+        ctx.memory(|memory| memory.focused()),
+        Some(Id::new("task-context-text"))
+    );
+    type_text(&ctx, &mut app, "Booking ref 42");
+    assert!(app.save_task_context());
+    idle(&ctx, &mut app);
+    assert!(app.task_context.is_none());
+    assert_eq!(ctx.memory(|memory| memory.focused()), Some(row));
+    let saved = saved_tasks(&app);
+    assert_eq!(saved[1].context, "Booking ref 42");
+    assert!(saved[0].context.is_empty() && saved[2].context.is_empty());
+    cleanup(&app);
+}
+
+#[test]
+fn task_context_shortcut_from_a_child_control_opens_the_parent_editor() {
+    let (ctx, mut app, list, tasks) = context_fixture();
+    app.switch_subtask_panel(Some((list, tasks[1])));
+    let child = app.lists[0].data.tasks[1].subtasks[0].id;
+    focus(
+        &ctx,
+        &mut app,
+        FocusItem::Subtask(list, tasks[1], child).id(),
+    );
+    key(&ctx, &mut app, Key::I, Modifiers::COMMAND);
+    let editor = app.task_context.as_ref().unwrap();
+    assert_eq!((editor.list, editor.task), (list, tasks[1]));
+    cleanup(&app);
+}
+
+#[test]
+fn task_context_shortcut_saves_typed_title_text_before_opening() {
+    let (ctx, mut app, list, tasks) = context_fixture();
+    app.editing = Some((list, tasks[1]));
+    app.edit_text = "B".into();
+    app.request_edit_focus = true;
+    idle(&ctx, &mut app);
+    assert_eq!(
+        ctx.memory(|memory| memory.focused()),
+        Some(Id::new(("edit-task", list, tasks[1])))
+    );
+    // Typing and the shortcut arrive in one batch; the text must land first.
+    let mut events = vec![Event::Text(" edited".into())];
+    events.extend(chord(Key::I, Modifiers::COMMAND));
+    frame(&ctx, &mut app, events, 430.0);
+    idle(&ctx, &mut app);
+    assert!(app.editing.is_none());
+    let editor = app.task_context.as_ref().unwrap();
+    assert_eq!((editor.list, editor.task), (list, tasks[1]));
+    assert!(editor.text.is_empty());
+    assert_eq!(saved_tasks(&app)[1].text, "B edited");
+    cleanup(&app);
+}
+
+#[test]
+fn task_context_shortcut_opens_history_rows_read_only() {
+    let (ctx, mut app, list, tasks) = context_fixture();
+    app.lists[0].data.tasks[0].context = "Saved notes".into();
+    app.lists[0].data.tasks[0].toggle();
+    app.archive_completed(list);
+    app.history_open = true;
+    idle(&ctx, &mut app);
+    let row = FocusItem::Archived(list, tasks[0]).id();
+    focus(&ctx, &mut app, row);
+    key(&ctx, &mut app, Key::I, Modifiers::COMMAND);
+    let editor = app.task_context.as_ref().unwrap();
+    assert_eq!(
+        (editor.list, editor.task, editor.archived),
+        (list, tasks[0], true)
+    );
+    assert_eq!(editor.text, "Saved notes");
+    type_text(&ctx, &mut app, "ignored");
+    assert_eq!(app.task_context.as_ref().unwrap().text, "Saved notes");
+    key(&ctx, &mut app, Key::Escape, Modifiers::NONE);
+    assert!(app.task_context.is_none());
+    assert_eq!(ctx.memory(|memory| memory.focused()), Some(row));
+    assert_eq!(
+        storage::load_workspace(&app.workspace).unwrap().lists[0]
+            .data
+            .archive[0]
+            .task
+            .context,
+        "Saved notes"
+    );
+    cleanup(&app);
+}
+
+#[test]
+fn task_context_shortcut_does_nothing_from_task_entry() {
+    let (ctx, mut app, list, _) = context_fixture();
+    let entry = Id::new(("new-task", list));
+    focus(&ctx, &mut app, entry);
+    key(&ctx, &mut app, Key::I, Modifiers::COMMAND);
+    assert!(app.task_context.is_none());
+    assert!(app.new_task.is_empty());
+    assert_eq!(ctx.memory(|memory| memory.focused()), Some(entry));
+    cleanup(&app);
+}

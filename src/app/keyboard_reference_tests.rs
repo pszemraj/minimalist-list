@@ -436,6 +436,7 @@ fn reference_uses_shared_bindings_and_native_key_names() {
             KeyboardShortcut::new(Modifiers::COMMAND, Key::Z),
         ),
         ("Move to another list", MOVE_TO_LIST),
+        ("Edit task context", TASK_CONTEXT),
     ] {
         let (_, label) = groups
             .iter()

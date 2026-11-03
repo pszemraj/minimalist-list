@@ -38,7 +38,7 @@ Click task or child text to edit it inline, or press Enter on a focused task row
 
 Use context for notes, links, booking details, or instructions while keeping the task title short. Context is multiline plain text and stays hidden in ordinary rows.
 
-1. Right-click the task's title or row and choose **Add context...**. For a task with saved notes, the action is **Edit context...**.
+1. Right-click the task's title or row and choose **Add context...**. For a task with saved notes, the action is **Edit context...**. From the keyboard, press `Ctrl+I` with focus on a task row, one of its controls, a checklist item, or its title editor; typed edits are saved first and the notes field opens focused.
 2. Enter the details and choose **Save**. **Cancel** or Escape discards your changes; clicking outside the popup leaves it open. See [save recovery](storage.md#save-recovery) for hiding or quitting with a draft.
 3. To reopen saved notes, click the small circle with three horizontal lines beside the task's checklist control, or use **Edit context...** again. Clearing the text and saving removes the notes icon.
 
@@ -46,7 +46,7 @@ Use context for notes, links, booking details, or instructions while keeping the
 
 <img src="../assets/task-context-editor.png" alt="Task context editor on Linux with multiline trip details, a URL, and Save and Cancel buttons" width="360">
 
-Saved context follows the task through Move, deletion Undo, and History, and syncs with its [list file](storage.md#file-sync-behavior). In History, right-click an archived task and choose **View context...** to read its notes without restoring it.
+Saved context follows the task through Move, deletion Undo, and History, and syncs with its [list file](storage.md#file-sync-behavior). In History, right-click an archived task and choose **View context...**, or press `Ctrl+I` on its focused row, to read its notes without restoring it.
 
 ### Copy the complete task
 

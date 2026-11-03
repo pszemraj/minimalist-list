@@ -30,6 +30,7 @@ fn needs_current_editor_input(event: &Event) -> bool {
             BACK_TO_LISTS,
             CLEAR_COMPLETED,
             MOVE_TO_LIST,
+            TASK_CONTEXT,
         ]
         .iter()
         .any(|binding| {
