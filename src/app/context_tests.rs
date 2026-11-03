@@ -32,10 +32,15 @@ fn full_copy_includes_parent_context_and_each_child_completion() {
         .map(Subtask::new)
         .to_vec();
     task.subtasks[1].completed = true;
+    let open_text = task.full_text();
     assert_eq!(
-        task.full_text(),
+        open_text,
         "[ ] Parent title\n\nSupporting details\nhttps://example.com/reference\n\n- [ ] First child\n- [x] Second child\nwith detail"
     );
+    assert_eq!(task.status(), TaskStatus::InProgress);
+    task.toggle_started();
+    assert_eq!(task.status(), TaskStatus::NotStarted);
+    assert_eq!(task.full_text(), open_text);
     task.toggle();
     assert!(task.full_text().starts_with("[x] Parent title"));
 }
@@ -439,6 +444,7 @@ fn wrap_preview_waits_two_seconds_and_never_displays_context() {
     for mode in [TitleOverflow::Wrap, TitleOverflow::Scroll] {
         let (ctx, mut app) = test_app();
         let mut task = Task::new("Task title for metadata preview");
+        task.toggle_started();
         task.context = "PRIVATE_CONTEXT_NOT_FOR_HOVER".into();
         let id = task.id;
         app.lists[0].data.tasks.push(task);
@@ -457,7 +463,7 @@ fn wrap_preview_waits_two_seconds_and_never_displays_context() {
         assert!(!early.shapes.iter().any(|shape| matches!(&shape.shape, egui::epaint::Shape::Text(text) if text.galley.text().contains("Created"))));
         app_frame(&ctx, &mut app, vec![], 3.3);
         let late = app_frame(&ctx, &mut app, vec![], 3.4);
-        let metadata = late.shapes.iter().any(|shape| matches!(&shape.shape, egui::epaint::Shape::Text(text) if text.galley.text().contains("Created")));
+        let metadata = late.shapes.iter().any(|shape| matches!(&shape.shape, egui::epaint::Shape::Text(text) if text.galley.text().contains("In progress · 0/0 subtasks")));
         assert_eq!(metadata, mode == TitleOverflow::Wrap);
         assert!(!late.shapes.iter().any(|shape| matches!(&shape.shape, egui::epaint::Shape::Text(text) if text.galley.text().contains("PRIVATE_CONTEXT_NOT_FOR_HOVER"))));
         fs::remove_dir_all(&app.workspace).unwrap();

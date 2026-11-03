@@ -108,6 +108,32 @@ fn completion_uses_the_click_modifiers_and_keeps_shift_space_on_the_row() {
 }
 
 #[test]
+fn task_circles_expose_their_status_and_shift_click_action_to_accessibility() {
+    let (ctx, mut app) = test_app();
+    ctx.enable_accesskit();
+    let mut tasks = ["Open", "Doing", "Done"].map(Task::new);
+    tasks[1].toggle_started();
+    tasks[2].toggle();
+    app.lists[0].data.tasks = tasks.into();
+    let input = crate::app::tests::frame_input(Vec2::new(520.0, 600.0), 1.0, Vec::new());
+    let output = crate::app::tests::run_app_frame(&ctx, &mut app, input);
+    let tree = output.platform_output.accesskit_update.unwrap();
+    for label in [
+        "Complete: Open (not started). Shift+click to mark in progress",
+        "Complete: Doing (in progress). Shift+click to mark not started",
+        "Reopen: Done (done). Shift+click to reopen in progress",
+    ] {
+        assert!(
+            tree.nodes.iter().any(|(_, node)| {
+                node.role() == egui::accesskit::Role::CheckBox && node.label() == Some(label)
+            }),
+            "missing checkbox {label}"
+        );
+    }
+    std::fs::remove_dir_all(&app.workspace).unwrap();
+}
+
+#[test]
 fn status_regrouping_scrolls_the_focused_row_and_circle_into_view() {
     let (ctx, mut app) = test_app();
     let list = app.lists[0].key;
