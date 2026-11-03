@@ -375,7 +375,7 @@ fn global_quick_add_keeps_move_return_focus() {
         };
         let source_before = saved(&f.app, f.list);
         let _ = f.ctx.run_logic(&Default::default(), |ctx| {
-            f.app.open_global_quick_add(ctx);
+            f.app.request_global_quick_add(ctx);
         });
         idle(&f.ctx, &mut f.app);
         assert!(f.app.details.move_task.is_none());

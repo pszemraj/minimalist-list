@@ -56,11 +56,10 @@ impl MinimalistApp {
         for (action, error) in failures {
             self.report_shortcut_error(action, error);
         }
-        if show || quick_add {
-            self.show_window(ctx);
-        }
         if quick_add {
-            self.open_global_quick_add(ctx);
+            self.request_global_quick_add(ctx);
+        } else if show {
+            self.show_window(ctx);
         }
     }
 

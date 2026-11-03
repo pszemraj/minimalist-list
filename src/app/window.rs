@@ -209,8 +209,7 @@ impl MinimalistApp {
                     shown = true;
                 }
                 Action::QuickAdd => {
-                    self.show_window(ctx);
-                    self.open_global_quick_add(ctx);
+                    self.request_global_quick_add(ctx);
                     shown = true;
                 }
                 Action::Quit => {
@@ -445,12 +444,55 @@ mod tests {
             .position(|command| *command == ViewportCommand::Focus)
             .unwrap();
         assert!(mapped < focused);
+        crate::app::tests::settle_keyboard(&ctx, &mut app);
         assert!(app.quick_capture.is_some());
-        for _ in 0..3 {
-            let time = ctx.input(|input| input.time) + 0.3;
-            let input = crate::app::tests::frame_input(egui::vec2(430.0, 500.0), time, vec![]);
-            crate::app::tests::run_app_frame(&ctx, &mut app, input);
-        }
+        assert_eq!(
+            ctx.memory(|memory| memory.focused()),
+            Some(egui::Id::new("quick-capture-text"))
+        );
+        std::fs::remove_dir_all(&app.workspace).unwrap();
+    }
+
+    #[test]
+    fn tray_quick_add_leaves_queued_paste_with_the_inline_editor() {
+        use crate::app::{
+            keyboard::FocusItem,
+            tests::{chord, focus_widget, frame_input, keyboard_frame, run_frame, settle_keyboard},
+        };
+
+        let (ctx, mut app) = test_app();
+        let list = app.lists[0].key;
+        let task = Task::new("Original");
+        let task_id = task.id;
+        app.lists[0].data.tasks.push(task);
+        assert!(app.save_list_index(0));
+        focus_widget(&ctx, &mut app, FocusItem::Task(list, task_id).id());
+        keyboard_frame(
+            &ctx,
+            &mut app,
+            chord(egui::Key::Enter, egui::Modifiers::NONE),
+            430.0,
+        );
+        settle_keyboard(&ctx, &mut app);
+        assert_eq!(app.editing, Some((list, task_id)));
+
+        let input = frame_input(
+            egui::vec2(430.0, 500.0),
+            ctx.input(|input| input.time) + 0.3,
+            vec![egui::Event::Paste("One\nTwo".into())],
+        );
+        run_frame(&ctx, input, |ui| {
+            // Native eframe runs logic and then UI with the same input batch.
+            app.handle_window_events(ui.ctx(), false, &[Action::QuickAdd], true);
+            <MinimalistApp as eframe::App>::ui(&mut app, ui, &mut eframe::Frame::_new_kittest());
+        });
+        settle_keyboard(&ctx, &mut app);
+
+        let saved = crate::storage::load_workspace(&app.workspace).unwrap();
+        let tasks = &saved.lists[0].data.tasks;
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].text, "OriginalOne Two");
+        assert!(app.quick_capture.as_ref().unwrap().text.is_empty());
         assert_eq!(
             ctx.memory(|memory| memory.focused()),
             Some(egui::Id::new("quick-capture-text"))

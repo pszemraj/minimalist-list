@@ -192,6 +192,15 @@ impl MinimalistApp {
         self.focus_now(ctx, Id::new("quick-capture-text"));
     }
 
+    /// Reveals the window now and queues Quick add until the current widgets process their input.
+    ///
+    /// # Arguments
+    /// - `ctx` - Context receiving the native window commands.
+    pub(super) fn request_global_quick_add(&mut self, ctx: &egui::Context) {
+        self.show_window(ctx);
+        self.global_quick_add_requested = true;
+    }
+
     /// Opens quick capture for a request from outside the window, above other transient layers.
     ///
     /// Dismissing the keyboard reference or Move keeps its return focus for Quick add. Open

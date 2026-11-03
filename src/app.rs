@@ -135,6 +135,7 @@ pub struct MinimalistApp {
     next_taskbar_check: Instant,
     instance: Option<crate::instance::InstanceGuard>,
     global_shortcut: Option<crate::hotkey::GlobalShortcut>,
+    global_quick_add_requested: bool,
     /// Editable shortcut text per `GlobalAction`.
     shortcut_inputs: crate::hotkey::PerAction<String>,
     /// Last failure shown per `GlobalAction`, cleared by a later successful apply.
@@ -303,6 +304,7 @@ impl MinimalistApp {
             next_taskbar_check: Instant::now(),
             instance: None,
             global_shortcut: None,
+            global_quick_add_requested: false,
             shortcut_inputs,
             shortcut_errors: Default::default(),
             task_context: None,
@@ -900,6 +902,11 @@ impl eframe::App for MinimalistApp {
         self.task_operations_ui(ui.ctx());
         self.task_context_ui(ui.ctx());
         self.finish_keyboard_frame(ui.ctx());
+        // Native requests arrive in logic, before this frame's editor input is processed.
+        if std::mem::take(&mut self.global_quick_add_requested) && !self.quitting {
+            self.open_global_quick_add(ui.ctx());
+            ui.ctx().request_repaint();
+        }
     }
 }
 
