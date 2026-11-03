@@ -49,12 +49,9 @@ pub(super) fn write_json_atomic_checked<T: Serialize>(
     }
     let bytes = serde_json::to_vec_pretty(value)
         .map_err(|error| format!("could not serialize {}: {error}", path.display()))?;
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("data.json");
+    // Keep the sibling writable even when the destination name is already near the filesystem limit.
     let temp = path.with_file_name(format!(
-        ".{file_name}.tmp-{}-{}",
+        ".minimalist-list.json.tmp-{}-{}",
         std::process::id(),
         Uuid::new_v4()
     ));
