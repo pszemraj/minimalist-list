@@ -247,6 +247,54 @@ fn the_move_button_moves_and_the_last_destination_is_preselected() {
 }
 
 #[test]
+fn a_dialog_whose_task_vanished_closes_and_returns_focus_to_task_entry() {
+    let mut f = fixture(["A", "B", "C"]);
+    focus(&f.ctx, &mut f.app, FocusItem::Task(f.list, f.tasks[1]).id());
+    key(
+        &f.ctx,
+        &mut f.app,
+        Key::M,
+        Modifiers::COMMAND | Modifiers::SHIFT,
+    );
+    assert!(f.app.details.move_task.is_some());
+    f.app.lists[0].data.tasks.remove(1);
+    f.app.request_task_focus = false;
+    idle(&f.ctx, &mut f.app);
+    assert!(f.app.details.move_task.is_none());
+    assert_eq!(focused(&f.ctx), Some(Id::new(("new-task", f.list))));
+    cleanup(&f.app);
+}
+
+#[test]
+fn a_vanished_destination_keeps_the_dialog_open_and_can_be_replaced() {
+    let mut f = fixture(["A", "B", "C"]);
+    focus(&f.ctx, &mut f.app, FocusItem::Task(f.list, f.tasks[1]).id());
+    key(
+        &f.ctx,
+        &mut f.app,
+        Key::M,
+        Modifiers::COMMAND | Modifiers::SHIFT,
+    );
+    key(&f.ctx, &mut f.app, Key::ArrowDown, Modifiers::NONE);
+    assert_eq!(destination(&f.app), f.third);
+    let removed = f.app.lists.remove(f.app.list_index(f.third).unwrap());
+    storage::delete_list(&f.app.workspace, &removed).unwrap();
+    key(&f.ctx, &mut f.app, Key::Enter, Modifiers::NONE);
+    assert!(f.app.details.move_task.is_some());
+    assert_eq!(
+        f.app.status.as_deref(),
+        Some("That list is no longer available. Choose another list.")
+    );
+    assert_eq!(titles(&saved(&f.app, f.list)), ["A", "B", "C"]);
+    key(&f.ctx, &mut f.app, Key::ArrowDown, Modifiers::NONE);
+    assert_eq!(destination(&f.app), f.other);
+    key(&f.ctx, &mut f.app, Key::Enter, Modifiers::NONE);
+    assert!(f.app.details.move_task.is_none());
+    assert_eq!(titles(&saved(&f.app, f.other)), ["B"]);
+    cleanup(&f.app);
+}
+
+#[test]
 fn shortcut_ignores_archived_rows_and_unfocused_screens() {
     let mut f = fixture(["A", "B", "C"]);
     f.app.lists[0].data.tasks[0].toggle();

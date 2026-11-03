@@ -149,7 +149,11 @@ impl MinimalistApp {
             return false;
         }
         self.finish_inline_edit();
-        let (Some(from), Some(to)) = (self.list_index(source), self.list_index(destination)) else {
+        let Some(from) = self.list_index(source) else {
+            return false;
+        };
+        let Some(to) = self.list_index(destination) else {
+            self.status = Some("That list is no longer available. Choose another list.".into());
             return false;
         };
         if !self.lists[from]
@@ -302,6 +306,8 @@ impl MinimalistApp {
             })
             .map(|item| item.text.clone());
         let Some(title) = title else {
+            // The task left while the dialog was open, taking its return focus with it.
+            self.keyboard.pending = self.default_focus();
             return;
         };
         let mut move_now = false;

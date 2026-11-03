@@ -204,7 +204,7 @@ impl MinimalistApp {
     /// # Returns
     ///
     /// The control ID to focus when no better target survives.
-    pub(super) fn default_focus(&self) -> Option<Id> {
+    pub(in crate::app) fn default_focus(&self) -> Option<Id> {
         match self.screen {
             Screen::List(list) => Some(Id::new(("new-task", list))),
             Screen::Overview => self.overview_focus(),
