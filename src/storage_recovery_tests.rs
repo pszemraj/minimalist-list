@@ -330,22 +330,72 @@ fn workspace_keys_stay_byte_identical_across_releases() {
 fn snapshots_are_written_at_most_hourly_even_when_the_clock_moves_back() {
     let directory = root();
     let base = 1_700_000_000;
-    backup::snapshot_into(&directory, b"first", base).unwrap();
-    backup::snapshot_into(&directory, b"too soon", base + 3_599).unwrap();
+    backup::snapshot_into(&directory, b"first", base, false).unwrap();
+    backup::snapshot_into(&directory, b"too soon", base + 3_599, false).unwrap();
     assert_eq!(numeric_snapshots(&directory), [base]);
     assert_eq!(
         fs::read(directory.join(format!("{base}.json"))).unwrap(),
         b"first"
     );
-    backup::snapshot_into(&directory, b"second", base + 3_600).unwrap();
+    backup::snapshot_into(&directory, b"second", base + 3_600, false).unwrap();
     assert_eq!(numeric_snapshots(&directory), [base, base + 3_600]);
     // A newest snapshot dated after the current time cannot suppress backups.
-    backup::snapshot_into(&directory, b"earlier clock", base + 10).unwrap();
+    backup::snapshot_into(&directory, b"earlier clock", base + 10, false).unwrap();
     assert_eq!(
         numeric_snapshots(&directory),
         [base, base + 10, base + 3_600]
     );
     fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn forced_snapshots_bypass_the_hourly_limit_without_replacing_earlier_ones() {
+    let directory = root();
+    let base = 1_700_000_000;
+    backup::snapshot_into(&directory, b"first", base, false).unwrap();
+    backup::snapshot_into(&directory, b"forced", base + 5, true).unwrap();
+    // A second forced snapshot in the same second takes the next free name.
+    backup::snapshot_into(&directory, b"same second", base + 5, true).unwrap();
+    assert_eq!(numeric_snapshots(&directory), [base, base + 5, base + 6]);
+    for (time, bytes) in [
+        (base, "first"),
+        (base + 5, "forced"),
+        (base + 6, "same second"),
+    ] {
+        assert_eq!(
+            fs::read_to_string(directory.join(format!("{time}.json"))).unwrap(),
+            bytes
+        );
+    }
+    for index in 0..105 {
+        backup::snapshot_into(&directory, b"{}", base + 10 + index, true).unwrap();
+    }
+    assert_eq!(numeric_snapshots(&directory).len(), 100);
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn snapshot_list_now_copies_the_observed_bytes_right_after_another_snapshot() {
+    let root = root();
+    let list = create_list(&root, "Tasks", Accent::Mint).unwrap();
+    let directory = backups_dir(&root)
+        .join("snapshots")
+        .join(list.key.to_string());
+    snapshot_list(&root, &list).unwrap();
+    snapshot_list(&root, &list).unwrap();
+    assert_eq!(numeric_snapshots(&directory).len(), 1);
+    snapshot_list_now(&root, &list).unwrap();
+    let kept = numeric_snapshots(&directory);
+    assert_eq!(kept.len(), 2);
+    let observed = list.source_bytes.borrow().clone().unwrap();
+    for time in kept {
+        assert_eq!(
+            fs::read(directory.join(format!("{time}.json"))).unwrap(),
+            &*observed
+        );
+    }
+    fs::remove_dir_all(backups_dir(&root)).unwrap();
+    fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
@@ -364,7 +414,7 @@ fn snapshots_are_capped_at_one_hundred_and_other_files_are_untouched() {
     }
     let base = 1_700_000_000;
     for index in 0..105 {
-        backup::snapshot_into(&directory, b"{}", base + index * 3_600).unwrap();
+        backup::snapshot_into(&directory, b"{}", base + index * 3_600, false).unwrap();
     }
     let kept = numeric_snapshots(&directory);
     assert_eq!(kept.len(), 100);

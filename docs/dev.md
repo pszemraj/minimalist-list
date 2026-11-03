@@ -26,8 +26,8 @@ src/app/paste.rs            Multi-line paste into task, checklist, and Quick add
 src/app/sorting.rs          Task view sorting and preserved manual storage order
 src/app/context.rs          Task context editor and complete-task clipboard copy
 src/app/desktop.rs          Global shortcut settings and workspace-folder opening
-src/app/settings.rs         Global preferences and separate List options
-src/app/task_details.rs     Measured checklists and read-only History
+src/app/settings.rs         Global preferences and separate List options, including Clear History
+src/app/task_details.rs     Measured checklists and read-only History with offscreen row skipping
 src/app/task_controls.rs    Task controls and optional collapsible child previews
 src/app/task_operations.rs  Child editing, Undo, and archival
 src/app/task_move.rs        Move dialog, two-list transfer, and Move Undo

@@ -72,13 +72,37 @@ fn unix_now() -> u64 {
 ///
 /// Returns an error when the backup folder cannot be written.
 pub fn snapshot_list(workspace: &Path, list: &StoredList) -> Result<(), String> {
+    snapshot_list_with(workspace, list, false)
+}
+
+/// Keeps the list's observed file contents even when a recent snapshot exists.
+///
+/// Used before an action the app cannot undo, such as clearing History.
+///
+/// # Arguments
+///
+/// - `workspace` - Workspace that owns the list.
+/// - `list` - List whose last loaded or saved file contents are copied.
+///
+/// # Returns
+///
+/// `Ok(())` after a snapshot is written, or when the list has no observed file contents.
+///
+/// # Errors
+///
+/// Returns an error when the backup folder cannot be written.
+pub fn snapshot_list_now(workspace: &Path, list: &StoredList) -> Result<(), String> {
+    snapshot_list_with(workspace, list, true)
+}
+
+fn snapshot_list_with(workspace: &Path, list: &StoredList, force: bool) -> Result<(), String> {
     let Some(bytes) = list.source_bytes.borrow().clone() else {
         return Ok(());
     };
     let directory = backups_dir(workspace)
         .join("snapshots")
         .join(list.key.to_string());
-    snapshot_into(&directory, &bytes, unix_now())
+    snapshot_into(&directory, &bytes, unix_now(), force)
         .map_err(|error| format!("could not back up {}: {error}", list.path.display()))
 }
 
@@ -102,14 +126,16 @@ fn snapshot_times(directory: &Path) -> std::io::Result<Vec<u64>> {
     Ok(times)
 }
 
-/// Writes one timestamped snapshot unless the newest is under an hour old, then
-/// removes the oldest numeric snapshots beyond the limit. Other files are untouched.
+/// Writes one timestamped snapshot unless the newest is under an hour old and
+/// `force` is false, then removes the oldest numeric snapshots beyond the limit.
+/// Other files are untouched, and an existing snapshot is never replaced.
 ///
 /// # Arguments
 ///
 /// - `directory` - Per-list snapshot folder, created when absent.
 /// - `bytes` - Previous list file contents.
-/// - `now` - Current Unix seconds, which also names the snapshot.
+/// - `now` - Current Unix seconds, which names the snapshot unless that name is taken.
+/// - `force` - Whether to write even when the newest snapshot is under an hour old.
 ///
 /// # Returns
 ///
@@ -118,19 +144,30 @@ fn snapshot_times(directory: &Path) -> std::io::Result<Vec<u64>> {
 /// # Errors
 ///
 /// Returns an error when the folder cannot be read or the snapshot cannot be written.
-pub(super) fn snapshot_into(directory: &Path, bytes: &[u8], now: u64) -> std::io::Result<()> {
+pub(super) fn snapshot_into(
+    directory: &Path,
+    bytes: &[u8],
+    now: u64,
+    force: bool,
+) -> std::io::Result<()> {
     fs::create_dir_all(directory)?;
     let existing = snapshot_times(directory)?;
     // A newest snapshot dated in the future must not suppress backups.
-    if existing
-        .last()
-        .is_some_and(|&newest| newest <= now && now - newest < SNAPSHOT_INTERVAL_SECS)
+    if !force
+        && existing
+            .last()
+            .is_some_and(|&newest| newest <= now && now - newest < SNAPSHOT_INTERVAL_SECS)
     {
         return Ok(());
     }
-    let temporary = directory.join(format!(".{now}.json.tmp"));
+    // A snapshot from the same second stays; the new one takes the next free name.
+    let mut stamp = now;
+    while fs::symlink_metadata(directory.join(format!("{stamp}.json"))).is_ok() {
+        stamp += 1;
+    }
+    let temporary = directory.join(format!(".{stamp}.json.tmp"));
     fs::write(&temporary, bytes)?;
-    if let Err(error) = fs::rename(&temporary, directory.join(format!("{now}.json"))) {
+    if let Err(error) = fs::rename(&temporary, directory.join(format!("{stamp}.json"))) {
         let _ = fs::remove_file(&temporary);
         return Err(error);
     }

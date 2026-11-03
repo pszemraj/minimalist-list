@@ -97,7 +97,7 @@ Moving a task writes the destination before removing the source and attempts to 
 
 ## Local backups
 
-Saves and list deletion keep earlier list files in a `backups/` folder beside the [local settings file](#default-directories), never inside the workspace or its sync folder:
+Saves, Clear History, and list deletion keep earlier list files in a `backups/` folder beside the [local settings file](#default-directories), never inside the workspace or its sync folder:
 
 - Linux: `~/.config/minimalist-list/backups/`
 - macOS: `~/Library/Application Support/minimalist-list/backups/`
@@ -112,6 +112,8 @@ backups/<workspace key>/
 ```
 
 Before a save replaces a list file, its previous contents are copied to `snapshots/`. A save writes no snapshot while the newest one for that list is under an hour old, and the newest 100 snapshots per list are kept; other files in the folder are never removed. Each snapshot is the file as it was before a save, so edits that have not been saved yet are not captured, and the latest saved version is the list file itself. If a snapshot cannot be written, saving continues and the app warns once per session.
+
+**Clear History** always writes a snapshot of the list's last saved file first, even when the newest one is under an hour old, so the archived tasks stay recoverable; if that snapshot cannot be written, History is kept and the app says so.
 
 **Delete list** moves the list file to `deleted/` instead of erasing it. Deleted files are never pruned automatically; remove old backups by hand.
 

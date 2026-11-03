@@ -25,7 +25,7 @@ pub use io::{list_changed_on_disk, save_list};
 
 #[path = "storage_backup.rs"]
 mod backup;
-pub use backup::{backups_dir, delete_list, snapshot_list, workspace_key};
+pub use backup::{backups_dir, delete_list, snapshot_list, snapshot_list_now, workspace_key};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]

@@ -4,6 +4,7 @@ use super::{MinimalistApp, SubtaskEdit, UndoItem};
 use crate::{
     app::{CLEAR_ANIMATION_SECONDS, DELETE_ANIMATION_SECONDS, Screen, keyboard::FocusItem},
     model::{ArchivedTask, Subtask, Task},
+    storage,
 };
 use eframe::egui::{self, Id};
 use std::time::Instant;
@@ -301,6 +302,11 @@ impl MinimalistApp {
                 task,
                 destination,
             }) => self.undo_move(source, position, task, destination),
+            Some(UndoItem::Archived {
+                list,
+                position,
+                item,
+            }) => self.undo_archived_deletion(list, position, item),
             None => {}
         }
     }
@@ -319,17 +325,7 @@ impl MinimalistApp {
             });
             return;
         };
-        if self.lists.iter().any(|item| {
-            item.data
-                .tasks
-                .iter()
-                .any(|existing| existing.id == task.id)
-                || item
-                    .data
-                    .archive
-                    .iter()
-                    .any(|existing| existing.task.id == task.id)
-        }) {
+        if self.task_id_exists(task.id) {
             // Keep Undo available so a stale or different duplicate can be resolved.
             self.details.undo = Some(UndoItem::Task {
                 list,
@@ -344,6 +340,51 @@ impl MinimalistApp {
         self.lists[index].data.tasks.insert(position, task);
         self.restore_manual_task_position(list, id, position);
         self.finish_undo(list, index, FocusItem::Task(list, id));
+    }
+
+    /// Reports whether any list holds an active or archived task with this identity.
+    fn task_id_exists(&self, id: Uuid) -> bool {
+        self.lists.iter().any(|item| {
+            item.data.tasks.iter().any(|existing| existing.id == id)
+                || item
+                    .data
+                    .archive
+                    .iter()
+                    .any(|existing| existing.task.id == id)
+        })
+    }
+
+    /// Reinserts a permanently deleted History entry at its original position and time.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an internally resolved list index is invalid.
+    fn undo_archived_deletion(&mut self, list: Uuid, position: usize, item: ArchivedTask) {
+        let Some(index) = self.list_index(list) else {
+            self.details.undo = Some(UndoItem::Archived {
+                list,
+                position,
+                item,
+            });
+            return;
+        };
+        if self.task_id_exists(item.task.id) {
+            // Keep Undo available so a stale or different duplicate can be resolved.
+            self.details.undo = Some(UndoItem::Archived {
+                list,
+                position,
+                item,
+            });
+            self.status = Some("The deleted task already exists in the workspace.".into());
+            return;
+        }
+        let id = item.task.id;
+        let archive = &mut self.lists[index].data.archive;
+        archive.insert(position.min(archive.len()), item);
+        if matches!(self.screen, Screen::List(active) if active == list) {
+            self.history_open = true;
+        }
+        self.finish_undo(list, index, FocusItem::Archived(list, id));
     }
 
     /// Reinserts a deleted checklist item at its original position.
@@ -520,6 +561,69 @@ impl MinimalistApp {
             self.details.expanded_history.remove(&(list, task));
             self.save_list_index(index);
             self.keyboard.pending = Some(FocusItem::Task(list, task).id());
+        }
+    }
+
+    /// Permanently removes one History entry, retaining it with its time for Undo.
+    ///
+    /// # Arguments
+    ///
+    /// - `list` - Parent list identity.
+    /// - `task` - Archived task identity.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an internally resolved list index is invalid.
+    pub(in crate::app) fn delete_archived(&mut self, list: Uuid, task: Uuid) {
+        let neighbors = self.focus_neighbors();
+        if let Some(index) = self.list_index(list)
+            && let Some(position) = self.lists[index]
+                .data
+                .archive
+                .iter()
+                .position(|item| item.task.id == task)
+        {
+            let item = self.lists[index].data.archive.remove(position);
+            self.details.undo = Some(UndoItem::Archived {
+                list,
+                position,
+                item,
+            });
+            self.details.expanded_history.remove(&(list, task));
+            if self.lists[index].data.archive.is_empty() {
+                self.history_open = false;
+            }
+            self.save_list_index(index);
+            self.repair_focus(&neighbors);
+        }
+    }
+
+    /// Empties a list's History without touching its active tasks.
+    ///
+    /// The list's saved file is first kept as a local snapshot, whatever the age of
+    /// the newest one; if that fails, History is kept and the status says so.
+    ///
+    /// # Arguments
+    ///
+    /// - `list` - List whose archived tasks are removed.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an internally resolved list index is invalid.
+    pub(in crate::app) fn clear_history(&mut self, list: Uuid) {
+        if let Some(index) = self.list_index(list) {
+            if let Err(error) = storage::snapshot_list_now(&self.workspace, &self.lists[index]) {
+                self.status = Some(format!(
+                    "History was kept because no backup could be written: {error}"
+                ));
+                return;
+            }
+            self.lists[index].data.archive.clear();
+            self.details
+                .expanded_history
+                .retain(|(parent, _)| *parent != list);
+            self.history_open = false;
+            self.save_list_index(index);
         }
     }
 

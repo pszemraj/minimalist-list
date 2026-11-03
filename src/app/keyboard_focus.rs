@@ -33,6 +33,19 @@ impl MinimalistApp {
         }
     }
 
+    /// Reports whether keyboard focus currently rests on a control of the logical item.
+    ///
+    /// # Arguments
+    ///
+    /// - `item` - Logical item whose controls are checked.
+    ///
+    /// # Returns
+    ///
+    /// Whether the focused control is tracked as belonging to the item.
+    pub(in crate::app) fn has_focus_within(&self, item: FocusItem) -> bool {
+        self.keyboard.anchor.is_some_and(|(_, owner)| owner == item)
+    }
+
     /// Resolves the task that owns the focused control, including its editors and child controls.
     ///
     /// # Arguments

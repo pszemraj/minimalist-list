@@ -111,6 +111,7 @@ pub struct MinimalistApp {
     rename_input: String,
     rename_baseline: String,
     delete_armed: bool,
+    clear_history_armed: bool,
     next_scan: Instant,
     last_pin_state: Option<bool>,
     last_decorations_state: Option<bool>,
@@ -278,6 +279,7 @@ impl MinimalistApp {
             rename_input: String::new(),
             rename_baseline: String::new(),
             delete_armed: false,
+            clear_history_armed: false,
             next_scan: Instant::now() + SCAN_INTERVAL,
             last_pin_state: None,
             last_decorations_state: None,
@@ -528,6 +530,7 @@ impl MinimalistApp {
         self.workspace_input = self.settings.workspace_path.clone();
         self.shortcut_inputs = crate::hotkey::input_texts(&self.settings);
         self.delete_armed = false;
+        self.clear_history_armed = false;
         self.begin_transition(1.0);
         self.screen = Screen::Settings;
     }
