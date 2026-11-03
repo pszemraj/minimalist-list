@@ -939,3 +939,6 @@ mod navigation;
 
 #[path = "keyboard_input_regressions.rs"]
 mod input_regressions;
+
+#[path = "keyboard_move_tests.rs"]
+mod move_dialog;

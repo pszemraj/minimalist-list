@@ -1,12 +1,15 @@
 //! Checklist edits, task recovery, moving, and archival mutations.
 
-use super::{DeletedItem, MinimalistApp, SubtaskEdit};
+use super::{MinimalistApp, MoveDialog, SubtaskEdit, UndoItem};
 use crate::{
-    app::{CLEAR_ANIMATION_SECONDS, DELETE_ANIMATION_SECONDS, keyboard::FocusItem},
-    model::{ArchivedTask, Subtask},
+    app::{
+        CLEAR_ANIMATION_SECONDS, DELETE_ANIMATION_SECONDS, Screen,
+        keyboard::{FocusItem, take_key},
+    },
+    model::{ArchivedTask, Subtask, Task},
     storage::StoredList,
 };
-use eframe::egui::{self, Id};
+use eframe::egui::{self, ComboBox, Id, Key, Modifiers};
 use std::time::Instant;
 use uuid::Uuid;
 
@@ -165,7 +168,7 @@ impl MinimalistApp {
             && let Some(position) = parent.subtasks.iter().position(|item| item.id == child)
         {
             let subtask = parent.subtasks.remove(position);
-            self.details.deleted = Some(DeletedItem::Subtask {
+            self.details.undo = Some(UndoItem::Subtask {
                 list,
                 task,
                 position,
@@ -258,7 +261,7 @@ impl MinimalistApp {
             }
             let manual_position = self.manual_task_position(list, task).unwrap_or(position);
             let task = self.lists[index].data.tasks.remove(position);
-            self.details.deleted = Some(DeletedItem::Task {
+            self.details.undo = Some(UndoItem::Task {
                 list,
                 position: manual_position,
                 task,
@@ -268,116 +271,207 @@ impl MinimalistApp {
         }
     }
 
-    /// Restores the latest deletion at its original position, preserving all content.
+    /// Reverses the latest deletion or move in one step, preserving all content.
+    pub(in crate::app) fn undo_last(&mut self) {
+        match self.details.undo.take() {
+            Some(UndoItem::Task {
+                list,
+                position,
+                task,
+            }) => self.undo_task_deletion(list, position, task),
+            Some(UndoItem::Subtask {
+                list,
+                task,
+                position,
+                subtask,
+            }) => self.undo_subtask_deletion(list, task, position, subtask),
+            Some(UndoItem::Moved {
+                source,
+                position,
+                task,
+                destination,
+            }) => self.undo_move(source, position, task, destination),
+            None => {}
+        }
+    }
+
+    /// Reinserts a deleted task at its original Manual position.
     ///
     /// # Panics
     ///
     /// Panics if an internally resolved list index is invalid.
-    pub(in crate::app) fn undo_delete(&mut self) {
-        let Some(deleted) = self.details.deleted.take() else {
-            return;
-        };
-        let list = match &deleted {
-            DeletedItem::Task { list, .. } | DeletedItem::Subtask { list, .. } => *list,
-        };
+    fn undo_task_deletion(&mut self, list: Uuid, position: usize, task: Task) {
         let Some(index) = self.list_index(list) else {
-            self.details.deleted = Some(deleted);
+            self.details.undo = Some(UndoItem::Task {
+                list,
+                position,
+                task,
+            });
             return;
         };
-        let mut restored_task_position = None;
-        let focus = match deleted {
-            DeletedItem::Task { position, task, .. } => {
-                let focus = FocusItem::Task(list, task.id);
-                if self.lists.iter().any(|item| {
-                    item.data
-                        .tasks
-                        .iter()
-                        .any(|existing| existing.id == task.id)
-                        || item
-                            .data
-                            .archive
-                            .iter()
-                            .any(|existing| existing.task.id == task.id)
-                }) {
-                    // Keep Undo available so a stale or different duplicate can be resolved.
-                    self.details.deleted = Some(DeletedItem::Task {
-                        list,
-                        position,
-                        task,
-                    });
-                    self.status = Some("The deleted task already exists in the workspace.".into());
-                    return;
-                }
-                let position = position.min(self.lists[index].data.tasks.len());
-                restored_task_position = Some((task.id, position));
-                self.lists[index].data.tasks.insert(position, task);
-                focus
-            }
-            DeletedItem::Subtask {
-                task,
-                position,
-                subtask,
-                ..
-            } => {
-                let archived = self.lists[index]
+        if self.lists.iter().any(|item| {
+            item.data
+                .tasks
+                .iter()
+                .any(|existing| existing.id == task.id)
+                || item
                     .data
                     .archive
                     .iter()
-                    .any(|item| item.task.id == task);
-                let data = &mut self.lists[index].data;
-                let Some(parent) = data
-                    .tasks
-                    .iter_mut()
-                    .chain(data.archive.iter_mut().map(|item| &mut item.task))
-                    .find(|item| item.id == task)
-                else {
-                    self.details.deleted = Some(DeletedItem::Subtask {
-                        list,
-                        task,
-                        position,
-                        subtask,
-                    });
-                    self.status =
-                        Some("Restore the parent task before restoring this subtask.".into());
-                    return;
-                };
-                let focus = if archived {
-                    FocusItem::Archived(list, task)
-                } else {
-                    FocusItem::Subtask(list, task, subtask.id)
-                };
-                if parent.subtasks.iter().any(|item| item.id == subtask.id) {
-                    // Keep Undo available so a stale or different duplicate can be resolved.
-                    self.details.deleted = Some(DeletedItem::Subtask {
-                        list,
-                        task,
-                        position,
-                        subtask,
-                    });
-                    self.status = Some("The deleted subtask already exists in its task.".into());
-                    return;
-                }
-                parent
-                    .subtasks
-                    .insert(position.min(parent.subtasks.len()), subtask);
-                if matches!(self.screen, crate::app::Screen::List(active) if active == list) {
-                    if archived {
-                        self.history_open = true;
-                        self.expand_archived(list, task);
-                    } else {
-                        self.switch_subtask_panel(Some((list, task)));
-                    }
-                }
-                focus
-            }
-        };
-        if let Some((task, position)) = restored_task_position {
-            self.restore_manual_task_position(list, task, position);
+                    .any(|existing| existing.task.id == task.id)
+        }) {
+            // Keep Undo available so a stale or different duplicate can be resolved.
+            self.details.undo = Some(UndoItem::Task {
+                list,
+                position,
+                task,
+            });
+            self.status = Some("The deleted task already exists in the workspace.".into());
+            return;
         }
+        let id = task.id;
+        let position = position.min(self.lists[index].data.tasks.len());
+        self.lists[index].data.tasks.insert(position, task);
+        self.restore_manual_task_position(list, id, position);
+        self.finish_undo(list, index, FocusItem::Task(list, id));
+    }
+
+    /// Reinserts a deleted checklist item at its original position.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an internally resolved list index is invalid.
+    fn undo_subtask_deletion(&mut self, list: Uuid, task: Uuid, position: usize, subtask: Subtask) {
+        let Some(index) = self.list_index(list) else {
+            self.details.undo = Some(UndoItem::Subtask {
+                list,
+                task,
+                position,
+                subtask,
+            });
+            return;
+        };
+        let archived = self.lists[index]
+            .data
+            .archive
+            .iter()
+            .any(|item| item.task.id == task);
+        let data = &mut self.lists[index].data;
+        let Some(parent) = data
+            .tasks
+            .iter_mut()
+            .chain(data.archive.iter_mut().map(|item| &mut item.task))
+            .find(|item| item.id == task)
+        else {
+            self.details.undo = Some(UndoItem::Subtask {
+                list,
+                task,
+                position,
+                subtask,
+            });
+            self.status = Some("Restore the parent task before restoring this subtask.".into());
+            return;
+        };
+        let focus = if archived {
+            FocusItem::Archived(list, task)
+        } else {
+            FocusItem::Subtask(list, task, subtask.id)
+        };
+        if parent.subtasks.iter().any(|item| item.id == subtask.id) {
+            // Keep Undo available so a stale or different duplicate can be resolved.
+            self.details.undo = Some(UndoItem::Subtask {
+                list,
+                task,
+                position,
+                subtask,
+            });
+            self.status = Some("The deleted subtask already exists in its task.".into());
+            return;
+        }
+        parent
+            .subtasks
+            .insert(position.min(parent.subtasks.len()), subtask);
+        if matches!(self.screen, Screen::List(active) if active == list) {
+            if archived {
+                self.history_open = true;
+                self.expand_archived(list, task);
+            } else {
+                self.switch_subtask_panel(Some((list, task)));
+            }
+        }
+        self.finish_undo(list, index, focus);
+    }
+
+    /// Saves a restored deletion and focuses it when its list is open.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the caller supplies an invalid loaded-list index.
+    fn finish_undo(&mut self, list: Uuid, index: usize, focus: FocusItem) {
         self.save_list_index(index);
         self.apply_task_sorts();
-        if matches!(self.screen, crate::app::Screen::List(active) if active == list) {
+        if matches!(self.screen, Screen::List(active) if active == list) {
             self.keyboard.pending = Some(focus.id());
+        }
+    }
+
+    /// Returns a moved task to its original Manual position in the source list.
+    ///
+    /// Undo stays available, with a status message, when either list or the task is gone.
+    ///
+    /// # Arguments
+    ///
+    /// - `source` - List the task came from.
+    /// - `position` - Its original Manual position there.
+    /// - `task` - Task identity.
+    /// - `destination` - List the task was moved to.
+    fn undo_move(&mut self, source: Uuid, position: usize, task: Uuid, destination: Uuid) {
+        let undo = UndoItem::Moved {
+            source,
+            position,
+            task,
+            destination,
+        };
+        let (Some(from), Some(to)) = (self.list_index(destination), self.list_index(source)) else {
+            self.details.undo = Some(undo);
+            self.status = Some("Undo needs both lists from the move to still exist.".into());
+            return;
+        };
+        if !self.lists[from]
+            .data
+            .tasks
+            .iter()
+            .any(|item| item.id == task)
+        {
+            self.details.undo = Some(undo);
+            self.status = Some("The moved task is no longer in its new list.".into());
+            return;
+        }
+        if self.lists[to].data.tasks.iter().any(|item| item.id == task)
+            || self.lists[to]
+                .data
+                .archive
+                .iter()
+                .any(|item| item.task.id == task)
+        {
+            self.details.undo = Some(undo);
+            self.status = Some("The original list already contains this task.".into());
+            return;
+        }
+        let item = FocusItem::Task(destination, task);
+        let neighbors = self.focus_siblings(item);
+        if let Err(error) = self.transfer_task(from, to, task, position) {
+            self.details.undo = Some(undo);
+            self.status = Some(format!(
+                "Undo did not finish; the task remains in its new list. {error}"
+            ));
+            return;
+        }
+        self.move_subtask_draft(destination, source, task);
+        if matches!(self.screen, Screen::List(active) if active == source) {
+            self.keyboard.pending = Some(FocusItem::Task(source, task).id());
+        } else {
+            self.repair_focus_from(item, &neighbors);
         }
     }
 
@@ -479,7 +573,10 @@ impl MinimalistApp {
         }
     }
 
-    /// Opens the task's destination picker from its existing action menu.
+    /// Opens the task's destination picker from its action menu or keyboard shortcut.
+    ///
+    /// The picker starts on the last destination used this session when that list
+    /// still exists, and otherwise on the first other list.
     ///
     /// # Arguments
     ///
@@ -489,13 +586,24 @@ impl MinimalistApp {
         self.finish_inline_edit();
         self.drag = None;
         self.revealed = None;
-        if let Some(destination) = self
-            .lists
-            .iter()
-            .find(|item| item.key != list)
-            .map(|item| item.key)
-        {
-            self.details.move_task = Some((list, task, destination));
+        self.keyboard.pending = None;
+        let remembered = self
+            .details
+            .last_move_destination
+            .filter(|id| *id != list && self.list_index(*id).is_some());
+        if let Some(destination) = remembered.or_else(|| {
+            self.lists
+                .iter()
+                .find(|item| item.key != list)
+                .map(|item| item.key)
+        }) {
+            self.details.move_task = Some(MoveDialog {
+                source: list,
+                task,
+                destination,
+                picker: None,
+                request_focus: true,
+            });
         } else {
             self.status = Some("Create another list before moving a task.".into());
         }
@@ -531,7 +639,9 @@ impl MinimalistApp {
             );
             return false;
         }
-        let neighbors = self.focus_neighbors();
+        let manual_position = self.manual_task_position(source, task).unwrap_or(0);
+        let moved = FocusItem::Task(source, task);
+        let neighbors = self.focus_siblings(moved);
         if let Err(error) = self.transfer_task(from, to, task, 0) {
             self.status = Some(format!(
                 "Move did not finish; the task remains in its original list. {error}"
@@ -539,16 +649,14 @@ impl MinimalistApp {
             return false;
         }
         self.move_subtask_draft(source, destination, task);
-        if let Some(DeletedItem::Subtask {
-            list, task: parent, ..
-        }) = &mut self.details.deleted
-            && *list == source
-            && *parent == task
-        {
-            *list = destination;
-        }
-        self.repair_focus(&neighbors);
-        self.acknowledge(format!("Moved to {}", self.lists[to].data.title));
+        self.details.undo = Some(UndoItem::Moved {
+            source,
+            position: manual_position,
+            task,
+            destination,
+        });
+        self.details.last_move_destination = Some(destination);
+        self.repair_focus_from(moved, &neighbors);
         true
     }
 
@@ -639,35 +747,44 @@ impl MinimalistApp {
         Ok(())
     }
 
-    /// Renders one-step deletion recovery and the destination picker.
+    /// Renders one-step Undo for deletions and moves, and the destination picker.
     ///
     /// # Panics
     ///
     /// Panics if an internally resolved list index is invalid.
     pub(in crate::app) fn task_operations_ui(&mut self, ctx: &egui::Context) {
-        if self.details.deleted.is_some() {
+        let toast = match &self.details.undo {
+            Some(UndoItem::Moved { destination, .. }) => Some(
+                self.list_index(*destination)
+                    .map_or("Moved".to_owned(), |index| {
+                        format!("Moved to {}", clipped(&self.lists[index].data.title, 40))
+                    }),
+            ),
+            Some(_) => Some("Deleted".to_owned()),
+            None => None,
+        };
+        if let Some(message) = toast {
             egui::Area::new(Id::new("delete-undo"))
                 .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -12.0))
                 .order(egui::Order::Foreground)
                 .show(ctx, |ui| {
                     egui::Frame::popup(ui.style()).show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            ui.label("Deleted");
+                            ui.label(message);
                             if ui.button("Undo").clicked() {
-                                self.undo_delete();
+                                self.undo_last();
                             }
                             if ui.button("Dismiss").clicked() {
-                                self.details.deleted = None;
+                                self.details.undo = None;
                             }
                         });
                     });
                 });
         }
-        let Some((source, task, mut destination)) = self.details.move_task else {
+        let Some(mut dialog) = self.details.move_task.take() else {
             return;
         };
-        let mut move_now = false;
-        let mut cancel = false;
+        let (source, task) = (dialog.source, dialog.task);
         let title = self
             .list_index(source)
             .and_then(|index| {
@@ -679,39 +796,89 @@ impl MinimalistApp {
             })
             .map(|item| item.text.clone());
         let Some(title) = title else {
-            self.details.move_task = None;
             return;
         };
+        let mut move_now = false;
+        let mut cancel = false;
+        // Arrows and Enter act on the focused picker only while its list is closed.
+        if dialog.picker.is_some_and(|id| {
+            ctx.memory(|memory| memory.has_focus(id)) && !ComboBox::is_open(ctx, id)
+        }) {
+            let others: Vec<_> = self
+                .lists
+                .iter()
+                .map(|list| list.key)
+                .filter(|key| *key != source)
+                .collect();
+            let current = others.iter().position(|key| *key == dialog.destination);
+            let step = if take_key(ctx, Key::ArrowDown, Modifiers::NONE) {
+                1
+            } else if take_key(ctx, Key::ArrowUp, Modifiers::NONE) {
+                others.len().saturating_sub(1)
+            } else {
+                0
+            };
+            if step > 0 && !others.is_empty() {
+                dialog.destination =
+                    others[current.map_or(0, |index| (index + step) % others.len())];
+            }
+            move_now = take_key(ctx, Key::Enter, Modifiers::NONE);
+        }
+        let mut picker = None;
         let modal = egui::Modal::new(Id::new("move-task-modal")).show(ctx, |ui| {
             ui.set_max_width((ctx.content_rect().width() - 56.0).clamp(100.0, 360.0));
             ui.heading("Move to list");
             ui.add(egui::Label::new(title).wrap());
-            egui::ComboBox::from_id_salt("move-destination")
+            let combo = ComboBox::from_id_salt("move-destination")
                 .selected_text(
-                    self.list_index(destination)
+                    self.list_index(dialog.destination)
                         .map(|index| self.lists[index].data.title.as_str())
                         .unwrap_or("Choose list"),
                 )
                 .show_ui(ui, |ui| {
                     for list in &self.lists {
-                        if list.key != source {
-                            ui.selectable_value(&mut destination, list.key, &list.data.title);
+                        if list.key != source
+                            && ui
+                                .selectable_value(
+                                    &mut dialog.destination,
+                                    list.key,
+                                    &list.data.title,
+                                )
+                                .clicked()
+                        {
+                            // The choosing key must not also activate the picker or Move.
+                            take_key(ctx, Key::Enter, Modifiers::NONE);
+                            take_key(ctx, Key::Space, Modifiers::NONE);
+                            dialog.request_focus = true;
+                            ui.close();
                         }
                     }
                 });
+            picker = Some(combo.response.id);
+            if dialog.request_focus {
+                combo.response.request_focus();
+                dialog.request_focus = false;
+            }
             ui.horizontal(|ui| {
-                move_now = ui.button("Move").clicked();
+                move_now |= ui.button("Move").clicked();
                 cancel = ui.button("Cancel").clicked();
             });
         });
-        self.details.move_task = Some((source, task, destination));
-        if cancel
-            || modal.should_close()
-            || (move_now && self.move_task_to_list(source, task, destination))
-        {
-            self.details.move_task = None;
+        dialog.picker = picker;
+        if cancel || modal.should_close() {
+            self.keyboard.pending = Some(FocusItem::Task(source, task).id());
+        } else if !move_now || !self.move_task_to_list(source, task, dialog.destination) {
+            self.details.move_task = Some(dialog);
         }
     }
+}
+
+/// Shortens a list title for the Undo notice.
+fn clipped(text: &str, limit: usize) -> String {
+    if text.chars().count() <= limit {
+        return text.to_owned();
+    }
+    text.chars().take(limit - 1).chain(['…']).collect()
 }
 
 #[cfg(test)]

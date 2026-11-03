@@ -62,6 +62,14 @@ pub(super) const CLEAR_COMPLETED: KeyboardShortcut = KeyboardShortcut::new(
     },
     Key::Backspace,
 );
+/// Opens the destination dialog for the focused task.
+pub(super) const MOVE_TO_LIST: KeyboardShortcut = KeyboardShortcut::new(
+    Modifiers {
+        shift: true,
+        ..Modifiers::COMMAND
+    },
+    Key::M,
+);
 /// Deletes a focused task using forward Delete.
 pub(super) const DELETE_TASK: KeyboardShortcut =
     KeyboardShortcut::new(Modifiers::NONE, Key::Delete);
@@ -240,8 +248,9 @@ pub(super) fn shortcut_groups() -> Vec<ShortcutGroup> {
                     "Move the task up / down",
                     pair(MOVE_TASK_UP, MOVE_TASK_DOWN),
                 ),
+                ("Move to another list", shortcut(MOVE_TO_LIST)),
                 (
-                    "Undo deletion",
+                    "Undo deletion or move",
                     shortcut(KeyboardShortcut::new(Modifiers::COMMAND, Key::Z)),
                 ),
                 (
@@ -368,7 +377,7 @@ impl MinimalistApp {
             && self.quick_capture.is_none()
             && self.find.is_none()
             && self.details.move_task.is_none())
-        .then(|| self.task_copy_target(ctx))
+        .then(|| self.focused_task(ctx))
         .flatten();
         if take_complete_task_copy(ctx, copy_target.is_some())
             && let Some((list, task, archived)) = copy_target
@@ -424,7 +433,13 @@ impl MinimalistApp {
             return;
         }
         if !ctx.text_edit_focused() && take_key(ctx, Key::Z, Modifiers::COMMAND) {
-            self.undo_delete();
+            self.undo_last();
+            return;
+        }
+        if let Some((list, task, false)) = self.focused_task(ctx)
+            && take_shortcut(ctx, MOVE_TO_LIST)
+        {
+            self.begin_move_task(list, task);
             return;
         }
         // Like '/', a logical comma may require Shift on the user's layout.

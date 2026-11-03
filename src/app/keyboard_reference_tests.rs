@@ -432,9 +432,10 @@ fn reference_uses_shared_bindings_and_native_key_names() {
             KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::C),
         ),
         (
-            "Undo deletion",
+            "Undo deletion or move",
             KeyboardShortcut::new(Modifiers::COMMAND, Key::Z),
         ),
+        ("Move to another list", MOVE_TO_LIST),
     ] {
         let (_, label) = groups
             .iter()

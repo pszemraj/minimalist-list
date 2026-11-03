@@ -189,7 +189,7 @@ fn deleting_and_undoing_in_sorted_view_restores_original_manual_position() {
     app.sort_tasks(list, TaskSort::Title);
     app.remove_task(list, manual[0]);
     assert!(!disk_ids(&app).contains(&manual[0]));
-    app.undo_delete();
+    app.undo_last();
     app.sort_tasks(list, TaskSort::Manual);
     assert_eq!(ids(&app), manual);
     assert_eq!(

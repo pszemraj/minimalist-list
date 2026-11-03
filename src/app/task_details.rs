@@ -23,9 +23,10 @@ mod controls;
 /// Session-only editors, recovery content, and expanded History entries.
 pub(super) struct TaskDetailsState {
     pub(super) editor: Option<SubtaskEdit>,
-    deleted: Option<DeletedItem>,
+    undo: Option<UndoItem>,
     expanded_history: HashSet<(Uuid, Uuid)>,
-    pub(super) move_task: Option<(Uuid, Uuid, Uuid)>,
+    pub(super) move_task: Option<MoveDialog>,
+    last_move_destination: Option<Uuid>,
     pub(super) menu_task: Option<(Uuid, Uuid, bool)>,
     pub(super) menu_popup: Option<Id>,
     collapsed_previews: HashSet<(Uuid, Uuid)>,
@@ -40,7 +41,17 @@ pub(super) struct SubtaskEdit {
     request_focus: bool,
 }
 
-enum DeletedItem {
+/// The destination choice for one task while its Move dialog is open.
+pub(super) struct MoveDialog {
+    pub(super) source: Uuid,
+    pub(super) task: Uuid,
+    pub(super) destination: Uuid,
+    picker: Option<Id>,
+    request_focus: bool,
+}
+
+/// The latest deletion or move, retained for one-step Undo.
+enum UndoItem {
     Task {
         list: Uuid,
         position: usize,
@@ -51,6 +62,13 @@ enum DeletedItem {
         task: Uuid,
         position: usize,
         subtask: crate::model::Subtask,
+    },
+    Moved {
+        source: Uuid,
+        /// The task's original Manual position in `source`.
+        position: usize,
+        task: Uuid,
+        destination: Uuid,
     },
 }
 

@@ -33,7 +33,7 @@ impl MinimalistApp {
         }
     }
 
-    /// Resolves complete-task copying from every focused task control and editor.
+    /// Resolves the task that owns the focused control, including its editors and child controls.
     ///
     /// # Arguments
     ///
@@ -42,10 +42,7 @@ impl MinimalistApp {
     /// # Returns
     ///
     /// The owning list, task, and archived state, when focus belongs to a task.
-    pub(in crate::app) fn task_copy_target(
-        &self,
-        ctx: &egui::Context,
-    ) -> Option<(Uuid, Uuid, bool)> {
+    pub(in crate::app) fn focused_task(&self, ctx: &egui::Context) -> Option<(Uuid, Uuid, bool)> {
         if let Some(editor) = &self.task_context {
             return Some((editor.list, editor.task, editor.archived));
         }
@@ -92,14 +89,27 @@ impl MinimalistApp {
     /// # Returns
     ///
     /// The focused item's siblings in their current display order.
+    pub(in crate::app) fn focus_neighbors(&self) -> Vec<FocusItem> {
+        self.keyboard
+            .anchor
+            .map(|(_, item)| self.focus_siblings(item))
+            .unwrap_or_default()
+    }
+
+    /// Lists an item and its siblings in their current display order.
+    ///
+    /// # Arguments
+    ///
+    /// - `item` - Logical item whose siblings are wanted.
+    ///
+    /// # Returns
+    ///
+    /// The siblings, or nothing when the item's parent no longer exists.
     ///
     /// # Panics
     ///
     /// Panics if an internally resolved list index becomes invalid.
-    pub(in crate::app) fn focus_neighbors(&self) -> Vec<FocusItem> {
-        let Some((_, item)) = self.keyboard.anchor else {
-            return Vec::new();
-        };
+    pub(in crate::app) fn focus_siblings(&self, item: FocusItem) -> Vec<FocusItem> {
         match item {
             FocusItem::Card(_) => self
                 .lists
@@ -147,10 +157,23 @@ impl MinimalistApp {
     ///
     /// Panics if a resolved sibling position is outside the previous sibling list.
     pub(in crate::app) fn repair_focus(&mut self, previous: &[FocusItem]) {
-        let Some((_, item)) = self.keyboard.anchor else {
-            return;
-        };
-        let current = self.focus_neighbors();
+        if let Some((_, item)) = self.keyboard.anchor {
+            self.repair_focus_from(item, previous);
+        }
+    }
+
+    /// Repairs focus for an item that left its siblings, even after a modal cleared the anchor.
+    ///
+    /// # Arguments
+    ///
+    /// - `item` - Item that held focus before the operation.
+    /// - `previous` - Its siblings captured before the operation.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a resolved sibling position is outside the previous sibling list.
+    pub(in crate::app) fn repair_focus_from(&mut self, item: FocusItem, previous: &[FocusItem]) {
+        let current = self.focus_siblings(item);
         if current.contains(&item) {
             return;
         }
