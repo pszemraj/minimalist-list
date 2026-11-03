@@ -339,6 +339,7 @@ impl MinimalistApp {
     }
 
     fn quick_capture_ui(&mut self, ctx: &egui::Context, palette: Palette) {
+        let batch_saved = self.take_capture_paste(ctx);
         let Some(mut state) = self.quick_capture.take() else {
             return;
         };
@@ -497,6 +498,11 @@ impl MinimalistApp {
                 });
         });
 
+        if batch_saved && !state.has_input() {
+            self.restore_overlay_focus();
+            ctx.request_repaint();
+            return;
+        }
         if submit {
             state.request_focus = true;
             if state.has_input()

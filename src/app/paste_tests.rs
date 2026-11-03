@@ -297,6 +297,27 @@ fn quick_add_paste_keeps_a_nonempty_draft_open() {
 }
 
 #[test]
+fn quick_add_paste_preserves_text_typed_in_the_same_frame() {
+    let mut f = fixture(&[]);
+    open_quick_add(&mut f, "");
+    frame(
+        &mut f,
+        vec![
+            Event::Text("Unfinished".into()),
+            Event::Paste("One\nTwo".into()),
+        ],
+    );
+    idle(&mut f);
+
+    assert_eq!(titles(&saved(&f).tasks), ["One", "Two"]);
+    assert_eq!(f.app.quick_capture.as_ref().unwrap().text, "Unfinished");
+    assert_eq!(focused(&f), Some(Id::new("quick-capture-text")));
+    frame(&mut f, chord(Key::Enter, Modifiers::NONE));
+    assert_eq!(titles(&saved(&f).tasks), ["Unfinished", "One", "Two"]);
+    cleanup(f);
+}
+
+#[test]
 fn quick_add_paste_with_a_conflicted_destination_stays_in_the_draft() {
     let mut f = fixture(&[]);
     open_quick_add(&mut f, "");

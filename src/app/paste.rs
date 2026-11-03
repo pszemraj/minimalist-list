@@ -11,8 +11,6 @@ enum PasteTarget {
     Tasks(Uuid),
     /// Checklist items for one task of the open list.
     Subtasks(Uuid, Uuid),
-    /// Tasks for Quick add's available destination.
-    Capture(Uuid),
 }
 
 /// Removes one leading list marker when whitespace or the line's end follows it.
@@ -74,30 +72,34 @@ pub(super) fn new_tasks(texts: &[String]) -> Vec<Task> {
     tasks
 }
 
+fn take_pasted_batch(ctx: &egui::Context) -> Vec<String> {
+    ctx.input_mut(|input| {
+        let mut items = Vec::new();
+        input.events.retain(|event| {
+            let Event::Paste(text) = event else {
+                return true;
+            };
+            let lines = pasted_items(text);
+            if lines.len() < 2 {
+                return true;
+            }
+            items.extend(lines);
+            false
+        });
+        items
+    })
+}
+
 impl MinimalistApp {
-    /// Returns the entry field that would receive a paste in this frame.
+    /// Returns the list entry field that would receive a paste in this frame.
     fn paste_target(&self, ctx: &egui::Context) -> Option<PasteTarget> {
         let focused = ctx.memory(|memory| memory.focused())?;
-        if self.shortcuts.is_some() {
-            return None;
-        }
-        if let Some(capture) = &self.quick_capture {
-            // Mirror Quick add's submit checks: a conflicted or missing
-            // destination leaves the paste to the text field.
-            return capture
-                .selected_list_id
-                .filter(|&list| {
-                    focused == Id::new("quick-capture-text")
-                        && capture.pending_batch.is_empty()
-                        && self.list_index(list).is_some()
-                        && !self.has_save_conflict(list)
-                })
-                .map(PasteTarget::Capture);
-        }
         let Screen::List(list) = self.screen else {
             return None;
         };
-        if self.find.is_some()
+        if self.shortcuts.is_some()
+            || self.quick_capture.is_some()
+            || self.find.is_some()
             || self.details.move_task.is_some()
             || self.task_context.is_some()
             || self.persistence.workspace_failure.is_some()
@@ -114,7 +116,7 @@ impl MinimalistApp {
             .map(|(list, task)| PasteTarget::Subtasks(list, task))
     }
 
-    /// Creates one item per line for a multi-line paste into a focused entry field.
+    /// Creates one item per line for a multi-line paste into a focused list entry.
     ///
     /// Only pastes of at least two nonempty lines are taken from this frame's input;
     /// anything else stays for the text field's ordinary paste. The field's draft text
@@ -135,21 +137,7 @@ impl MinimalistApp {
         let Some(target) = self.paste_target(ctx) else {
             return;
         };
-        let items = ctx.input_mut(|input| {
-            let mut items = Vec::new();
-            input.events.retain(|event| {
-                let Event::Paste(text) = event else {
-                    return true;
-                };
-                let lines = pasted_items(text);
-                if lines.len() < 2 {
-                    return true;
-                }
-                items.extend(lines);
-                false
-            });
-            items
-        });
+        let items = take_pasted_batch(ctx);
         if items.is_empty() {
             return;
         }
@@ -164,25 +152,42 @@ impl MinimalistApp {
                     self.acknowledge(format!("Added {} subtasks", items.len()));
                 }
             }
-            PasteTarget::Capture(list) => {
-                let Some(draft) = &self.quick_capture else {
-                    return;
-                };
-                let blank = draft.text.trim().is_empty();
-                let failure = draft.failure.clone();
-                match self.save_capture(list, &items, failure.as_deref()) {
-                    Ok(()) if blank => {
-                        self.quick_capture = None;
-                        self.restore_overlay_focus();
-                    }
-                    Ok(()) => {}
-                    Err(error) => {
-                        if let Some(draft) = &mut self.quick_capture {
-                            draft.pending_batch = items;
-                            draft.failure = Some(error);
-                        }
-                    }
+        }
+    }
+
+    /// Saves a multiline Quick add paste, leaving other input for its text widget.
+    ///
+    /// # Arguments
+    /// - `ctx` - Context containing this frame's input events and focus.
+    ///
+    /// # Returns
+    /// Whether a pasted batch was saved. The overlay checks whether to close after editing.
+    pub(super) fn take_capture_paste(&mut self, ctx: &egui::Context) -> bool {
+        let Some(capture) = &self.quick_capture else {
+            return false;
+        };
+        // An unavailable destination or pending batch leaves the paste to the text widget.
+        let Some(list) = capture.selected_list_id.filter(|&list| {
+            ctx.memory(|memory| memory.has_focus(Id::new("quick-capture-text")))
+                && capture.pending_batch.is_empty()
+                && self.list_index(list).is_some()
+                && !self.has_save_conflict(list)
+        }) else {
+            return false;
+        };
+        let items = take_pasted_batch(ctx);
+        if items.is_empty() {
+            return false;
+        }
+        let failure = capture.failure.clone();
+        match self.save_capture(list, &items, failure.as_deref()) {
+            Ok(()) => true,
+            Err(error) => {
+                if let Some(capture) = &mut self.quick_capture {
+                    capture.pending_batch = items;
+                    capture.failure = Some(error);
                 }
+                false
             }
         }
     }
