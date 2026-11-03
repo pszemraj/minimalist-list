@@ -1,5 +1,6 @@
 //! Overview pointer, creation, and layout journeys.
 use super::*;
+use crate::app::tests::label_center;
 
 fn grid_frame(
     ctx: &egui::Context,
@@ -557,19 +558,7 @@ fn frame(
 
 fn click_label(ctx: &egui::Context, app: &mut MinimalistApp, label: &str) {
     let output = frame(ctx, app, Vec::new());
-    let point = output
-        .shapes
-        .iter()
-        .find_map(|shape| {
-            if let egui::epaint::Shape::Text(text) = &shape.shape
-                && text.galley.text() == label
-            {
-                Some(text.pos + text.galley.size() * 0.5)
-            } else {
-                None
-            }
-        })
-        .unwrap_or_else(|| panic!("Missing button {label}"));
+    let point = label_center(&output, label);
     for pressed in [true, false] {
         frame(
             ctx,

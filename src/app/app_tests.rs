@@ -60,6 +60,30 @@ pub(super) fn run_app_frame(
     })
 }
 
+/// Finds the center of the first rendered text shape with the given label.
+///
+/// # Arguments
+/// - `output` - Frame containing the rendered text shapes.
+/// - `label` - Exact text to locate.
+///
+/// # Returns
+/// The label's center in logical points.
+///
+/// # Panics
+/// Panics when the frame does not contain the label.
+pub(super) fn label_center(output: &egui::FullOutput, label: &str) -> egui::Pos2 {
+    output
+        .shapes
+        .iter()
+        .find_map(|shape| match &shape.shape {
+            egui::epaint::Shape::Text(text) if text.galley.text() == label => {
+                Some(text.pos + text.galley.size() * 0.5)
+            }
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no {label} control is visible"))
+}
+
 /// Creates press and release events for a key with the same modifiers.
 ///
 /// # Arguments

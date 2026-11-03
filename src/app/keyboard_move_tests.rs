@@ -1,6 +1,7 @@
 //! Keyboard Move and Undo journeys through real widgets and saved list files.
 
 use super::*;
+use crate::app::tests::label_center;
 use crate::model::{Subtask, TaskSort, TodoList};
 
 struct Fixture {
@@ -68,16 +69,7 @@ fn choose_with_keys(f: &mut Fixture, downs: usize) {
 
 fn click_label(ctx: &egui::Context, app: &mut MinimalistApp, label: &str) {
     let output = frame(ctx, app, Vec::new(), 430.0);
-    let position = output
-        .shapes
-        .iter()
-        .find_map(|shape| match &shape.shape {
-            egui::epaint::Shape::Text(text) if text.galley.text() == label => {
-                Some(text.pos + text.galley.size() / 2.0)
-            }
-            _ => None,
-        })
-        .unwrap_or_else(|| panic!("no {label} control is visible"));
+    let position = label_center(&output, label);
     let button = |pressed| Event::PointerButton {
         pos: position,
         button: egui::PointerButton::Primary,
