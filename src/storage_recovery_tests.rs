@@ -392,21 +392,39 @@ fn forced_snapshots_bypass_the_hourly_limit_without_replacing_earlier_ones() {
     backup::snapshot_into(&directory, b"forced", base + 5, true).unwrap();
     // A second forced snapshot in the same second takes the next free name.
     backup::snapshot_into(&directory, b"same second", base + 5, true).unwrap();
-    assert_eq!(numeric_snapshots(&directory), [base, base + 5, base + 6]);
-    for (time, bytes) in [
-        (base, "first"),
-        (base + 5, "forced"),
-        (base + 6, "same second"),
+    assert_eq!(fs::read_dir(&directory).unwrap().count(), 3);
+    for (name, bytes) in [
+        (format!("{base}.json"), "first"),
+        (format!("{}.json", base + 5), "forced"),
+        (format!("{}-1.json", base + 5), "same second"),
     ] {
-        assert_eq!(
-            fs::read_to_string(directory.join(format!("{time}.json"))).unwrap(),
-            bytes
-        );
+        assert_eq!(fs::read_to_string(directory.join(name)).unwrap(), bytes);
     }
     for index in 0..105 {
         backup::snapshot_into(&directory, b"{}", base + 10 + index, true).unwrap();
     }
-    assert_eq!(numeric_snapshots(&directory).len(), 100);
+    assert_eq!(fs::read_dir(&directory).unwrap().count(), 100);
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn a_same_second_history_snapshot_survives_the_next_ordinary_saves() {
+    let directory = root();
+    fs::create_dir_all(&directory).unwrap();
+    let now = 1_700_000_000;
+    for stamp in now - 99..=now {
+        fs::write(directory.join(format!("{stamp}.json")), b"Older version").unwrap();
+    }
+
+    backup::snapshot_into(&directory, b"History before clearing", now, true).unwrap();
+    backup::snapshot_into(&directory, b"History before clearing", now, false).unwrap();
+    backup::snapshot_into(&directory, b"Cleared History", now + 1, false).unwrap();
+
+    assert_eq!(fs::read_dir(&directory).unwrap().count(), 100);
+    assert_eq!(
+        fs::read(directory.join(format!("{now}-1.json"))).unwrap(),
+        b"History before clearing"
+    );
     fs::remove_dir_all(directory).unwrap();
 }
 
@@ -421,14 +439,14 @@ fn snapshot_list_now_copies_the_observed_bytes_right_after_another_snapshot() {
     snapshot_list(&root, &list).unwrap();
     assert_eq!(numeric_snapshots(&directory).len(), 1);
     snapshot_list_now(&root, &list).unwrap();
-    let kept = numeric_snapshots(&directory);
+    let kept = fs::read_dir(&directory)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect::<Vec<_>>();
     assert_eq!(kept.len(), 2);
     let observed = list.source_bytes.borrow().clone().unwrap();
-    for time in kept {
-        assert_eq!(
-            fs::read(directory.join(format!("{time}.json"))).unwrap(),
-            &*observed
-        );
+    for path in kept {
+        assert_eq!(fs::read(path).unwrap(), &*observed);
     }
     fs::remove_dir_all(backups_dir(&root)).unwrap();
     fs::remove_dir_all(root).unwrap();

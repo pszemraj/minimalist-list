@@ -235,8 +235,9 @@ fn clearing_history_empties_the_archive_and_keeps_live_tasks() {
 fn snapshots_by_time(app: &MinimalistApp, list: Uuid) -> Vec<std::path::PathBuf> {
     let mut files = snapshot_files(app, list);
     files.sort_by_key(|path| {
-        path.file_stem()
-            .and_then(|stem| stem.to_str()?.parse::<u64>().ok())
+        let stem = path.file_stem()?.to_str()?;
+        let (time, sequence) = stem.split_once('-').unwrap_or((stem, "0"));
+        Some((time.parse::<u64>().ok()?, sequence.parse::<u64>().ok()?))
     });
     files
 }
@@ -251,8 +252,7 @@ fn clearing_history_snapshots_the_archive_even_right_after_another_snapshot() {
     assert!(app.status.is_none());
     assert!(saved(&app).archive.is_empty());
     let files = snapshots_by_time(&app, list);
-    // A same-second name is bumped into the future, so the save may add one more copy.
-    assert!(files.len() >= 2);
+    assert_eq!(files.len(), 2);
     let kept: TodoList = serde_json::from_slice(&fs::read(files.last().unwrap()).unwrap()).unwrap();
     assert_eq!(
         kept.archive

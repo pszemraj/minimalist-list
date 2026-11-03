@@ -109,24 +109,34 @@ fn snapshot_list_with(workspace: &Path, list: &StoredList, force: bool) -> Resul
         .map_err(|error| format!("could not back up {}: {error}", list.path.display()))
 }
 
-/// Lists the numeric `<unix seconds>.json` snapshot names in a folder.
-fn snapshot_times(directory: &Path) -> std::io::Result<Vec<u64>> {
-    let mut times = Vec::new();
+struct Snapshot {
+    time: u64,
+    sequence: u64,
+    path: PathBuf,
+}
+
+/// Lists timestamped snapshots, including earlier backups with no sequence suffix.
+fn snapshot_files(directory: &Path) -> std::io::Result<Vec<Snapshot>> {
+    let mut snapshots = Vec::new();
     for entry in fs::read_dir(directory)?.flatten() {
         let name = entry.file_name();
         let Some(stem) = name.to_str().and_then(|name| name.strip_suffix(".json")) else {
             continue;
         };
-        if !stem.is_empty()
-            && stem.bytes().all(|byte| byte.is_ascii_digit())
-            && let Ok(time) = stem.parse()
+        let (time, sequence) = stem.split_once('-').unwrap_or((stem, "0"));
+        if time.bytes().all(|byte| byte.is_ascii_digit())
+            && sequence.bytes().all(|byte| byte.is_ascii_digit())
+            && let (Ok(time), Ok(sequence)) = (time.parse(), sequence.parse())
             && entry.file_type().is_ok_and(|kind| kind.is_file())
         {
-            times.push(time);
+            snapshots.push(Snapshot {
+                time,
+                sequence,
+                path: entry.path(),
+            });
         }
     }
-    times.sort_unstable();
-    Ok(times)
+    Ok(snapshots)
 }
 
 /// Writes one timestamped snapshot unless the newest is under an hour old and
@@ -137,7 +147,7 @@ fn snapshot_times(directory: &Path) -> std::io::Result<Vec<u64>> {
 ///
 /// - `directory` - Per-list snapshot folder, created when absent.
 /// - `bytes` - Previous list file contents.
-/// - `now` - Current Unix seconds, which names the snapshot unless that name is taken.
+/// - `now` - Current Unix seconds used in the snapshot name.
 /// - `force` - Whether to write even when the newest snapshot is under an hour old.
 ///
 /// # Returns
@@ -154,35 +164,57 @@ pub(super) fn snapshot_into(
     force: bool,
 ) -> std::io::Result<()> {
     fs::create_dir_all(directory)?;
-    let existing = snapshot_times(directory)?;
+    let existing = snapshot_files(directory)?;
     // A newest snapshot dated in the future must not suppress backups.
     if !force
         && existing
-            .last()
-            .is_some_and(|&newest| newest <= now && now - newest < SNAPSHOT_INTERVAL_SECS)
+            .iter()
+            .map(|snapshot| snapshot.time)
+            .max()
+            .is_some_and(|newest| newest <= now && now - newest < SNAPSHOT_INTERVAL_SECS)
     {
         return Ok(());
     }
-    // A snapshot from the same second stays; the new one takes the next free name.
-    let mut stamp = now;
-    while fs::symlink_metadata(directory.join(format!("{stamp}.json"))).is_ok() {
-        stamp += 1;
-    }
-    let temporary = directory.join(format!(".{stamp}.json.tmp"));
+    // Keep wall-clock time separate from the collision counter used in the name.
+    let mut sequence = existing
+        .iter()
+        .filter(|snapshot| snapshot.time == now)
+        .map(|snapshot| snapshot.sequence)
+        .max()
+        .map_or(0, |latest| latest.saturating_add(1));
+    let (destination, temporary) = loop {
+        let name = if sequence == 0 {
+            format!("{now}.json")
+        } else {
+            format!("{now}-{sequence}.json")
+        };
+        let destination = directory.join(&name);
+        if fs::symlink_metadata(&destination).is_err() {
+            break (destination, directory.join(format!(".{name}.tmp")));
+        }
+        sequence = sequence
+            .checked_add(1)
+            .ok_or_else(|| std::io::Error::other("snapshot sequence exhausted"))?;
+    };
     fs::write(&temporary, bytes)?;
-    if let Err(error) = fs::rename(&temporary, directory.join(format!("{stamp}.json"))) {
+    if let Err(error) = fs::rename(&temporary, &destination) {
         let _ = fs::remove_file(&temporary);
         return Err(error);
     }
-    if let Ok(mut times) = snapshot_times(directory) {
-        // After a clock rollback, future names must not crowd out new snapshots.
-        // Keep this write even if a filename collision pushed its timestamp forward.
-        times.sort_unstable_by_key(|&time| (time == stamp, time <= now, time));
-        for time in times
+    if let Ok(mut snapshots) = snapshot_files(directory) {
+        snapshots.sort_unstable_by_key(|snapshot| {
+            (
+                snapshot.path == destination,
+                snapshot.time <= now,
+                snapshot.time,
+                snapshot.sequence,
+            )
+        });
+        for snapshot in snapshots
             .iter()
-            .take(times.len().saturating_sub(SNAPSHOT_LIMIT))
+            .take(snapshots.len().saturating_sub(SNAPSHOT_LIMIT))
         {
-            let _ = fs::remove_file(directory.join(format!("{time}.json")));
+            let _ = fs::remove_file(&snapshot.path);
         }
     }
     Ok(())
