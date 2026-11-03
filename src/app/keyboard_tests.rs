@@ -1,30 +1,11 @@
 //! Headless keyboard journeys using real egui widgets and persisted task files.
 
 use super::*;
-use crate::app::tests::{chord, test_app};
+use crate::app::tests::{
+    chord, focus_widget as focus, keyboard_frame as frame, settle_keyboard as idle, test_app,
+};
 use crate::model::{Accent, ArchivedTask, Task};
 use crate::storage;
-
-fn frame(
-    ctx: &egui::Context,
-    app: &mut MinimalistApp,
-    events: Vec<Event>,
-    width: f32,
-) -> egui::FullOutput {
-    let input = crate::app::tests::frame_input(
-        egui::vec2(width, 500.0),
-        ctx.input(|input| input.time) + 0.3,
-        events,
-    );
-    app.update_motion(ctx);
-    crate::app::tests::run_app_frame(ctx, app, input)
-}
-
-fn idle(ctx: &egui::Context, app: &mut MinimalistApp) {
-    for _ in 0..3 {
-        frame(ctx, app, Vec::new(), 430.0);
-    }
-}
 
 fn key(ctx: &egui::Context, app: &mut MinimalistApp, key: Key, modifiers: Modifiers) {
     frame(ctx, app, chord(key, modifiers), 430.0);
@@ -61,13 +42,6 @@ fn tab_to_label(ctx: &egui::Context, app: &mut MinimalistApp, label: &str) -> Id
         }
     }
     panic!("could not focus {label}");
-}
-
-fn focus(ctx: &egui::Context, app: &mut MinimalistApp, id: Id) {
-    app.request_task_focus = false;
-    app.keyboard.pending = Some(id);
-    idle(ctx, app);
-    assert_eq!(ctx.memory(|memory| memory.focused()), Some(id));
 }
 
 fn type_text(ctx: &egui::Context, app: &mut MinimalistApp, text: &str) {

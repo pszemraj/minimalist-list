@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::{
-    app::tests::{chord, frame_input, run_app_frame, test_app},
+    app::tests::{chord, focus_widget, keyboard_frame, settle_keyboard, test_app},
     model::{Subtask, TaskSort, TodoList},
     storage,
 };
@@ -16,19 +16,11 @@ struct Fixture {
 }
 
 fn frame(f: &mut Fixture, events: Vec<Event>) {
-    let input = frame_input(
-        egui::vec2(430.0, 500.0),
-        f.ctx.input(|input| input.time) + 0.3,
-        events,
-    );
-    f.app.update_motion(&f.ctx);
-    run_app_frame(&f.ctx, &mut f.app, input);
+    keyboard_frame(&f.ctx, &mut f.app, events, 430.0);
 }
 
 fn idle(f: &mut Fixture) {
-    for _ in 0..3 {
-        frame(f, Vec::new());
-    }
+    settle_keyboard(&f.ctx, &mut f.app);
 }
 
 fn paste(f: &mut Fixture, text: &str) {
@@ -41,10 +33,7 @@ fn focused(f: &Fixture) -> Option<Id> {
 }
 
 fn focus(f: &mut Fixture, id: Id) {
-    f.app.request_task_focus = false;
-    f.app.keyboard.pending = Some(id);
-    idle(f);
-    assert_eq!(focused(f), Some(id));
+    focus_widget(&f.ctx, &mut f.app, id);
 }
 
 /// Opens the first list with the given tasks and focuses its task entry.
