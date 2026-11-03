@@ -451,20 +451,34 @@ impl MinimalistApp {
             CompletionState::Task(TaskStatus::Done) | CompletionState::Subtask(true)
         );
         let in_progress = state == CompletionState::Task(TaskStatus::InProgress);
-        let label = if completed {
-            format!("Mark active: {text}")
-        } else if in_progress {
-            format!("Complete: {text} (in progress)")
-        } else {
-            format!("Complete: {text}")
+        let (label, hint) = match state {
+            CompletionState::Task(TaskStatus::NotStarted) => (
+                format!("Complete: {text} (not started)"),
+                "Shift+click to mark in progress",
+            ),
+            CompletionState::Task(TaskStatus::InProgress) => (
+                format!("Complete: {text} (in progress)"),
+                "Shift+click to mark not started",
+            ),
+            CompletionState::Task(TaskStatus::Done) => (
+                format!("Reopen: {text} (done)"),
+                "Shift+click to reopen in progress",
+            ),
+            CompletionState::Subtask(false) => (format!("Complete: {text}"), ""),
+            CompletionState::Subtask(true) => (format!("Mark active: {text}"), ""),
         };
-        let hint = match state {
-            CompletionState::Subtask(_) => "",
-            _ if in_progress => "\nShift+click: mark not started",
-            CompletionState::Task(_) => "\nShift+click: mark in progress",
+        let (accessible_name, tooltip) = if hint.is_empty() {
+            (label.clone(), label)
+        } else {
+            (format!("{label}. {hint}"), format!("{label}\n{hint}"))
         };
         response.widget_info(|| {
-            egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, completed, &label)
+            egui::WidgetInfo::selected(
+                egui::WidgetType::Checkbox,
+                true,
+                completed,
+                &accessible_name,
+            )
         });
 
         let center = response.rect.center();
@@ -536,7 +550,7 @@ impl MinimalistApp {
                 .circle_stroke(center, radius + 4.0, Stroke::new(1.5, palette.text));
         }
 
-        response.on_hover_text(format!("{label}{hint}"))
+        response.on_hover_text(tooltip)
     }
 
     /// Renders the draggable screen header and its navigation actions.
