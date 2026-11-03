@@ -16,6 +16,7 @@ src/app/persistence.rs      Save results, dirty-list retries, and visible status
 src/app/save_conflict.rs    Local copies and reloads after an external edit
 src/app/keyboard.rs         Keyboard commands and transient focus restoration
 src/app/keyboard_events.rs  Ordered editor input before screen-changing shortcuts
+src/app/keyboard_focus.rs   Focus requests, anchors, sibling repair, and the focus outline
 src/app/keyboard_levels.rs  Directional list, checklist, History, and form navigation
 src/app/list.rs             Task entry, rows, editing, gestures, and ordering
 src/app/overlays.rs         Quick add, Find, and keyboard reference
