@@ -123,6 +123,27 @@ fn edited_titles_and_completion_resort_the_view_without_rewriting_manual_order()
 }
 
 #[test]
+fn failed_capture_does_not_change_the_manual_position_used_by_undo() {
+    let (_, mut app, list, manual) = fixture();
+    app.sort_tasks(list, TaskSort::Title);
+    let lists = app.workspace.join("lists");
+    let offline = app.workspace.join("offline");
+    std::fs::rename(&lists, &offline).unwrap();
+    std::fs::write(&lists, "a file blocks the folder").unwrap();
+    assert!(
+        app.save_capture(list, &["Failed capture".into()], None)
+            .is_err()
+    );
+    std::fs::remove_file(&lists).unwrap();
+    std::fs::rename(&offline, &lists).unwrap();
+
+    app.remove_task(list, manual[1]);
+    app.undo_last();
+    assert_eq!(disk_ids(&app), manual);
+    std::fs::remove_dir_all(app.workspace).unwrap();
+}
+
+#[test]
 fn candidate_capture_and_context_edits_preserve_manual_order_and_whole_tasks() {
     let (_, mut app, list, manual) = fixture();
     app.sort_tasks(list, TaskSort::Title);

@@ -169,11 +169,12 @@ impl MinimalistApp {
         index: usize,
         mut candidate: StoredList,
     ) -> Result<(), String> {
-        self.prepare_list_for_save(&mut candidate);
+        let manual = self.prepare_list_for_save(&mut candidate);
         if let Err(error) = self.write_list(&candidate) {
             self.record_save_conflict(&candidate);
             return Err(error);
         }
+        self.manual_task_order.insert(candidate.key, manual);
         self.lists[index] = candidate;
         self.apply_task_sorts();
         self.complete_list_save(index);
