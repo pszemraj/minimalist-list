@@ -72,14 +72,13 @@ impl MinimalistApp {
     /// Panics if an internally resolved list index is invalid.
     pub(super) fn toggle_subtask(&mut self, list: Uuid, task: Uuid, child: Uuid) {
         if let Some(index) = self.list_index(list)
-            && let Some(subtask) = self.lists[index]
+            && self.lists[index]
                 .data
                 .tasks
                 .iter_mut()
                 .find(|item| item.id == task)
-                .and_then(|parent| parent.subtasks.iter_mut().find(|item| item.id == child))
+                .is_some_and(|parent| parent.toggle_subtask(child))
         {
-            subtask.completed = !subtask.completed;
             self.save_list_index(index);
         }
     }

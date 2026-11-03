@@ -4,7 +4,7 @@ use super::MinimalistApp;
 use super::keyboard::{
     BACK_TO_LISTS, FIND, OPEN_SETTINGS, QUICK_ADD, mark_own_focus_frame, shortcut,
 };
-use crate::model::{Accent, FontChoice};
+use crate::model::{Accent, FontChoice, TaskStatus};
 use eframe::egui;
 use egui::{
     Align, Button, Color32, CornerRadius, CursorIcon, FontFamily, FontId, Frame, Id, Label, Layout,
@@ -44,6 +44,13 @@ pub(super) fn install_fonts(ctx: &egui::Context) {
             .insert(FontFamily::Name(name.into()), fallback);
     }
     ctx.set_fonts(fonts);
+}
+
+#[derive(Clone, Copy, PartialEq)]
+/// What a completion control marks: a task's status or a checklist item's completion.
+pub(super) enum CompletionState {
+    Task(TaskStatus),
+    Subtask(bool),
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -422,7 +429,7 @@ impl MinimalistApp {
     ///
     /// - `ui` - UI whose painter draws the control.
     /// - `response` - Interaction region allocated for the control.
-    /// - `completed` - Current task completion state.
+    /// - `state` - Current task status or checklist item completion.
     /// - `progress` - Completion animation progress from zero to one.
     /// - `palette` - Colors used to paint the control.
     /// - `text` - Task or subtask text included in its accessible name.
@@ -434,15 +441,27 @@ impl MinimalistApp {
         &self,
         ui: &mut egui::Ui,
         response: egui::Response,
-        completed: bool,
+        state: CompletionState,
         progress: f32,
         palette: Palette,
         text: &str,
     ) -> egui::Response {
+        let completed = matches!(
+            state,
+            CompletionState::Task(TaskStatus::Done) | CompletionState::Subtask(true)
+        );
+        let in_progress = state == CompletionState::Task(TaskStatus::InProgress);
         let label = if completed {
             format!("Mark active: {text}")
+        } else if in_progress {
+            format!("Complete: {text} (in progress)")
         } else {
             format!("Complete: {text}")
+        };
+        let hint = match state {
+            CompletionState::Subtask(_) => "",
+            _ if in_progress => "\nShift+click: mark not started",
+            CompletionState::Task(_) => "\nShift+click: mark in progress",
         };
         response.widget_info(|| {
             egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, completed, &label)
@@ -471,6 +490,30 @@ impl MinimalistApp {
                 palette.accent.lerp_to_gamma(palette.text, hover * 0.18),
             ),
         );
+        let start_progress = ui.ctx().animate_bool_with_time_and_easing(
+            Id::new(("completion-started", response.id)),
+            in_progress,
+            0.16,
+            egui::emath::easing::cubic_out,
+        ) * (1.0 - progress);
+        if start_progress > 0.0 {
+            // A half-filled circle reads as partway done and stays distinct from the check.
+            let fill_radius = radius - 2.4;
+            // Thirteen points 15 degrees apart sweep the right half from top to bottom.
+            let points = (0..=12_u8)
+                .map(|step| {
+                    let angle = -std::f32::consts::FRAC_PI_2
+                        + std::f32::consts::FRAC_PI_6 * 0.5 * f32::from(step);
+                    center + fill_radius * Vec2::angled(angle)
+                })
+                .chain(std::iter::once(center))
+                .collect();
+            ui.painter().add(egui::Shape::convex_polygon(
+                points,
+                palette.accent.linear_multiply(start_progress),
+                Stroke::NONE,
+            ));
+        }
         if progress > 0.0 {
             let scale = 0.68 + progress * 0.32;
             ui.painter().circle_filled(
@@ -493,7 +536,7 @@ impl MinimalistApp {
                 .circle_stroke(center, radius + 4.0, Stroke::new(1.5, palette.text));
         }
 
-        response.on_hover_text(label)
+        response.on_hover_text(format!("{label}{hint}"))
     }
 
     /// Renders the draggable screen header and its navigation actions.

@@ -412,10 +412,9 @@ fn settings_merge_preserves_other_workspaces_list_order() {
     second
         .list_sort
         .insert("/workspace/second".into(), ListSort::Newest);
-    second.task_sort.insert(
-        "/workspace/second::task-list".into(),
-        TaskSort::IncompleteFirst,
-    );
+    second
+        .task_sort
+        .insert("/workspace/second::task-list".into(), TaskSort::ByStatus);
     second
         .manual_task_order
         .insert("/workspace/second::task-list".into(), second_ids.clone());
@@ -430,7 +429,7 @@ fn settings_merge_preserves_other_workspaces_list_order() {
     );
     assert_eq!(
         merged.task_sort["/workspace/second::task-list"],
-        TaskSort::IncompleteFirst
+        TaskSort::ByStatus
     );
     assert!(merged.manual_task_order.is_empty());
     let mut removed = merged.clone();

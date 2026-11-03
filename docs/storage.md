@@ -83,6 +83,8 @@ A list save writes and flushes a temporary sibling file before replacing the des
 
 On startup and workspace loading, the app removes recognized unlocked temporary files older than a day.
 
+Earlier versions drop a task's [In progress](usage.md#complete-reorder-and-remove-tasks) mark when they save its list, so update every device that shares a workspace.
+
 The app checks disk every five seconds and reloads externally changed list files at the next scan. Reloads wait until task or child editing and dragging finish, while any task context dialog is open, and while unsaved list changes need recovery. A sync service controls when a file arrives on another computer.
 
 ### Duplicate list files
