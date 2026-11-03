@@ -1,18 +1,14 @@
 //! Local list snapshots and recoverable list deletion, kept beside the settings file.
 
 use super::{StoredList, list_file_name, read_list, settings_path};
-use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
-use uuid::Uuid;
 
 /// Minimum age of the newest snapshot before another one is written.
 const SNAPSHOT_INTERVAL_SECS: u64 = 3600;
 /// Snapshots kept for each list.
 const SNAPSHOT_LIMIT: usize = 100;
-/// Maximum component length for a portable deleted-list backup name.
-const BACKUP_NAME_LIMIT: usize = 255;
 
 /// Derives a stable local key from a normalized workspace path.
 ///
@@ -260,18 +256,8 @@ pub fn delete_list(workspace: &Path, list: &StoredList) -> Result<(), String> {
             list.path.display()
         )
     };
-    let name = list.path.file_name().ok_or_else(|| {
-        format!(
-            "could not delete {}: it has no file name",
-            list.path.display()
-        )
-    })?;
-    // A timestamp prefix would hide a UUID-only name from the workspace reader.
-    let uuid_only_name = list
-        .path
-        .file_stem()
-        .and_then(|stem| stem.to_str())
-        .is_some_and(|stem| Uuid::parse_str(stem).is_ok());
+    // A timestamp prefix can change how the workspace reader interprets a source name.
+    let name = list_file_name(&list.data.title, list.key);
     let source_type = fs::symlink_metadata(&list.path).map_err(fail)?.file_type();
     if !source_type.is_file() && !source_type.is_symlink() {
         return Err(fail(std::io::Error::new(
@@ -284,13 +270,7 @@ pub fn delete_list(workspace: &Path, list: &StoredList) -> Result<(), String> {
     // Never replace an earlier deleted copy that shares the same second and name.
     let mut stamp = unix_now();
     let kept = loop {
-        let mut file = OsString::from(format!("{stamp}-"));
-        if uuid_only_name || file.len() + name.len() > BACKUP_NAME_LIMIT {
-            file.push(list_file_name(&list.data.title, list.key));
-        } else {
-            file.push(name);
-        }
-        let candidate = directory.join(file);
+        let candidate = directory.join(format!("{stamp}-{name}"));
         if fs::symlink_metadata(&candidate).is_err() {
             break candidate;
         }

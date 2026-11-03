@@ -548,7 +548,6 @@ fn delete_list_leaves_a_replacement_directory_in_the_workspace() {
 
 #[test]
 fn deleted_long_filename_restores_its_identity_and_bytes() {
-    // One name can take the backup prefix, while the other needs a bounded name.
     for length in [157, 207] {
         let root = root();
         let list = create_list(&root, "Long filename", Accent::Mint).unwrap();
@@ -581,6 +580,49 @@ fn deleted_long_filename_restores_its_identity_and_bytes() {
         fs::remove_dir_all(backups).unwrap();
         fs::remove_dir_all(root).unwrap();
     }
+}
+
+#[test]
+fn a_list_restored_under_an_older_long_backup_name_is_writable() {
+    let root = root();
+    let list = create_list(&root, "Restored", Accent::Mint).unwrap();
+    let restored =
+        list.path
+            .with_file_name(format!("1700000000-{}--{}.json", "x".repeat(157), list.key));
+    fs::rename(&list.path, &restored).unwrap();
+    let mut loaded = load_workspace(&root).unwrap().lists.remove(0);
+    loaded.data.tasks.push(Task::new("Edited after restore"));
+    save_list(&loaded).unwrap();
+    let saved = load_workspace(&root).unwrap().lists.remove(0);
+    assert_eq!(saved.key, list.key);
+    assert_eq!(saved.data.tasks[0].text, "Edited after restore");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn deleted_backup_preserves_the_loaded_identity_of_an_external_name() {
+    let root = root();
+    let keep = create_list(&root, "Keep", Accent::Mint).unwrap();
+    let remove = create_list(&root, "Remove and restore", Accent::Sky).unwrap();
+    let path = remove.path.with_file_name(format!("--{}.json", keep.key));
+    fs::rename(&remove.path, &path).unwrap();
+    let (loaded, _) = read_list(&path).unwrap();
+    assert_eq!(loaded.key, remove.key);
+
+    delete_list(&root, &loaded).unwrap();
+    let backups = backups_dir(&root);
+    let backup = fs::read_dir(backups.join("deleted"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap();
+    fs::copy(backup.path(), root.join("lists").join(backup.file_name())).unwrap();
+    let restored = load_workspace(&root).unwrap();
+    assert!(restored.warnings.is_empty());
+    assert!(restored.lists.iter().any(|list| list.key == remove.key));
+    assert!(restored.lists.iter().any(|list| list.key == keep.key));
+    fs::remove_dir_all(backups).unwrap();
+    fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
