@@ -245,8 +245,19 @@ fn rename_preserves_an_existing_dangling_symlink() {
 fn omitted_shortcut_uses_default_while_explicit_empty_remains_disabled() {
     let legacy: Settings = serde_json::from_str("{}").unwrap();
     assert_eq!(legacy.global_shortcut, "CommandOrControl+Alt+Shift+KeyL");
+    assert_eq!(legacy.quick_add_shortcut, "CommandOrControl+Alt+Shift+KeyN");
     let disabled: Settings = serde_json::from_str(r#"{"global_shortcut":""}"#).unwrap();
     assert!(disabled.global_shortcut.is_empty());
+    assert_eq!(
+        disabled.quick_add_shortcut,
+        "CommandOrControl+Alt+Shift+KeyN"
+    );
+    let quick_disabled: Settings = serde_json::from_str(r#"{"quick_add_shortcut":""}"#).unwrap();
+    assert!(quick_disabled.quick_add_shortcut.is_empty());
+    assert_eq!(
+        quick_disabled.global_shortcut,
+        "CommandOrControl+Alt+Shift+KeyL"
+    );
     save_settings(&disabled).unwrap();
     assert!(load_settings().0.global_shortcut.is_empty());
 }

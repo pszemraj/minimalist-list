@@ -4,43 +4,137 @@ use super::*;
 
 #[test]
 fn shortcut_reference_displays_configured_and_disabled_global_shortcuts() {
-    for width in [320.0, 520.0] {
-        let (ctx, mut app) = test_app();
-        let default = crate::hotkey::label(&app.settings.global_shortcut);
-        app.open_shortcuts();
-        for (configured, expected) in [
-            (
-                "CommandOrControl+Alt+KeyK",
-                if cfg!(target_os = "macos") {
-                    "Cmd+Option+K"
+    use crate::hotkey::GlobalAction;
+    for (action, row) in [
+        (GlobalAction::Show, "Show window (global)"),
+        (GlobalAction::QuickAdd, "Quick add from any app"),
+    ] {
+        for width in [320.0, 520.0] {
+            let (ctx, mut app) = test_app();
+            let default = crate::hotkey::label(action.configured(&app.settings));
+            app.open_shortcuts();
+            for (configured, expected) in [
+                (
+                    "CommandOrControl+Alt+KeyK",
+                    if cfg!(target_os = "macos") {
+                        "Cmd+Option+K"
+                    } else {
+                        "Ctrl+Alt+K"
+                    },
+                ),
+                ("", "Disabled"),
+            ] {
+                *action.configured_mut(&mut app.settings) = configured.into();
+                // The Quick add row follows Show window and can start below a narrow viewport.
+                let scrolls = if action == GlobalAction::QuickAdd {
+                    3
                 } else {
-                    "Ctrl+Alt+K"
-                },
-            ),
-            ("", "Disabled"),
-        ] {
-            app.settings.global_shortcut = configured.into();
-            for _ in 0..3 {
-                frame(&ctx, &mut app, Vec::new(), width);
+                    0
+                };
+                for _ in 0..scrolls {
+                    frame(
+                        &ctx,
+                        &mut app,
+                        chord(Key::ArrowDown, Modifiers::NONE),
+                        width,
+                    );
+                }
+                for _ in 0..3 {
+                    frame(&ctx, &mut app, Vec::new(), width);
+                }
+                let output = frame(&ctx, &mut app, Vec::new(), width);
+                let text: Vec<_> = output
+                    .shapes
+                    .iter()
+                    .filter_map(|shape| match &shape.shape {
+                        egui::epaint::Shape::Text(text) => Some(text.galley.text()),
+                        _ => None,
+                    })
+                    .collect();
+                assert!(text.contains(&row), "{text:?}");
+                assert!(
+                    text.contains(&expected),
+                    "Missing {expected} for {row} at width {width}"
+                );
+                assert!(!text.contains(&default.as_str()));
             }
-            let output = frame(&ctx, &mut app, Vec::new(), width);
-            let text: Vec<_> = output
-                .shapes
-                .iter()
-                .filter_map(|shape| match &shape.shape {
-                    egui::epaint::Shape::Text(text) => Some(text.galley.text()),
-                    _ => None,
-                })
-                .collect();
-            assert!(text.contains(&"Show window (global)"), "{text:?}");
-            assert!(
-                text.contains(&expected),
-                "Missing {expected} at width {width}"
-            );
-            assert!(!text.contains(&default.as_str()));
+            cleanup(&app);
         }
-        cleanup(&app);
     }
+}
+
+#[test]
+fn global_quick_add_replaces_the_reference_and_returns_focus_beneath_it() {
+    let (ctx, mut app) = test_app();
+    let list = app.lists[0].key;
+    app.open_list(list);
+    idle(&ctx, &mut app);
+    let beneath = ctx.memory(|memory| memory.focused());
+    assert!(beneath.is_some());
+    key(&ctx, &mut app, Key::Slash, Modifiers::COMMAND);
+    assert!(app.shortcuts.is_some());
+    app.open_global_quick_add(&ctx);
+    idle(&ctx, &mut app);
+    assert!(app.shortcuts.is_none() && app.quick_capture.is_some());
+    assert_eq!(
+        app.quick_capture.as_ref().unwrap().selected_list_id,
+        Some(list)
+    );
+    assert_eq!(
+        ctx.memory(|memory| memory.focused()),
+        Some(Id::new("quick-capture-text"))
+    );
+    type_text(&ctx, &mut app, "From another app");
+    key(&ctx, &mut app, Key::Enter, Modifiers::NONE);
+    assert!(app.quick_capture.is_none());
+    assert_eq!(app.lists[0].data.tasks[0].text, "From another app");
+    assert_eq!(ctx.memory(|memory| memory.focused()), beneath);
+    cleanup(&app);
+}
+
+#[test]
+fn global_quick_add_dismisses_the_move_dialog_and_open_menus() {
+    let (ctx, mut app) = test_app();
+    let source = app.lists[0].key;
+    add_list(&mut app, "Destination");
+    app.lists[0].data.tasks.push(Task::new("Move me"));
+    let task = app.lists[0].data.tasks[0].id;
+    app.open_list(source);
+    app.begin_move_task(source, task);
+    egui::Popup::open_id(&ctx, Id::new("unrelated-menu"));
+    idle(&ctx, &mut app);
+    assert!(app.details.move_task.is_some());
+    app.open_global_quick_add(&ctx);
+    idle(&ctx, &mut app);
+    assert!(app.details.move_task.is_none() && !egui::Popup::is_any_open(&ctx));
+    assert!(app.quick_capture.is_some());
+    assert_eq!(
+        ctx.memory(|memory| memory.focused()),
+        Some(Id::new("quick-capture-text"))
+    );
+    assert_eq!(app.lists[0].data.tasks.len(), 1);
+    cleanup(&app);
+}
+
+#[test]
+fn global_quick_add_keeps_an_open_draft_and_refocuses_its_field() {
+    let (ctx, mut app) = test_app();
+    idle(&ctx, &mut app);
+    key(&ctx, &mut app, Key::N, Modifiers::COMMAND);
+    type_text(&ctx, &mut app, "Half-typed capture");
+    ctx.memory_mut(|memory| memory.surrender_focus(Id::new("quick-capture-text")));
+    idle(&ctx, &mut app);
+    app.open_global_quick_add(&ctx);
+    idle(&ctx, &mut app);
+    assert_eq!(
+        app.quick_capture.as_ref().unwrap().text,
+        "Half-typed capture"
+    );
+    assert_eq!(
+        ctx.memory(|memory| memory.focused()),
+        Some(Id::new("quick-capture-text"))
+    );
+    cleanup(&app);
 }
 
 #[test]
@@ -408,7 +502,7 @@ fn reference_uses_shared_bindings_and_native_key_names() {
         assert_eq!(shortcut_for_platform(binding, false), regular);
         assert_eq!(shortcut_for_platform(binding, true), mac);
     }
-    let groups = shortcut_groups();
+    let groups = shortcut_groups("show".into(), "capture".into());
     for (action, binding) in [
         ("Keyboard shortcuts", SHOW_SHORTCUTS),
         ("Settings (main screens)", OPEN_SETTINGS),

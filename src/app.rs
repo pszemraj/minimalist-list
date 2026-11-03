@@ -133,9 +133,10 @@ pub struct MinimalistApp {
     next_taskbar_check: Instant,
     instance: Option<crate::instance::InstanceGuard>,
     global_shortcut: Option<crate::hotkey::GlobalShortcut>,
-    global_shortcut_input: String,
-    /// Last shortcut failure shown, cleared by a later successful apply.
-    shortcut_error: Option<String>,
+    /// Editable shortcut text per `GlobalAction`.
+    shortcut_inputs: crate::hotkey::PerAction<String>,
+    /// Last failure shown per `GlobalAction`, cleared by a later successful apply.
+    shortcut_errors: crate::hotkey::PerAction<Option<String>>,
     task_context: Option<context::TaskContextEditor>,
     #[cfg(target_os = "macos")]
     reopen: Option<crate::macos::ReopenHandler>,
@@ -243,11 +244,7 @@ impl MinimalistApp {
             })
             .unwrap_or_else(|| Palette::from_accent(Accent::Charcoal));
         let workspace_input = settings.workspace_path.clone();
-        let global_shortcut_input = if settings.global_shortcut.is_empty() {
-            String::new()
-        } else {
-            crate::hotkey::label(&settings.global_shortcut)
-        };
+        let shortcut_inputs = crate::hotkey::input_texts(&settings);
 
         let mut app = Self {
             settings,
@@ -303,8 +300,8 @@ impl MinimalistApp {
             next_taskbar_check: Instant::now(),
             instance: None,
             global_shortcut: None,
-            global_shortcut_input,
-            shortcut_error: None,
+            shortcut_inputs,
+            shortcut_errors: Default::default(),
             task_context: None,
             #[cfg(target_os = "macos")]
             reopen: None,
@@ -528,11 +525,7 @@ impl MinimalistApp {
             .unwrap_or_default();
         self.rename_baseline.clone_from(&self.rename_input);
         self.workspace_input = self.settings.workspace_path.clone();
-        self.global_shortcut_input = if self.settings.global_shortcut.is_empty() {
-            String::new()
-        } else {
-            crate::hotkey::label(&self.settings.global_shortcut)
-        };
+        self.shortcut_inputs = crate::hotkey::input_texts(&self.settings);
         self.delete_armed = false;
         self.begin_transition(1.0);
         self.screen = Screen::Settings;

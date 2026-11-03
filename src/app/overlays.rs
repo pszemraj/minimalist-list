@@ -1,11 +1,12 @@
 //! Quick-capture, cross-list search, and keyboard-reference overlays.
 
 use super::{
-    MinimalistApp,
+    MinimalistApp, Screen,
     keyboard::{FocusItem, shortcut_groups, take_key},
     text_input_shortcuts,
     theme::Palette,
 };
+use crate::hotkey::GlobalAction;
 use crate::model::{Subtask, Task};
 use crate::storage::StoredList;
 use eframe::egui;
@@ -171,6 +172,29 @@ impl MinimalistApp {
         });
     }
 
+    /// Opens quick capture for the current list and focuses its text field.
+    pub(super) fn open_quick_add_here(&mut self, ctx: &egui::Context) {
+        let current = match self.screen {
+            Screen::List(id) => Some(id),
+            _ => None,
+        };
+        self.open_quick_capture(current);
+        self.focus_now(ctx, Id::new("quick-capture-text"));
+    }
+
+    /// Opens quick capture for a request from outside the window, above other transient layers.
+    ///
+    /// The keyboard reference closes, returning focus to the control beneath it. The Move dialog
+    /// and open menus are dismissed. An already open Quick add keeps its draft and regains focus.
+    pub(super) fn open_global_quick_add(&mut self, ctx: &egui::Context) {
+        if let Some(reference) = self.shortcuts.take() {
+            self.keyboard.pending = reference.return_focus;
+        }
+        self.details.move_task = None;
+        egui::Popup::close_all(ctx);
+        self.open_quick_add_here(ctx);
+    }
+
     /// Opens global search and requests focus for its query field.
     pub(super) fn open_find(&mut self) {
         self.prepare_capture_or_search();
@@ -260,15 +284,12 @@ impl MinimalistApp {
                     if home {
                         ui.scroll_to_cursor(Some(Align::Min));
                     }
-                    for (heading, shortcuts) in shortcut_groups() {
+                    let [show, quick_add] = GlobalAction::ALL
+                        .map(|action| crate::hotkey::label(action.configured(&self.settings)));
+                    for (heading, shortcuts) in shortcut_groups(show, quick_add) {
                         ui.add_space(10.0);
                         ui.label(self.rich(heading, 17.0, palette.accent));
                         for (action, keys) in shortcuts {
-                            let keys = if action == "Show window (global)" {
-                                crate::hotkey::label(&self.settings.global_shortcut)
-                            } else {
-                                keys
-                            };
                             if ui.available_width() < 380.0 {
                                 ui.label(self.rich(action, 14.0, palette.text));
                                 ui.label(self.rich(keys, 13.0, palette.muted));

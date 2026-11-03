@@ -12,7 +12,7 @@ impl MinimalistApp {
     ///
     /// - `ctx` - Context whose memory receives the focus request.
     /// - `id` - Control to focus.
-    pub(super) fn focus_now(&mut self, ctx: &egui::Context, id: Id) {
+    pub(in crate::app) fn focus_now(&mut self, ctx: &egui::Context, id: Id) {
         self.keyboard.pending = Some(id);
         self.keyboard.requested = Some(id);
         ctx.memory_mut(|memory| memory.request_focus(id));

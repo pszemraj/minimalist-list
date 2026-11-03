@@ -58,7 +58,7 @@ Verify the checkout with `cargo test --locked`; `cargo run --locked -- --version
 
 Open a list, type `Buy groceries` into the [task entry](docs/usage.md#capture-and-edit-tasks), and press Enter. See [list management](docs/usage.md#manage-lists) to create more lists.
 
-Use [keyboard navigation](docs/usage.md#keyboard-shortcuts) to work without a mouse, or the [global reveal shortcut](docs/usage.md#global-reveal-shortcut) to show the running app from another application.
+Use [keyboard navigation](docs/usage.md#keyboard-shortcuts) to work without a mouse, or the [global shortcuts](docs/usage.md#global-shortcuts) to show the running app or open Quick add from another application.
 
 ## Documentation
 

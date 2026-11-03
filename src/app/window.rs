@@ -208,6 +208,11 @@ impl MinimalistApp {
                     self.show_window(ctx);
                     shown = true;
                 }
+                Action::QuickAdd => {
+                    self.show_window(ctx);
+                    self.open_global_quick_add(ctx);
+                    shown = true;
+                }
                 Action::Quit => {
                     self.quit(ctx);
                     return;
@@ -428,6 +433,37 @@ mod tests {
             assert!(mapped < restored);
             std::fs::remove_dir_all(&app.workspace).unwrap();
         }
+    }
+
+    #[test]
+    fn tray_quick_add_reveals_a_hidden_window_and_focuses_the_entry_field() {
+        let (ctx, mut app) = test_app();
+        app.window_hidden = true;
+        let output = ctx.run_logic(&Default::default(), |ctx| {
+            app.handle_window_events(ctx, false, &[Action::QuickAdd], true);
+        });
+        assert!(!app.window_hidden);
+        let commands = &output.viewport_commands[&egui::ViewportId::ROOT];
+        let mapped = commands
+            .iter()
+            .position(|command| *command == ViewportCommand::Visible(true))
+            .unwrap();
+        let focused = commands
+            .iter()
+            .position(|command| *command == ViewportCommand::Focus)
+            .unwrap();
+        assert!(mapped < focused);
+        assert!(app.quick_capture.is_some());
+        for _ in 0..3 {
+            let time = ctx.input(|input| input.time) + 0.3;
+            let input = crate::app::tests::frame_input(egui::vec2(430.0, 500.0), time, vec![]);
+            crate::app::tests::run_app_frame(&ctx, &mut app, input);
+        }
+        assert_eq!(
+            ctx.memory(|memory| memory.focused()),
+            Some(egui::Id::new("quick-capture-text"))
+        );
+        std::fs::remove_dir_all(&app.workspace).unwrap();
     }
 
     #[test]

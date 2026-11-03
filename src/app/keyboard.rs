@@ -211,10 +211,15 @@ pub(super) type ShortcutGroup = (&'static str, Vec<(&'static str, String)>);
 
 /// Builds the reference from the same bindings used by routing and tooltips.
 ///
+/// # Arguments
+///
+/// - `show_window` - Configured global chord that reveals the window.
+/// - `quick_add` - Configured global chord that opens Quick add.
+///
 /// # Returns
 ///
 /// Context groups containing native shortcut labels.
-pub(super) fn shortcut_groups() -> Vec<ShortcutGroup> {
+pub(super) fn shortcut_groups(show_window: String, quick_add: String) -> Vec<ShortcutGroup> {
     let pair = |first, second| format!("{} / {}", shortcut(first), shortcut(second));
     vec![
         (
@@ -225,13 +230,8 @@ pub(super) fn shortcut_groups() -> Vec<ShortcutGroup> {
                 ("Quick add", shortcut(QUICK_ADD)),
                 ("Find tasks and History", shortcut(FIND)),
                 ("New list (Lists, list, Settings)", shortcut(NEW_LIST)),
-                (
-                    "Show window (global)",
-                    shortcut(KeyboardShortcut::new(
-                        Modifiers::COMMAND | Modifiers::ALT | Modifiers::SHIFT,
-                        Key::L,
-                    )),
-                ),
+                ("Show window (global)", show_window),
+                ("Quick add from any app", quick_add),
                 ("Close window", shortcut(CLOSE_WINDOW)),
             ],
         ),
@@ -415,12 +415,7 @@ impl MinimalistApp {
             return;
         }
         if take_shortcut(ctx, QUICK_ADD) {
-            let current = match self.screen {
-                Screen::List(id) => Some(id),
-                _ => None,
-            };
-            self.open_quick_capture(current);
-            self.focus_now(ctx, Id::new("quick-capture-text"));
+            self.open_quick_add_here(ctx);
             return;
         }
         if take_shortcut(ctx, FIND) {

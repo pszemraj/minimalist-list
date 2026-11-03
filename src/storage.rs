@@ -50,6 +50,7 @@ pub struct Settings {
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub manual_task_order: BTreeMap<String, Vec<Uuid>>,
     pub global_shortcut: String,
+    pub quick_add_shortcut: String,
 }
 
 impl Default for Settings {
@@ -72,6 +73,7 @@ impl Default for Settings {
             task_sort: BTreeMap::new(),
             manual_task_order: BTreeMap::new(),
             global_shortcut: "CommandOrControl+Alt+Shift+KeyL".into(),
+            quick_add_shortcut: "CommandOrControl+Alt+Shift+KeyN".into(),
         }
     }
 }

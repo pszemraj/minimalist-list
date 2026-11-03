@@ -6,7 +6,7 @@
 src/main.rs                 Native eframe setup and launch arguments
 src/instance.rs             Workspace instance claims and window reveal requests
 src/macos.rs                Native app-bundle reopen delegate
-src/hotkey.rs               Native global reveal shortcut registration and wakeups
+src/hotkey.rs               Native global shortcut registration and wakeups
 src/linux.rs                X11 cursor, taskbar state, and native event-loop setup
 src/linux_cursor.rs         XSettings cursor parsing and scale selection
 src/linux_taskbar.rs        EWMH state preservation and taskbar request payloads
@@ -88,7 +88,7 @@ Bash:
 ```bash
 mkdir -p "$XDG_CONFIG_HOME/minimalist-list"
 if [ ! -e "$XDG_CONFIG_HOME/minimalist-list/settings.json" ]; then
-  printf '%s\n' '{"global_shortcut":""}' > "$XDG_CONFIG_HOME/minimalist-list/settings.json"
+  printf '%s\n' '{"global_shortcut":"","quick_add_shortcut":""}' > "$XDG_CONFIG_HOME/minimalist-list/settings.json"
 fi
 export EGUI_INSPECTION=127.0.0.1:5741
 ```
@@ -99,7 +99,7 @@ PowerShell:
 $GuiSettings = Join-Path $env:XDG_CONFIG_HOME 'minimalist-list/settings.json'
 New-Item -ItemType Directory -Force -Path (Split-Path $GuiSettings) | Out-Null
 if (-not (Test-Path -LiteralPath $GuiSettings)) {
-  Set-Content -LiteralPath $GuiSettings -Value '{"global_shortcut":""}'
+  Set-Content -LiteralPath $GuiSettings -Value '{"global_shortcut":"","quick_add_shortcut":""}'
 }
 $env:EGUI_INSPECTION = '127.0.0.1:5741'
 ```
@@ -114,13 +114,13 @@ Attach the GUI inspector to port 5741. Use a distinct port for each instance and
 
 ### Running alongside an installed copy
 
-The fresh test profile above disables the global shortcut so it cannot capture the installed app's binding. Disable the shortcut in existing test profiles too. For an explicit global-shortcut check, use a different chord or quit the regular instance first. Keep environment overrides local to the test launch rather than exporting them into a shell used for ordinary builds or installation.
+The fresh test profile above disables both global shortcuts (reveal and Quick add) so they cannot capture the installed app's bindings. Disable both in existing test profiles too. For an explicit global-shortcut check, use different chords or quit the regular instance first. Keep environment overrides local to the test launch rather than exporting them into a shell used for ordinary builds or installation.
 
 For macOS automation, reuse one development bundle and identifier, separate from the installed app, and launch each by its full path. Rebuilding or reinstalling does not launch the installed copy or stop an older process. Both windows can have the same title, so verify the executable path and selected test workspace before interacting.
 
 Spotlight can index generated `.app` bundles under the ignored `target/` directory, including copies inside installer fixtures. After testing, archive any bundles needed for reuse and remove their extracted `.app` directories. Restore the same development name, identifier, and path for the next check. A separate settings directory protects task data but does not prevent Spotlight from launching the test copy.
 
-Finish every GUI check, including a user-assisted keyboard check, by quitting the test instance and confirming that its process has exited. With a usable tray, closing only hides the window; it continues to own its shortcut and instance claim. Disable any test shortcut, clean up generated bundles, and open the installed copy explicitly when returning to everyday use.
+Finish every GUI check, including a user-assisted keyboard check, by quitting the test instance and confirming that its process has exited. With a usable tray, closing only hides the window; it continues to own its shortcuts and instance claim. Disable any test shortcuts, clean up generated bundles, and open the installed copy explicitly when returning to everyday use.
 
 ### Interaction checks
 
@@ -134,9 +134,9 @@ Check paths, shortcuts, accessibility, and transparency on each native platform;
 | [Subtask previews](usage.md#capture-and-edit-tasks) | Enable previews, collapse separate parents, and open the full checklist. Toggle completion and check saved state. |
 | [Layout and appearance](usage.md#window-and-appearance-settings) | Test both title modes, 320- and 520-point windows, maximum text size in both fonts and weights, pinning, and opacity over bright and dark backgrounds. Use long text, explicit newlines, and many History rows; completion, Delete, Add, and Restore must remain reachable. Restart to check window placement. |
 | [Shared folders](storage.md#file-sync-behavior) | Use two isolated instances against one workspace. Edit and externally replace list files, including while inline editing, dragging, viewing context, and hidden. Introduce [duplicate identities](storage.md#duplicate-list-files); check selected contents and deletion refusal before and after restart. Switch folders, use Open workspace folder, then restart to check the selection. |
-| [Tray and shutdown](usage.md#startup-and-system-tray) | Close and minimize where supported, with decorations on and off. Hide during an inline edit, restore through the tray, then Quit while hidden. Confirm pending clear/delete actions saved and the process and icon exited. Repeat without a tray host and with the host disappearing while hidden. |
+| [Tray and shutdown](usage.md#startup-and-system-tray) | Close and minimize where supported, with decorations on and off. Hide during an inline edit, restore through the tray, then Quit while hidden. Choose Quick add from the tray menu while hidden and with the shortcut reference open: the window shows with the entry focused. Confirm pending clear/delete actions saved and the process and icon exited. Repeat without a tray host and with the host disappearing while hidden. |
 | Launch coordination | Test ordinary and `--start-hidden` launches, then repeat each with the same workspace and settings. Test app-menu and sign-in entries with installation paths containing spaces; inspect the startup entry and verify sign-in through a real desktop login. Windows release builds must open without a console. |
-| Taskbar and window state | On Windows and X11, check visible and hidden windows, repeated reveal and global shortcut activation, and tray-host removal and restoration. Test both pinned and unpinned states after every reveal, including while another application has focus; check maximization and preserve unrelated X11 state flags. |
+| Taskbar and window state | On Windows and X11, check visible and hidden windows, repeated reveal and activation of both global shortcuts, and tray-host removal and restoration. Test both pinned and unpinned states after every reveal, including while another application has focus; check maximization and preserve unrelated X11 state flags. |
 | macOS bundle | Use the [isolated development bundle](#running-alongside-an-installed-copy) for ordinary checks. Run [installer checks](../README.md#install-and-run) in a disposable macOS account: XDG overrides do not redirect its app bundle or LaunchAgent. Run `plutil -lint` on generated plists. Test close, disabled minimize, menu-bar Show/Quit, bundle reopening, and hidden startup without focus theft. Repeat with decorations disabled, a workspace path containing spaces, and an inline edit before hiding; restart. Check light/dark menu bars and Command shortcuts on Apple Silicon and Intel Macs. |
 | [Save recovery](storage.md#save-recovery) | Test an obstructed list directory, filename collision, and external replacement during editing. Exercise Retry, local-copy recovery, suspended Quick add, and Move failures at both writes. Include unfinished context and list names. Inspect both conflict versions and their independent IDs; check Close, Quit, workspace switching, and restart. Deleting a dirty list clears its retry state; successful retries preserve unrelated warnings. |
 | [Workspace recovery](storage.md#workspace-location) | Make the selected folder unavailable while the default folder contains test tasks. Startup must show recovery without loading those tasks. Restore and retry, including with a launch-only override, then explicitly choose another folder and check the saved selection. |
