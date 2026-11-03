@@ -83,7 +83,7 @@ impl MinimalistApp {
         self.move_subtask_draft(destination, source, task);
         if matches!(self.screen, Screen::List(active) if active == source) {
             self.keyboard.pending = Some(FocusItem::Task(source, task).id());
-        } else {
+        } else if matches!(self.screen, Screen::List(active) if active == destination) {
             self.repair_focus_from(item, &neighbors);
         }
     }
@@ -98,10 +98,6 @@ impl MinimalistApp {
     /// - `list` - Source list identity.
     /// - `task` - Task to move.
     pub(in crate::app) fn begin_move_task(&mut self, list: Uuid, task: Uuid) {
-        self.finish_inline_edit();
-        self.drag = None;
-        self.revealed = None;
-        self.keyboard.pending = None;
         let remembered = self
             .details
             .last_move_destination
@@ -112,6 +108,10 @@ impl MinimalistApp {
                 .find(|item| item.key != list)
                 .map(|item| item.key)
         }) {
+            self.finish_inline_edit();
+            self.drag = None;
+            self.revealed = None;
+            self.keyboard.pending = None;
             self.details.move_task = Some(MoveDialog {
                 source: list,
                 task,
@@ -324,13 +324,15 @@ impl MinimalistApp {
                 .collect();
             let current = others.iter().position(|key| *key == dialog.destination);
             let step = if take_key(ctx, Key::ArrowDown, Modifiers::NONE) {
-                1
+                Some(1)
             } else if take_key(ctx, Key::ArrowUp, Modifiers::NONE) {
-                others.len().saturating_sub(1)
+                Some(others.len().saturating_sub(1))
             } else {
-                0
+                None
             };
-            if step > 0 && !others.is_empty() {
+            if let Some(step) = step
+                && !others.is_empty()
+            {
                 dialog.destination =
                     others[current.map_or(0, |index| (index + step) % others.len())];
             }

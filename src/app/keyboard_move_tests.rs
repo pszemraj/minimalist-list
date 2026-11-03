@@ -286,7 +286,7 @@ fn a_vanished_destination_keeps_the_dialog_open_and_can_be_replaced() {
         Some("That list is no longer available. Choose another list.")
     );
     assert_eq!(titles(&saved(&f.app, f.list)), ["A", "B", "C"]);
-    key(&f.ctx, &mut f.app, Key::ArrowDown, Modifiers::NONE);
+    key(&f.ctx, &mut f.app, Key::ArrowUp, Modifiers::NONE);
     assert_eq!(destination(&f.app), f.other);
     key(&f.ctx, &mut f.app, Key::Enter, Modifiers::NONE);
     assert!(f.app.details.move_task.is_none());
@@ -395,4 +395,46 @@ fn global_quick_add_keeps_move_return_focus() {
         assert!(saved(&f.app, f.other).tasks.is_empty());
         cleanup(&f.app);
     }
+}
+
+#[test]
+fn move_without_a_destination_keeps_the_title_editor_open() {
+    let mut f = fixture(["A", "B", "C"]);
+    f.app.lists.truncate(1);
+    let task = f.tasks[1];
+    focus(&f.ctx, &mut f.app, FocusItem::Task(f.list, task).id());
+    key(&f.ctx, &mut f.app, Key::Enter, Modifiers::NONE);
+    type_text(&f.ctx, &mut f.app, " draft");
+    let editor = Id::new(("edit-task", f.list, task));
+    let draft = f.app.edit_text.clone();
+    assert_eq!(focused(&f.ctx), Some(editor));
+    frame(&f.ctx, &mut f.app, move_chord(), 430.0);
+    idle(&f.ctx, &mut f.app);
+    assert!(f.app.details.move_task.is_none());
+    assert_eq!(focused(&f.ctx), Some(editor));
+    assert_eq!(f.app.edit_text, draft);
+    assert_eq!(titles(&saved(&f.app, f.list)), ["A", "B", "C"]);
+    cleanup(&f.app);
+}
+
+#[test]
+fn undo_move_from_another_list_leaves_its_focused_row_alone() {
+    let mut f = fixture(["A", "B", "C"]);
+    let unrelated = Task::new("Unrelated");
+    let row = FocusItem::Task(f.third, unrelated.id).id();
+    let index = f.app.list_index(f.third).unwrap();
+    f.app.lists[index].data.tasks.push(unrelated);
+    assert!(f.app.save_list_index(index));
+    focus(&f.ctx, &mut f.app, FocusItem::Task(f.list, f.tasks[1]).id());
+    frame(&f.ctx, &mut f.app, move_chord(), 430.0);
+    idle(&f.ctx, &mut f.app);
+    choose_with_keys(&mut f, 0);
+    f.app.open_list(f.third);
+    focus(&f.ctx, &mut f.app, row);
+    key(&f.ctx, &mut f.app, Key::Z, Modifiers::COMMAND);
+    idle(&f.ctx, &mut f.app);
+    assert_eq!(titles(&saved(&f.app, f.list)), ["A", "B", "C"]);
+    assert!(saved(&f.app, f.other).tasks.is_empty());
+    assert_eq!(focused(&f.ctx), Some(row));
+    cleanup(&f.app);
 }
