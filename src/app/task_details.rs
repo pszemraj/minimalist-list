@@ -16,6 +16,9 @@ use uuid::Uuid;
 #[path = "task_operations.rs"]
 mod operations;
 
+#[path = "task_move.rs"]
+mod moving;
+
 #[path = "task_controls.rs"]
 mod controls;
 

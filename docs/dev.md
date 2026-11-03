@@ -28,7 +28,8 @@ src/app/desktop.rs          Global shortcut settings and workspace-folder openin
 src/app/settings.rs         Global preferences and separate List options
 src/app/task_details.rs     Measured checklists and read-only History
 src/app/task_controls.rs    Task controls and optional collapsible child previews
-src/app/task_operations.rs  Child editing, Undo, moving, and archival
+src/app/task_operations.rs  Child editing, Undo, and archival
+src/app/task_move.rs        Move dialog, two-list transfer, and Move Undo
 src/app/task_text.rs        Title wrapping and hover scrolling
 src/app/theme.rs            Fonts, palettes, and shared rendering helpers
 src/app/window.rs           Tray hiding, restoration, and shutdown
