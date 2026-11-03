@@ -528,6 +528,36 @@ fn delete_list_leaves_a_replacement_directory_in_the_workspace() {
 }
 
 #[test]
+fn deleted_long_filename_restores_its_identity_and_bytes() {
+    let root = root();
+    let list = create_list(&root, "Long filename", Accent::Mint).unwrap();
+    let id = Uuid::new_v4();
+    let path = list
+        .path
+        .with_file_name(format!("{}--{id}.json", "x".repeat(207)));
+    fs::rename(&list.path, &path).unwrap();
+    let contents = fs::read(&path).unwrap();
+    let loaded = load_workspace(&root).unwrap().lists.remove(0);
+    assert_eq!(loaded.key, id);
+
+    delete_list(&root, &loaded).unwrap();
+    assert!(!path.exists());
+    let backups = backups_dir(&root);
+    let backup = fs::read_dir(backups.join("deleted"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap();
+    assert_eq!(fs::read(backup.path()).unwrap(), contents);
+    fs::copy(backup.path(), root.join("lists").join(backup.file_name())).unwrap();
+    let restored = load_workspace(&root).unwrap().lists.remove(0);
+    assert_eq!(restored.key, id);
+    assert_eq!(restored.data.title, list.data.title);
+    fs::remove_dir_all(backups).unwrap();
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn deleted_uuid_only_list_restores_with_its_filename_identity() {
     let root = root();
     let keep = create_list(&root, "Keep", Accent::Mint).unwrap();

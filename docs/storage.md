@@ -113,7 +113,7 @@ Before a save replaces a list file, its previous contents are copied to `snapsho
 
 **Clear History** saves pending edits first, then takes a snapshot even when the newest one is under an hour old. If either step fails, the archived tasks stay in History.
 
-**Delete list** moves the list file to `deleted/`. Backups of legacy UUID-only files use a descriptive filename to preserve the filename UUID. For a list opened through a symbolic link, the app saves a regular copy of its target and removes the link from the workspace. The app retains each deleted backup until you remove it.
+**Delete list** moves the list file to `deleted/`. For legacy UUID-only filenames or names too long to take a timestamp prefix, the backup uses a bounded descriptive filename that preserves the list UUID. For a list opened through a symbolic link, the app saves a regular copy of its target and removes the link from the workspace. The app retains each deleted backup until you remove it.
 
 To restore a snapshot, save any pending edits and quit the instance using the workspace. Replace the current list file's contents with the snapshot and keep the current filename, including its UUID. Reopen the app to load the restored list.
 
