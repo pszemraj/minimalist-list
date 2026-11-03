@@ -273,25 +273,23 @@ impl MinimalistApp {
         if source == target {
             return;
         }
-        let moved = tasks.remove(source);
-        tasks.insert(target, moved);
         if mode == TaskSort::ByStatus {
-            // Files keep Manual order, so place the task beside its new group neighbour there.
-            let (anchor, after) = if target < *range.end() {
-                (tasks[target + 1].id, 0)
-            } else {
-                (tasks[target - 1].id, 1)
+            // Cross only as far as the target group neighbour in Manual order.
+            let anchor = tasks[target].id;
+            let Some(order) = self.manual_task_order.get_mut(&list) else {
+                return;
             };
-            if let Some(order) = self.manual_task_order.get_mut(&list)
-                && let Some(from) = order.iter().position(|id| *id == task)
-            {
-                order.remove(from);
-                let to = order
-                    .iter()
-                    .position(|id| *id == anchor)
-                    .map_or(from, |position| position + after);
-                order.insert(to, task);
-            }
+            let Some(from) = order.iter().position(|id| *id == task) else {
+                return;
+            };
+            let Some(to) = order.iter().position(|id| *id == anchor) else {
+                return;
+            };
+            order.remove(from);
+            order.insert(to, task);
+        } else {
+            let moved = tasks.remove(source);
+            tasks.insert(target, moved);
         }
         self.save_list_index(index);
     }

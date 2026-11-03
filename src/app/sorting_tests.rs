@@ -422,3 +422,44 @@ fn other_views_still_refuse_reordering() {
     assert_eq!(disk_ids(&app), manual);
     std::fs::remove_dir_all(app.workspace).unwrap();
 }
+
+#[test]
+fn by_status_moves_only_as_far_as_the_crossed_neighbor_in_manual_order() {
+    let (_, mut app) = test_app();
+    let list = app.lists[0].key;
+    app.lists[0].data.tasks = (0..5)
+        .map(|i| {
+            let mut task = Task::new(format!("Task {i}"));
+            if i % 2 == 0 {
+                task.toggle_started();
+            }
+            task
+        })
+        .collect();
+    app.save_list_index(0);
+    let manual = disk_ids(&app);
+    app.sort_tasks(list, TaskSort::ByStatus);
+
+    app.reorder_task(list, manual[0], 1);
+    assert_eq!(
+        ids(&app),
+        [manual[2], manual[0], manual[4], manual[1], manual[3]]
+    );
+    assert_eq!(
+        disk_ids(&app),
+        [manual[1], manual[2], manual[0], manual[3], manual[4]]
+    );
+    let bytes = std::fs::read(&app.lists[0].path).unwrap();
+    app.reorder_task(list, manual[2], 0);
+    assert_eq!(std::fs::read(&app.lists[0].path).unwrap(), bytes);
+
+    // An unavailable Manual order cannot be reconstructed from grouped rows.
+    app.manual_task_order.remove(&list);
+    app.reorder_task(list, manual[0], 2);
+    assert_eq!(
+        ids(&app),
+        [manual[2], manual[0], manual[4], manual[1], manual[3]]
+    );
+    assert_eq!(std::fs::read(&app.lists[0].path).unwrap(), bytes);
+    std::fs::remove_dir_all(app.workspace).unwrap();
+}
