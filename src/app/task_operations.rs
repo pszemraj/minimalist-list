@@ -119,6 +119,14 @@ impl MinimalistApp {
         });
     }
 
+    /// Saves the active inline title or checklist edit before leaving its editor.
+    pub(in crate::app) fn finish_inline_edit(&mut self) {
+        self.finish_subtask_edit();
+        if let Some((list_id, task_id)) = self.editing {
+            self.commit_task_edit(list_id, task_id, &self.edit_text.clone());
+        }
+    }
+
     /// Applies an outgoing checklist edit without changing its identity or state.
     ///
     /// # Panics
