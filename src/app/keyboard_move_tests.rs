@@ -430,3 +430,53 @@ fn undo_move_from_another_list_leaves_its_focused_row_alone() {
     assert_eq!(focused(&f.ctx), Some(row));
     cleanup(&f.app);
 }
+
+#[test]
+fn long_move_titles_keep_the_picker_and_buttons_inside_a_narrow_window() {
+    for height in [280.0, 500.0] {
+        let long_title = "A long task title for the narrow Move dialog. ".repeat(35);
+        let mut f = fixture([&long_title, "B", "C"]);
+        f.app.begin_move_task(f.list, f.tasks[0]);
+        let size = egui::vec2(320.0, height);
+        let mut output = Default::default();
+        for _ in 0..4 {
+            let input = crate::app::tests::frame_input(
+                size,
+                f.ctx.input(|input| input.time) + 0.3,
+                Vec::new(),
+            );
+            output = crate::app::tests::run_app_frame(&f.ctx, &mut f.app, input);
+        }
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
+        for label in ["Other", "Move", "Cancel"] {
+            let position = label_center(&output, label);
+            assert!(
+                screen.contains(position),
+                "{label} at {position} outside {screen:?}"
+            );
+        }
+        let position = label_center(&output, "Move");
+        let events = vec![
+            Event::PointerMoved(position),
+            Event::PointerButton {
+                pos: position,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: Modifiers::NONE,
+            },
+            Event::PointerButton {
+                pos: position,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: Modifiers::NONE,
+            },
+        ];
+        let input =
+            crate::app::tests::frame_input(size, f.ctx.input(|input| input.time) + 0.3, events);
+        crate::app::tests::run_app_frame(&f.ctx, &mut f.app, input);
+        assert!(f.app.details.move_task.is_none());
+        assert_eq!(saved(&f.app, f.other).tasks[0].text, long_title);
+        assert_eq!(titles(&saved(&f.app, f.list)), ["B", "C"]);
+        cleanup(&f.app);
+    }
+}

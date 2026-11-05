@@ -8,7 +8,7 @@ use crate::{
     },
     storage::StoredList,
 };
-use eframe::egui::{self, ComboBox, Id, Key, Modifiers};
+use eframe::egui::{self, ComboBox, Id, Key, Modifiers, ScrollArea};
 use uuid::Uuid;
 
 /// A list's manual order and conflict snapshot, kept in case a write is abandoned.
@@ -335,9 +335,16 @@ impl MinimalistApp {
         }
         let mut picker = None;
         let modal = egui::Modal::new(Id::new("move-task-modal")).show(ctx, |ui| {
-            ui.set_max_width((ctx.content_rect().width() - 56.0).clamp(100.0, 360.0));
+            let available = ctx.content_rect().size() - egui::vec2(56.0, 56.0);
+            ui.set_max_width(available.x.clamp(100.0, 360.0));
+            ui.set_max_height(available.y.max(100.0));
             ui.heading("Move to list");
-            ui.add(egui::Label::new(title).wrap());
+            ScrollArea::vertical()
+                .id_salt(("move-task-title", source, task))
+                .max_height((available.y - 110.0).max(40.0))
+                .show(ui, |ui| {
+                    ui.add(egui::Label::new(title).wrap());
+                });
             let combo = ComboBox::from_id_salt("move-destination")
                 .selected_text(
                     self.list_index(dialog.destination)
