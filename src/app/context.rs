@@ -30,15 +30,17 @@ pub(super) struct TaskContextEditor {
 /// The verb followed by days, hours, or minutes ago, or "just now" under a minute.
 pub(super) fn relative_age(verb: &str, since: u64, now: u64) -> String {
     let age = now.saturating_sub(since);
-    if age >= 86_400 {
-        format!("{verb} {} days ago", age / 86_400)
+    let (seconds, unit) = if age >= 86_400 {
+        (86_400, "day")
     } else if age >= 3_600 {
-        format!("{verb} {} hours ago", age / 3_600)
+        (3_600, "hour")
     } else if age >= 60 {
-        format!("{verb} {} minutes ago", age / 60)
+        (60, "minute")
     } else {
-        format!("{verb} just now")
-    }
+        return format!("{verb} just now");
+    };
+    let suffix = if age < 2 * seconds { "" } else { "s" };
+    format!("{verb} {} {unit}{suffix} ago", age / seconds)
 }
 
 impl MinimalistApp {

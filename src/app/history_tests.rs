@@ -359,7 +359,9 @@ fn clearing_history_is_refused_when_no_backup_can_be_written() {
 #[test]
 fn relative_age_names_whole_days_hours_minutes_or_just_now() {
     assert_eq!(relative_age("Created", 100, 159), "Created just now");
-    assert_eq!(relative_age("Created", 100, 160), "Created 1 minutes ago");
+    assert_eq!(relative_age("Created", 100, 160), "Created 1 minute ago");
+    assert_eq!(relative_age("Archived", 0, 3_600), "Archived 1 hour ago");
+    assert_eq!(relative_age("Archived", 0, 86_400), "Archived 1 day ago");
     assert_eq!(relative_age("Archived", 0, 7_200), "Archived 2 hours ago");
     assert_eq!(
         relative_age("Archived", 0, 3 * 86_400 + 5),
