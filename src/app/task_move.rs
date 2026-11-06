@@ -346,12 +346,15 @@ impl MinimalistApp {
                     ui.add(egui::Label::new(title).wrap());
                 });
             let combo = ComboBox::from_id_salt("move-destination")
+                .width(ui.available_width())
+                .wrap_mode(egui::TextWrapMode::Truncate)
                 .selected_text(
                     self.list_index(dialog.destination)
                         .map(|index| self.lists[index].data.title.as_str())
                         .unwrap_or("Choose list"),
                 )
                 .show_ui(ui, |ui| {
+                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
                     for list in &self.lists {
                         if list.key != source
                             && ui

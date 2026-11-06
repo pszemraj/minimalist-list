@@ -480,3 +480,65 @@ fn long_move_titles_keep_the_picker_and_buttons_inside_a_narrow_window() {
         cleanup(&f.app);
     }
 }
+
+#[test]
+fn long_move_destinations_keep_the_picker_and_popup_inside_a_narrow_window() {
+    let mut f = fixture(["A", "B", "C"]);
+    let long_title = "Long destination list title ".repeat(20);
+    let destination = f.app.list_index(f.other).unwrap();
+    f.app.lists[destination].data.title.clone_from(&long_title);
+    f.ctx.enable_accesskit();
+    f.app.begin_move_task(f.list, f.tasks[0]);
+    let size = egui::vec2(320.0, 280.0);
+    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
+    let render = |f: &mut Fixture, events| {
+        let input =
+            crate::app::tests::frame_input(size, f.ctx.input(|input| input.time) + 0.3, events);
+        crate::app::tests::run_app_frame(&f.ctx, &mut f.app, input)
+    };
+    for _ in 0..4 {
+        render(&mut f, Vec::new());
+    }
+    let picker = f.ctx.read_response(focused(&f.ctx).unwrap()).unwrap();
+    assert!(
+        screen.contains_rect(picker.rect),
+        "destination picker {:?} outside {screen:?}",
+        picker.rect
+    );
+    let position = picker.rect.center();
+    render(
+        &mut f,
+        vec![
+            Event::PointerMoved(position),
+            Event::PointerButton {
+                pos: position,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: Modifiers::NONE,
+            },
+            Event::PointerButton {
+                pos: position,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: Modifiers::NONE,
+            },
+        ],
+    );
+    for _ in 0..3 {
+        render(&mut f, Vec::new());
+    }
+    let output = render(&mut f, Vec::new());
+    let tree = output.platform_output.accesskit_update.unwrap();
+    let choice = tree
+        .nodes
+        .iter()
+        .find(|(_, node)| node.label() == Some(long_title.as_str()))
+        .expect("the full destination name remains accessible");
+    let bounds = choice.1.bounds().unwrap();
+    assert!(bounds.x0 >= 0.0 && bounds.x1 <= f64::from(size.x));
+    assert_eq!(
+        f.app.details.move_task.as_ref().unwrap().destination,
+        f.other
+    );
+    cleanup(&f.app);
+}
