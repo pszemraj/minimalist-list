@@ -128,7 +128,10 @@ impl MinimalistApp {
     ///
     /// # Arguments
     /// - `candidate` - Whole-list candidate, including its latest task mutations.
-    pub(super) fn prepare_list_for_save(&mut self, candidate: &mut StoredList) {
+    ///
+    /// # Returns
+    /// The candidate's Manual order, without adopting it in the loaded list.
+    pub(super) fn prepare_list_for_save(&self, candidate: &mut StoredList) -> Vec<Uuid> {
         let mode = self.task_sort_mode(candidate.key);
         let manual = if mode == TaskSort::Manual {
             candidate.data.tasks.iter().map(|task| task.id).collect()
@@ -140,8 +143,8 @@ impl MinimalistApp {
                 .unwrap_or_default();
             reconcile_order(&previous, &candidate.data.tasks)
         };
-        self.manual_task_order.insert(candidate.key, manual.clone());
         apply_order(&mut candidate.data.tasks, &manual, TaskSort::Manual);
+        manual
     }
 
     /// Clones the loaded list and prepares its tasks for a Manual-order disk write.
@@ -156,7 +159,9 @@ impl MinimalistApp {
     /// Panics if the caller supplies an invalid loaded-list index.
     pub(super) fn list_for_save(&mut self, index: usize) -> StoredList {
         let mut candidate = self.lists[index].clone();
-        self.prepare_list_for_save(&mut candidate);
+        let manual = self.prepare_list_for_save(&mut candidate);
+        // The loaded edits survive a write failure, including their Manual order.
+        self.manual_task_order.insert(candidate.key, manual);
         candidate
     }
 

@@ -20,6 +20,7 @@ pub(super) struct PersistenceState {
     pub(super) settings_dirty: bool,
     settings_save_after: Option<Instant>,
     pub(super) notice: Option<(String, Instant)>,
+    backup_warned: bool,
 }
 
 #[cfg(test)]
@@ -46,6 +47,7 @@ impl PersistenceState {
             settings_dirty: false,
             settings_save_after: None,
             notice: None,
+            backup_warned: false,
         }
     }
 }
@@ -100,6 +102,23 @@ impl MinimalistApp {
         }
     }
 
+    /// Writes a list after keeping its previous file contents in local backups.
+    ///
+    /// A backup failure warns once per session and never blocks the save.
+    fn write_list(&mut self, list: &StoredList) -> Result<(), String> {
+        if let Err(error) = storage::snapshot_list(&self.workspace, list)
+            && !self.persistence.backup_warned
+        {
+            self.persistence.backup_warned = true;
+            let message = format!("Local backup unavailable: {error}");
+            self.status = Some(match self.status.take() {
+                Some(status) => format!("{status}\n{message}"),
+                None => message,
+            });
+        }
+        storage::save_list(list)
+    }
+
     /// Saves one list and retains failed content for explicit retry.
     ///
     /// # Returns
@@ -110,7 +129,7 @@ impl MinimalistApp {
     pub(super) fn save_list_index(&mut self, index: usize) -> bool {
         let list = self.list_for_save(index);
         let id = list.key;
-        let saved = match storage::save_list(&list) {
+        let saved = match self.write_list(&list) {
             Ok(()) => {
                 self.lists[index].stamp.set(list.stamp.get());
                 self.lists[index]
@@ -150,11 +169,12 @@ impl MinimalistApp {
         index: usize,
         mut candidate: StoredList,
     ) -> Result<(), String> {
-        self.prepare_list_for_save(&mut candidate);
-        if let Err(error) = storage::save_list(&candidate) {
+        let manual = self.prepare_list_for_save(&mut candidate);
+        if let Err(error) = self.write_list(&candidate) {
             self.record_save_conflict(&candidate);
             return Err(error);
         }
+        self.manual_task_order.insert(candidate.key, manual);
         self.lists[index] = candidate;
         self.apply_task_sorts();
         self.complete_list_save(index);
@@ -227,6 +247,14 @@ impl MinimalistApp {
         if self.persistence.settings_dirty || self.persistence.settings_save_after.is_some() {
             self.save_settings();
         }
+        self.clear_resolved_save_error()
+    }
+
+    /// Clears the matching retry warning once no saves are pending.
+    ///
+    /// # Returns
+    /// Whether there are no pending list or preference writes.
+    pub(super) fn clear_resolved_save_error(&mut self) -> bool {
         let saved = self.persistence.dirty_lists.is_empty()
             && self.persistence.pending_filenames.is_empty()
             && !self.persistence.settings_dirty;

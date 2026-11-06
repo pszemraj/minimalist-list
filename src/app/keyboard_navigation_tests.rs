@@ -42,7 +42,7 @@ fn opening_settings_preserves_fractional_preferences_until_a_slider_is_edited() 
     for _ in 0..2 {
         key(&ctx, &mut app, Key::PageDown, Modifiers::NONE);
     }
-    let saved = storage::load_settings().unwrap();
+    let saved = storage::load_settings().0;
     assert_eq!(saved.font_size, 19.4);
     assert_eq!(saved.row_padding, 7.4);
     assert_eq!(saved.background_opacity, 0.83);
@@ -52,9 +52,9 @@ fn opening_settings_preserves_fractional_preferences_until_a_slider_is_edited() 
     key(&ctx, &mut app, Key::ArrowDown, Modifiers::NONE);
     key(&ctx, &mut app, Key::ArrowRight, Modifiers::NONE);
     assert_eq!(app.settings.font_size, 20.0);
-    assert_eq!(storage::load_settings().unwrap().font_size, 19.4);
+    assert_eq!(storage::load_settings().0.font_size, 19.4);
     assert!(app.finish_pending_changes());
-    let saved = storage::load_settings().unwrap();
+    let saved = storage::load_settings().0;
     assert_eq!(saved.font_size, 20.0);
     assert_eq!(saved.row_padding, 7.4);
     assert_eq!(saved.background_opacity, 0.83);
@@ -329,7 +329,7 @@ fn settings_arrows_move_rows_and_page_keys_jump_sections() {
     let pin = ctx.memory(|m| m.focused());
     key(&ctx, &mut app, Key::Space, Modifiers::NONE);
     assert!(app.settings.always_on_top);
-    assert!(storage::load_settings().unwrap().always_on_top);
+    assert!(storage::load_settings().0.always_on_top);
     key(&ctx, &mut app, Key::PageDown, Modifiers::NONE);
     assert!(!ctx.text_edit_focused());
     let appearance = ctx.memory(|m| m.focused());

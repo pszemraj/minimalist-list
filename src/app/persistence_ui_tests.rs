@@ -22,12 +22,12 @@ fn appearance_writes_wait_for_a_pause_and_shutdown_flushes_the_final_value() {
     app.schedule_settings_save(&ctx);
     app.persistence.settings_save_after = Some(Instant::now());
     app.flush_deferred_settings(&ctx);
-    assert_eq!(storage::load_settings().unwrap().font_size, 25.0);
+    assert_eq!(storage::load_settings().0.font_size, 25.0);
     assert!(app.persistence.settings_save_after.is_none());
     app.settings.background_opacity = 0.4;
     app.schedule_settings_save(&ctx);
     assert!(app.finish_pending_changes());
-    assert_eq!(storage::load_settings().unwrap().background_opacity, 0.4);
+    assert_eq!(storage::load_settings().0.background_opacity, 0.4);
     fs::remove_dir_all(app.workspace).unwrap();
 }
 
@@ -345,7 +345,7 @@ fn retry_save_only_appears_for_independent_recoverable_writes() {
                 );
             }
         } else if independent == "preferences" {
-            assert_eq!(storage::load_settings().unwrap().font_size, 24.0);
+            assert_eq!(storage::load_settings().0.font_size, 24.0);
         }
         fs::remove_dir_all(app.workspace).unwrap();
     }

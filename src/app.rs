@@ -9,6 +9,7 @@ mod keyboard;
 mod list;
 mod overlays;
 mod overview;
+mod paste;
 mod persistence;
 #[cfg(test)]
 mod persistence_tests;
@@ -110,6 +111,7 @@ pub struct MinimalistApp {
     rename_input: String,
     rename_baseline: String,
     delete_armed: bool,
+    clear_history_armed: bool,
     next_scan: Instant,
     last_pin_state: Option<bool>,
     last_decorations_state: Option<bool>,
@@ -133,9 +135,11 @@ pub struct MinimalistApp {
     next_taskbar_check: Instant,
     instance: Option<crate::instance::InstanceGuard>,
     global_shortcut: Option<crate::hotkey::GlobalShortcut>,
-    global_shortcut_input: String,
-    /// Last shortcut failure shown, cleared by a later successful apply.
-    shortcut_error: Option<String>,
+    global_quick_add_requested: bool,
+    /// Editable shortcut text per `GlobalAction`.
+    shortcut_inputs: crate::hotkey::PerAction<String>,
+    /// Last failure shown per `GlobalAction`, cleared by a later successful apply.
+    shortcut_errors: crate::hotkey::PerAction<Option<String>>,
     task_context: Option<context::TaskContextEditor>,
     #[cfg(target_os = "macos")]
     reopen: Option<crate::macos::ReopenHandler>,
@@ -243,11 +247,7 @@ impl MinimalistApp {
             })
             .unwrap_or_else(|| Palette::from_accent(Accent::Charcoal));
         let workspace_input = settings.workspace_path.clone();
-        let global_shortcut_input = if settings.global_shortcut.is_empty() {
-            String::new()
-        } else {
-            crate::hotkey::label(&settings.global_shortcut)
-        };
+        let shortcut_inputs = crate::hotkey::input_texts(&settings);
 
         let mut app = Self {
             settings,
@@ -280,6 +280,7 @@ impl MinimalistApp {
             rename_input: String::new(),
             rename_baseline: String::new(),
             delete_armed: false,
+            clear_history_armed: false,
             next_scan: Instant::now() + SCAN_INTERVAL,
             last_pin_state: None,
             last_decorations_state: None,
@@ -303,8 +304,9 @@ impl MinimalistApp {
             next_taskbar_check: Instant::now(),
             instance: None,
             global_shortcut: None,
-            global_shortcut_input,
-            shortcut_error: None,
+            global_quick_add_requested: false,
+            shortcut_inputs,
+            shortcut_errors: Default::default(),
             task_context: None,
             #[cfg(target_os = "macos")]
             reopen: None,
@@ -528,12 +530,9 @@ impl MinimalistApp {
             .unwrap_or_default();
         self.rename_baseline.clone_from(&self.rename_input);
         self.workspace_input = self.settings.workspace_path.clone();
-        self.global_shortcut_input = if self.settings.global_shortcut.is_empty() {
-            String::new()
-        } else {
-            crate::hotkey::label(&self.settings.global_shortcut)
-        };
+        self.shortcut_inputs = crate::hotkey::input_texts(&self.settings);
         self.delete_armed = false;
+        self.clear_history_armed = false;
         self.begin_transition(1.0);
         self.screen = Screen::Settings;
     }
@@ -903,6 +902,11 @@ impl eframe::App for MinimalistApp {
         self.task_operations_ui(ui.ctx());
         self.task_context_ui(ui.ctx());
         self.finish_keyboard_frame(ui.ctx());
+        // Native requests arrive in logic, before this frame's editor input is processed.
+        if std::mem::take(&mut self.global_quick_add_requested) && !self.quitting {
+            self.open_global_quick_add(ui.ctx());
+            ui.ctx().request_repaint();
+        }
     }
 }
 

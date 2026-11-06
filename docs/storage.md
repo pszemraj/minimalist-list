@@ -31,9 +31,11 @@ Workspace selection follows this order:
 3. The path saved through Settings
 4. The platform default
 
-The flag and environment variable do not replace the saved setting. Choosing a folder in the application does. Run `cargo run --locked -- --help` for the command summary.
+Choosing a folder in the application saves it for the next launch. Run `cargo run --locked -- --help` for the command summary.
 
-If the selected workspace is temporarily unavailable at startup, its saved path is retained. A missing saved folder, or one whose `lists` subfolder is missing or has no list files, such as an unmounted or still-syncing folder, is neither recreated nor given a new list; only the platform default, `--data-dir`, `MINIMALIST_LIST_WORKSPACE`, and folders chosen in Settings are created when absent or start with a list when empty. If the open workspace's `lists` folder disappears, becomes unreadable, or loses all its list files while the app runs, the next scan shows the same recovery screen instead of creating a new list. The recovery screen offers **Retry workspace** or **Choose workspace...** without opening another workspace's lists. Restore access and retry to reopen it. Retrying a launch-only override does not replace the saved selection; choosing another folder does.
+If the selected workspace is unavailable at startup, the app offers **Retry workspace** and **Choose workspace...**. The same screen appears if the open workspace's `lists` folder disappears, becomes unreadable, or loses all its list files during a scan. Restore access and retry to reopen it with the current selection.
+
+The app creates missing folders and starts with a list when opening an empty platform default, launch override, or folder explicitly chosen in Settings. Other saved folders must already contain list files. This protects an unmounted or still-syncing workspace from accidental initialization.
 
 ## Default directories
 
@@ -49,11 +51,11 @@ When the Windows environment variables are absent or empty, paths fall back to `
 
 If the native defaults do not exist on macOS or Windows, the app uses an existing `~/.local/share/minimalist-list/` workspace or `~/.config/minimalist-list/settings.json` settings file. Each fallback is independent; the settings file is used for both loading and saving. These legacy paths use `HOME`, including on Windows. No files are copied or moved. Launch overrides and saved workspace selections keep the precedence shown above.
 
-`window.ron`, beside `settings.json`, stores native window geometry and framework state. Local `instances/` files coordinate [repeated launches](usage.md#startup-and-system-tray) for each workspace; they do not belong in a synced list folder.
+`window.ron`, beside `settings.json`, stores native window geometry and framework state. Local `instances/` files coordinate [repeated launches](usage.md#startup-and-system-tray) for each workspace.
 
-`settings.lock` serializes local preference merges across running instances, preserving unrelated changes made by different workspaces.
+`settings.lock` serializes preference saves across running instances. Each save merges changed preferences into the file's current values, including valid values recovered from a partially malformed file.
 
-Malformed settings show a startup warning and use defaults. Before replacing them, a preference save preserves the original bytes beside the file as `settings.invalid-<UUID>.json`. File read errors remain save errors. Unchanged preferences leave the settings file untouched; continuous appearance adjustments save after a short pause and flush when leaving the application.
+Malformed settings show a startup warning. Each preference that still parses is kept and any malformed one uses its default; a file that is unreadable or not a JSON object uses all defaults. Before replacing the file, a preference save preserves the original bytes beside it as `settings.invalid-<UUID>.json`. File read errors remain save errors. Unchanged preferences leave the settings file untouched; continuous appearance adjustments save after a short pause and flush when leaving the application.
 
 ## File layout
 
@@ -68,7 +70,7 @@ minimalist-list/
 
 New filenames combine a safe, bounded list title with its stable UUID. Renaming a list saves its contents before updating its filename; name collisions never replace another file. If the filename update fails, the contents remain at the previous path with a warning. Quitting, switching workspaces, and reloads remain available. After resolving the filename problem, change the title again to retry; submitting an unchanged title does nothing. Existing UUID-only filenames remain readable and ordinary saves keep their paths. The filename UUID is authoritative.
 
-Default list order comes from `created_at_unix`, with the UUID as a stable tie-breaker. Manual tile order and temporary list/task sort modes are local workspace-scoped settings. Task JSON retains manual task order for [every sort mode](usage.md#complete-reorder-and-remove-tasks); task IDs are not duplicated in local settings. Preferences for deleted lists are removed when that workspace is loaded.
+Default list order comes from `created_at_unix`, with the UUID as a stable tie-breaker. The app remembers tile order and the chosen list and task sort modes locally for each workspace. The `tasks` array keeps Manual order for [every sort mode](usage.md#complete-reorder-and-remove-tasks). Preferences for deleted lists are removed when that workspace is loaded.
 
 ## File-sync behavior
 
@@ -77,7 +79,9 @@ Sync services transfer the [per-list files](#file-layout) independently.
 > [!IMPORTANT]
 > Minimalist List does not merge simultaneous changes to the same list. Let one device finish syncing before editing that list on another device.
 
-Every edit writes and flushes a temporary sibling file, then replaces the destination. Saves compare the destination with its last loaded or saved bytes, including immediately before replacement, even when its timestamp and size are unchanged: timestamp-only changes permit saving, while changed contents preserve the external file and retain local changes for [recovery](#save-recovery). A change between the final check and replacement is still possible. On startup and workspace loading, recognized unlocked temporary files older than a day are removed; recent or active writes are retained.
+A list save writes and flushes a temporary sibling file before replacing the destination. It compares the destination with its last loaded or saved bytes, including immediately before replacement, even when the timestamp and size are unchanged. A timestamp-only change permits saving. If the bytes changed, the external file stays in place and the local edit is kept for [recovery](#save-recovery). A change between the final check and replacement is still possible.
+
+On startup and workspace loading, the app removes recognized unlocked temporary files older than a day.
 
 The app checks disk every five seconds and reloads externally changed list files at the next scan. Reloads wait until task or child editing and dragging finish, while any task context dialog is open, and while unsaved list changes need recovery. A sync service controls when a file arrives on another computer.
 
@@ -89,11 +93,33 @@ If files contain the same list UUID, filenames with a recognized UUID take prece
 
 Before quitting or switching workspaces, the app saves inline edits, list title changes, open context drafts, and accepted archive/delete actions. Hiding also saves open editors and list names. A failed write retains changes in memory and keeps the window and workspace available. Restore folder access and choose **Retry save**.
 
-A failed Quick add keeps its draft and destination until retried or explicitly cancelled, including when Find hides it. Task context keeps its editor open with the draft. Retry actions appear for write failures; external-edit conflicts offer local-copy recovery instead. These failures block shutdown and workspace switching until saved or cancelled.
+A failed [Quick add](usage.md#quick-add) keeps its typed draft, any pasted batch, and destination, even when Find hides it. **Retry save** saves a failed batch on its own and leaves any separately typed text in the entry. Task context keeps its editor open with the draft. External-edit conflicts offer local-copy recovery. Resolve or cancel the failed edit before quitting or switching workspaces.
 
 If another device changed the list, choose **Keep local copy and reload** in the save warning or failed editor. It saves the local contents in a separate **(local copy)** list with new list, task, and child IDs, then reloads the original. The copy includes current inline edits, editable context, active or suspended Quick add drafts, and an unfinished list-name change for that list. Both versions remain ordinary JSON files. Resolve each conflicting list before quitting or switching workspaces.
 
 Moving a task writes the destination before removing the source and attempts to roll back both lists if either write fails; the two list files are not a single atomic transaction.
+
+## Local backups
+
+Saves, Clear History, and list deletion keep earlier list files in `backups/` beside the [local settings file](#default-directories), outside the workspace. Syncing the workspace does not transfer these local backups between computers.
+
+Each workspace has a subfolder named by a 16-digit hexadecimal key derived from its path. **Settings -> Workspace -> Open backups folder** opens the active workspace's subfolder, creating it if needed.
+
+```text
+backups/<workspace key>/
++-- snapshots/<list UUID>/<unix seconds>-<sequence>.json
++-- deleted/<unix seconds>-<title>--<list UUID>.json
+```
+
+Before a save replaces a list file, its previous contents are copied to `snapshots/`. A save writes no snapshot while the latest backup for that list is under an hour old. Retention keeps up to 100 snapshots per list in creation order, using the sequence number even if the clock changes. Earlier timestamp-only snapshots can still be restored. Other files in the folder stay in place. The list file itself holds the latest saved version. If a snapshot cannot be written, saving continues and the app warns once per session.
+
+**Clear History** saves pending edits first, then takes a snapshot even when the newest one is under an hour old. If either step fails, the archived tasks stay in History.
+
+**Delete list** moves the list file to `deleted/` under a timestamped filename built from its title and UUID. For a list opened through a symbolic link, the app saves a regular copy of its target and removes the link from the workspace. The app retains each deleted backup until you remove it.
+
+To restore a snapshot, save any pending edits and quit the instance using the workspace. Replace the current list file's contents with the snapshot and keep the current filename, including its UUID. Reopen the app to load the restored list.
+
+To restore a deleted list, copy its file from `deleted/` back into the workspace's `lists/` folder. The list returns with its original identity at the next scan. You can remove the leading `<unix seconds>-` from the filename. If an older backup has a `<unix seconds>-<UUID>.json` filename, remove the timestamp prefix so the filename UUID is used.
 
 ## JSON format
 
@@ -108,4 +134,14 @@ List files are pretty-printed and hand-editable. `format_version` is currently `
 
 Timestamps are Unix seconds. `accent` is one of `Mint`, `Charcoal`, `Crimson`, `Sand`, `Sky`, or `Lavender`.
 
-Missing `context` loads as empty; an empty context is omitted when writing. Older versions without task-context support discard this field when rewriting a list. See [task context](usage.md#add-task-context) for editing and copying notes.
+Missing `context` loads as empty; an empty context is omitted when writing. See [task context](usage.md#add-task-context) for editing and copying notes.
+
+### Format compatibility
+
+The app supports list format `1` and checks that version before decoding task contents. Unsupported files remain on disk and produce a warning naming the file and supported version. Update the app on that computer before editing the affected list. Other supported lists can still open.
+
+Saving an unsupported in-memory list is also refused. If another app replaces an open list with an unsupported file, the last loaded contents may remain visible, but the replacement cannot be overwritten, renamed, or deleted through that cached list.
+
+Within the supported format, unknown JSON fields are retained on lists, tasks, subtasks, and archive entries. Editing, moving, or archiving a task keeps those fields with the objects that survive the operation. Deleting an object removes its fields too; restoring a task from History removes its archive entry, including fields belonging only to that entry.
+
+Optional additions with defaults can keep the same format when existing editing behavior remains valid. Changes to field types, required structure, or behavior that older writers must understand require a new format and an explicit conversion from supported older formats. There is currently no older list format to migrate. Opening a workspace does not upgrade or rewrite all of its files. Format compatibility does not merge simultaneous edits; the [file-sync rules](#file-sync-behavior) still apply.

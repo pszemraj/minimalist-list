@@ -81,7 +81,7 @@ fn view_mode_and_manual_order_survive_restart() {
     let (_, mut app, list, manual) = fixture();
     app.sort_tasks(list, TaskSort::Title);
     let sorted = ids(&app);
-    let settings = storage::load_settings().unwrap();
+    let settings = storage::load_settings().0;
     let ctx = egui::Context::default();
     let mut restarted = MinimalistApp::new(&ctx, settings, None, None);
     assert_eq!(restarted.task_sort_mode(list), TaskSort::Title);
@@ -119,6 +119,27 @@ fn edited_titles_and_completion_resort_the_view_without_rewriting_manual_order()
     assert_eq!(disk_ids(&app), manual);
     app.sort_tasks(list, TaskSort::Manual);
     assert_eq!(ids(&app), manual);
+    std::fs::remove_dir_all(app.workspace).unwrap();
+}
+
+#[test]
+fn failed_capture_does_not_change_the_manual_position_used_by_undo() {
+    let (_, mut app, list, manual) = fixture();
+    app.sort_tasks(list, TaskSort::Title);
+    let lists = app.workspace.join("lists");
+    let offline = app.workspace.join("offline");
+    std::fs::rename(&lists, &offline).unwrap();
+    std::fs::write(&lists, "a file blocks the folder").unwrap();
+    assert!(
+        app.save_capture(list, &["Failed capture".into()], None)
+            .is_err()
+    );
+    std::fs::remove_file(&lists).unwrap();
+    std::fs::rename(&offline, &lists).unwrap();
+
+    app.remove_task(list, manual[1]);
+    app.undo_last();
+    assert_eq!(disk_ids(&app), manual);
     std::fs::remove_dir_all(app.workspace).unwrap();
 }
 
@@ -189,7 +210,7 @@ fn deleting_and_undoing_in_sorted_view_restores_original_manual_position() {
     app.sort_tasks(list, TaskSort::Title);
     app.remove_task(list, manual[0]);
     assert!(!disk_ids(&app).contains(&manual[0]));
-    app.undo_delete();
+    app.undo_last();
     app.sort_tasks(list, TaskSort::Manual);
     assert_eq!(ids(&app), manual);
     assert_eq!(

@@ -11,6 +11,7 @@ use tray_icon::{
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
     Show,
+    QuickAdd,
     Quit,
 }
 
@@ -45,8 +46,9 @@ impl Tray {
         let host = linux_host()?;
         let menu = Menu::new();
         let show = MenuItem::new("Show Minimalist List", true, None);
+        let quick_add = MenuItem::new("Quick add", true, None);
         let quit = MenuItem::new("Quit", true, None);
-        menu.append_items(&[&show, &quit])
+        menu.append_items(&[&show, &quick_add, &quit])
             .map_err(|error| error.to_string())?;
         let icon = icon_data();
         let icon = Icon::from_rgba(icon.rgba, icon.width, icon.height)
@@ -66,10 +68,13 @@ impl Tray {
         let menu_sender = sender.clone();
         let menu_ctx = ctx.clone();
         let show_id = show.id().clone();
+        let quick_add_id = quick_add.id().clone();
         let quit_id = quit.id().clone();
         MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
             let action = if event.id == show_id {
                 Action::Show
+            } else if event.id == quick_add_id {
+                Action::QuickAdd
             } else if event.id == quit_id {
                 Action::Quit
             } else {
@@ -101,7 +106,7 @@ impl Tray {
     ///
     /// # Returns
     ///
-    /// A Show or Quit action from the icon or its menu.
+    /// A Show, Quick add, or Quit action from the icon or its menu.
     pub fn next_action(&self) -> Option<Action> {
         self.actions.try_recv().ok()
     }

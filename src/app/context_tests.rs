@@ -542,7 +542,7 @@ fn copy_shortcut_reaches_each_parent_and_child_action_without_activation() {
             time,
         );
         time += 0.3;
-        assert_eq!(app.task_copy_target(&ctx), Some((list, parent, false)));
+        assert_eq!(app.focused_task(&ctx), Some((list, parent, false)));
         let output = app_frame(
             &ctx,
             &mut app,
@@ -840,10 +840,10 @@ fn unrelated_popups_never_copy_a_stale_task_menu_target() {
     app.details.menu_task = Some((list, id, false));
     app.details.menu_popup = Some(task_menu);
     egui::Popup::open_id(&ctx, task_menu);
-    assert_eq!(app.task_copy_target(&ctx), Some((list, id, false)));
+    assert_eq!(app.focused_task(&ctx), Some((list, id, false)));
     egui::Popup::close_id(&ctx, task_menu);
     egui::Popup::open_id(&ctx, Id::new("unrelated-sort-menu"));
-    assert_eq!(app.task_copy_target(&ctx), None);
+    assert_eq!(app.focused_task(&ctx), None);
     fs::remove_dir_all(&app.workspace).unwrap();
 }
 

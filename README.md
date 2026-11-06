@@ -1,12 +1,16 @@
 # Minimalist List
 
-Minimalist List is a native desktop task list built with `egui` and `eframe`, inspired by MinimaList. It runs without an account or hosted service.
+Minimalist List is a native desktop task list for Linux, macOS, and Windows. Organize tasks into lists with checklists and notes, capture from other apps, and search active tasks or History. It runs locally without an account or hosted service.
+
+Open a list, type `Buy groceries` into the [task entry](docs/usage.md#capture-and-edit-tasks), and press Enter. Use the circle beside a task to complete it. See [list management](docs/usage.md#manage-lists) to create more lists.
 
 <p align="center">
-  <img src="assets/ui.png" alt="Minimalist List on Windows in the default Charcoal palette, showing tasks, subtasks, and completion" width="360">
+  <img src="assets/ui.png" alt="Minimalist List on Linux in the default Charcoal palette, showing tasks, notes, subtasks, and completion" width="360">
   <br>
-  <sub>Charcoal theme on Windows: tasks and subtasks</sub>
+  <sub>Tasks and subtasks in the Charcoal theme on Linux</sub>
 </p>
+
+Lists are ordinary JSON files in a workspace folder you choose. For a shared Dropbox folder, let sync finish before editing the same list on another computer; simultaneous edits are not merged. See [storage and sync](docs/storage.md).
 
 ## Install and run
 
@@ -50,20 +54,16 @@ macOS:
 bash scripts/install-macos.sh
 ```
 
-Windows and Linux add an app-menu shortcut; macOS installs `~/Applications/Minimalist List.app`. The installers enable startup at sign-in. Quit before reinstalling. See [startup and tray behavior](docs/usage.md#startup-and-system-tray) for window controls and disabling startup.
+Windows and Linux add an app-menu shortcut. macOS installs `~/Applications/Minimalist List.app`. Quit before reinstalling. See [startup and system tray](docs/usage.md#startup-and-system-tray) for what the installers configure at sign-in.
 
-Verify the checkout with `cargo test --locked`; `cargo run --locked -- --version` checks the executable. The [development guide](docs/dev.md#verification) lists the full checks.
-
-## Start using it
-
-Open a list, type `Buy groceries` into the [task entry](docs/usage.md#capture-and-edit-tasks), and press Enter. See [list management](docs/usage.md#manage-lists) to create more lists.
-
-Use [keyboard navigation](docs/usage.md#keyboard-shortcuts) to work without a mouse, or the [global reveal shortcut](docs/usage.md#global-reveal-shortcut) to show the running app from another application.
+Verify the checkout with `cargo test --locked`. Run `cargo run --locked -- --version` to check the executable. See the [development guide](docs/dev.md#verification) for the full checks.
 
 ## Documentation
+
+Use [keyboard navigation](docs/usage.md#keyboard-shortcuts) to work without a mouse, or the [global shortcuts](docs/usage.md#global-shortcuts) to show the running app or open Quick add from another application.
 
 - [Tasks, subtasks, context, search, history, and appearance](docs/usage.md)
 - [Workspace folders, settings paths, and file sync](docs/storage.md)
 - [Source layout, checks, and GUI inspection](docs/dev.md)
 
-Bundled bold fonts: [sources](assets/fonts/SOURCES.txt), [Ubuntu Font Licence](assets/fonts/Ubuntu-LICENSE.txt), and [Hack licenses](assets/fonts/Hack-LICENSE.txt).
+Built with `egui` and `eframe`, inspired by MinimaList. See the bundled bold font [sources](assets/fonts/SOURCES.txt), the [Ubuntu Font Licence](assets/fonts/Ubuntu-LICENSE.txt), and the [Hack licenses](assets/fonts/Hack-LICENSE.txt).

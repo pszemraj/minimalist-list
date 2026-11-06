@@ -132,10 +132,7 @@ fn main() -> eframe::Result {
             std::process::exit(2);
         }
     };
-    let (settings, warning) = match storage::load_settings() {
-        Ok(settings) => (settings, None),
-        Err(error) => (storage::Settings::default(), Some(error)),
-    };
+    let (settings, warning) = storage::load_settings();
     let workspace_override =
         select_workspace_override(data_dir, env::var_os("MINIMALIST_LIST_WORKSPACE"));
 

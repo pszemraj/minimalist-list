@@ -17,6 +17,32 @@ pub(super) struct TaskContextEditor {
     return_focus: Option<Id>,
 }
 
+/// Describes the whole time elapsed since a Unix timestamp, such as "Created 3 hours ago".
+///
+/// # Arguments
+///
+/// - `verb` - Leading word naming the event, such as "Created" or "Archived".
+/// - `since` - Unix seconds when the event happened.
+/// - `now` - Current Unix seconds; earlier timestamps in the future read as "just now".
+///
+/// # Returns
+///
+/// The verb followed by days, hours, or minutes ago, or "just now" under a minute.
+pub(super) fn relative_age(verb: &str, since: u64, now: u64) -> String {
+    let age = now.saturating_sub(since);
+    let (seconds, unit) = if age >= 86_400 {
+        (86_400, "day")
+    } else if age >= 3_600 {
+        (3_600, "hour")
+    } else if age >= 60 {
+        (60, "minute")
+    } else {
+        return format!("{verb} just now");
+    };
+    let suffix = if age < 2 * seconds { "" } else { "s" };
+    format!("{verb} {} {unit}{suffix} ago", age / seconds)
+}
+
 impl MinimalistApp {
     fn task_snapshot(&self, list: Uuid, task: Uuid, archived: bool) -> Option<Task> {
         let index = self.list_index(list)?;
@@ -275,7 +301,7 @@ impl MinimalistApp {
         self.acknowledge("Copied complete task".into());
     }
 
-    /// Shows the task's hidden context, copy, and move actions in its existing menu.
+    /// Shows the task's hidden context, copy, move, and History deletion actions in its menu.
     ///
     /// # Arguments
     ///
@@ -313,6 +339,10 @@ impl MinimalistApp {
             }
             if !archived && ui.button("Move to list…").clicked() {
                 self.begin_move_task(list, task);
+                ui.close();
+            }
+            if archived && ui.button("Delete permanently").clicked() {
+                self.delete_archived(list, task);
                 ui.close();
             }
         });
@@ -489,16 +519,11 @@ impl MinimalistApp {
                         12.0,
                         palette.muted,
                     ));
-                    let age = crate::model::now_unix_seconds().saturating_sub(task.created_at_unix);
-                    let created = if age >= 86_400 {
-                        format!("Created {} days ago", age / 86_400)
-                    } else if age >= 3_600 {
-                        format!("Created {} hours ago", age / 3_600)
-                    } else if age >= 60 {
-                        format!("Created {} minutes ago", age / 60)
-                    } else {
-                        "Created just now".into()
-                    };
+                    let created = relative_age(
+                        "Created",
+                        task.created_at_unix,
+                        crate::model::now_unix_seconds(),
+                    );
                     ui.label(self.rich(created, 12.0, palette.muted));
                 });
             } else {

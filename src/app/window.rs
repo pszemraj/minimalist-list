@@ -208,6 +208,10 @@ impl MinimalistApp {
                     self.show_window(ctx);
                     shown = true;
                 }
+                Action::QuickAdd => {
+                    self.request_global_quick_add(ctx);
+                    shown = true;
+                }
                 Action::Quit => {
                     self.quit(ctx);
                     return;
@@ -250,14 +254,6 @@ impl MinimalistApp {
         }
         self.quitting = true;
         ctx.send_viewport_cmd(ViewportCommand::Close);
-    }
-
-    /// Saves an active inline edit before navigating, hiding, or quitting.
-    pub(super) fn finish_inline_edit(&mut self) {
-        self.finish_subtask_edit();
-        if let Some((list_id, task_id)) = self.editing {
-            self.commit_task_edit(list_id, task_id, &self.edit_text.clone());
-        }
     }
 
     /// Finishes accepted changes while retaining failed capture drafts before native shutdown.
@@ -428,6 +424,80 @@ mod tests {
             assert!(mapped < restored);
             std::fs::remove_dir_all(&app.workspace).unwrap();
         }
+    }
+
+    #[test]
+    fn tray_quick_add_reveals_a_hidden_window_and_focuses_the_entry_field() {
+        let (ctx, mut app) = test_app();
+        app.window_hidden = true;
+        let output = ctx.run_logic(&Default::default(), |ctx| {
+            app.handle_window_events(ctx, false, &[Action::QuickAdd], true);
+        });
+        assert!(!app.window_hidden);
+        let commands = &output.viewport_commands[&egui::ViewportId::ROOT];
+        let mapped = commands
+            .iter()
+            .position(|command| *command == ViewportCommand::Visible(true))
+            .unwrap();
+        let focused = commands
+            .iter()
+            .position(|command| *command == ViewportCommand::Focus)
+            .unwrap();
+        assert!(mapped < focused);
+        crate::app::tests::settle_keyboard(&ctx, &mut app);
+        assert!(app.quick_capture.is_some());
+        assert_eq!(
+            ctx.memory(|memory| memory.focused()),
+            Some(egui::Id::new("quick-capture-text"))
+        );
+        std::fs::remove_dir_all(&app.workspace).unwrap();
+    }
+
+    #[test]
+    fn tray_quick_add_leaves_queued_paste_with_the_inline_editor() {
+        use crate::app::{
+            keyboard::FocusItem,
+            tests::{chord, focus_widget, frame_input, keyboard_frame, run_frame, settle_keyboard},
+        };
+
+        let (ctx, mut app) = test_app();
+        let list = app.lists[0].key;
+        let task = Task::new("Original");
+        let task_id = task.id;
+        app.lists[0].data.tasks.push(task);
+        assert!(app.save_list_index(0));
+        focus_widget(&ctx, &mut app, FocusItem::Task(list, task_id).id());
+        keyboard_frame(
+            &ctx,
+            &mut app,
+            chord(egui::Key::Enter, egui::Modifiers::NONE),
+            430.0,
+        );
+        settle_keyboard(&ctx, &mut app);
+        assert_eq!(app.editing, Some((list, task_id)));
+
+        let input = frame_input(
+            egui::vec2(430.0, 500.0),
+            ctx.input(|input| input.time) + 0.3,
+            vec![egui::Event::Paste("One\nTwo".into())],
+        );
+        run_frame(&ctx, input, |ui| {
+            // Native eframe runs logic and then UI with the same input batch.
+            app.handle_window_events(ui.ctx(), false, &[Action::QuickAdd], true);
+            <MinimalistApp as eframe::App>::ui(&mut app, ui, &mut eframe::Frame::_new_kittest());
+        });
+        settle_keyboard(&ctx, &mut app);
+
+        let saved = crate::storage::load_workspace(&app.workspace).unwrap();
+        let tasks = &saved.lists[0].data.tasks;
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].text, "OriginalOne Two");
+        assert!(app.quick_capture.as_ref().unwrap().text.is_empty());
+        assert_eq!(
+            ctx.memory(|memory| memory.focused()),
+            Some(egui::Id::new("quick-capture-text"))
+        );
+        std::fs::remove_dir_all(&app.workspace).unwrap();
     }
 
     #[test]

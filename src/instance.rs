@@ -120,18 +120,10 @@ pub(crate) fn claim(
     start_hidden: bool,
 ) -> Result<LaunchOutcome, String> {
     let workspace = fs::canonicalize(workspace).unwrap_or_else(|_| workspace.to_owned());
-    // A fixed FNV-1a hash keeps the filename stable across Rust/toolchain updates.
-    let key = workspace
-        .as_os_str()
-        .as_encoded_bytes()
-        .iter()
-        .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
-            (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
-        });
     let directory = local_state_dir.join("instances");
     fs::create_dir_all(&directory)
         .map_err(|error| format!("could not create instance directory: {error}"))?;
-    let stem = format!("{key:016x}");
+    let stem = crate::storage::workspace_key(&workspace);
     let lock_path = directory.join(format!("{stem}.lock"));
     let endpoint = directory.join(format!("{stem}.endpoint"));
     let lock = OpenOptions::new()
