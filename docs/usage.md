@@ -6,7 +6,7 @@ Application shortcuts require keyboard focus in the app. On macOS, use Command f
 
 Press `Ctrl+/` to show the in-app keyboard shortcut reference. Keyboard layouts that require Shift to type `/` are supported. Use Up/Down, Page Up/Page Down, or Home/End to scroll it. Escape or **Close** dismisses it.
 
-<img src="../assets/shortcuts.png" alt="The keyboard shortcut reference on Windows, showing Backspace and task navigation" width="360">
+<img src="../assets/shortcuts.png" alt="The keyboard shortcut reference on Linux, showing Move, context, and Undo shortcuts" width="360">
 
 ## Manage lists
 
@@ -47,6 +47,8 @@ Switching between Quick add and Find preserves their drafts. A nonempty capture 
 
 You can also open Quick add from the [tray](#startup-and-system-tray) or with its [global shortcut](#global-shortcuts).
 
+<img src="../assets/quick-add.png" alt="Quick add on Linux with a draft task and Today selected as the destination" width="360">
+
 ## Add task context
 
 Use context for notes, links, booking details, or instructions while keeping the task title short. Context is multiline plain text and stays hidden in ordinary rows.
@@ -75,7 +77,7 @@ Drag a task vertically to reorder it. Drag right past the threshold to complete 
 
 **List options -> Sort** selects Manual, Title, Newest, Oldest, or Incomplete first. In Manual order, new tasks appear at the top. Return to Manual to recover your arrangement and use dragging or reorder shortcuts. See [stored order](storage.md#file-layout) for how sorting affects list files.
 
-`Ctrl+Shift+Backspace` or **Archive completed** moves completed tasks into restorable History. The shortcut works from an empty task or subtask entry; nonempty fields and inline editors keep editing text. With no completed tasks, it leaves the list file untouched.
+`Ctrl+Shift+Backspace` or **Archive N completed** moves the displayed count of completed tasks into restorable History. The shortcut works from an empty task or subtask entry; nonempty fields and inline editors keep editing text. With no completed tasks, it leaves the list file untouched.
 
 Deleting a task, child, or History entry, or moving a task, shows **Undo**. Select it or press `Ctrl+Z` outside a text editor. Undo restores a deleted item with its contents, completion, and original position, including the archive time for a History entry. Undo returns a moved task to its original position in its source list.
 
@@ -84,6 +86,8 @@ Undo applies to the latest deletion or move and lasts until the next deletion or
 Right-click a task and choose **Move to list**, or press `Ctrl+Shift+M` with focus on a task row, one of its controls, a checklist item, or its title editor. The app saves inline edits first. The picker starts on the last destination used this session if it is still available, or the first other list. Use Up and Down to change the destination, Enter or **Move** to confirm, and Escape to return to the task. If the destination disappears while the picker is open, choose another.
 
 A moved task keeps its identity, completion, context, checklist, and unfinished checklist draft. It appears at the top in Manual order. Focus moves to the neighboring row, and the notice names the destination and offers **Undo**. See [save recovery](storage.md#save-recovery) for what happens if either write fails.
+
+<img src="../assets/move.png" alt="Move to list on Linux with Projects selected as the destination for Plan the week" width="360">
 
 Select **Show history** and activate an archived title to inspect its children without changing their state. Each archived task shows a muted "Archived 3 days ago" line under its title. **Restore** returns the parent as incomplete, with child completion unchanged. It appears at the bottom in Manual order; other sort modes determine its visible position.
 
@@ -97,7 +101,7 @@ Down from the last task reaches **Show history**, or Down from task entry when n
 
 Use Up and Down to select a result, Enter to open it, and Escape to close Find. The selected task scrolls into view and is briefly highlighted. Opening an archived child reveals its read-only History contents. Results show each child's own completion state, with History labeled separately. Reopening Find retains the query and selection. Scrolling the results with a wheel or trackpad keeps the selection.
 
-<img src="../assets/find.png" alt="Find showing matching tasks from the Projects and Errands lists" width="360">
+<img src="../assets/find.png" alt="Find on Linux matching notes, History, and task titles across four lists" width="360">
 
 `Ctrl+Tab` and `Ctrl+Shift+Tab` move between lists, including on macOS, where Command+Tab switches applications. Each list remembers its own scroll position during the session.
 
@@ -119,7 +123,9 @@ The header's `pin` control toggles always-on-top mode. Turn off **Show window ti
 
 Typography settings control proportional or monospace text, real regular or bold faces, content size, and row spacing. Task titles, children, editors, History, and Find scale together. Reduce row spacing to fit more tasks on screen.
 
-**Long titles** has two modes: **Scroll** (the default) keeps one line, uses an ellipsis at rest, and scrolls horizontally after a short hover delay; **Wrap** shows the full title across as many lines as needed. Scrolling stops at the end, or when you leave the title, edit, or drag. Leave and reenter the title to scroll again. Keyboard focus shows a truncated task title in a wrapped tooltip. In Wrap mode, hovering a card or task for two seconds shows its full title and basic information; context stays hidden.
+For active task titles, **Long titles** has two modes: **Scroll** (the default) keeps one line, uses an ellipsis at rest, and scrolls horizontally after a short hover delay; **Wrap** shows the full title across as many lines as needed. Scrolling stops at the end, or when you leave the title, edit, or drag. Leave and reenter the title to scroll again.
+
+Keyboard focus shows a truncated task title in a wrapped tooltip. In Wrap mode, hovering a card or task for two seconds shows its full title and basic information; context stays hidden.
 
 **Background opacity** starts at 85% and can be adjusted from 20% to 100%. It affects background surfaces, including in pinned mode, while task text and controls stay fully opaque. Low opacity reduces text contrast over bright backgrounds. Desktop transparency depends on the operating system's compositor.
 

@@ -101,7 +101,9 @@ Moving a task writes the destination before removing the source and attempts to 
 
 ## Local backups
 
-Saves, Clear History, and list deletion keep earlier list files in `backups/` beside the [local settings file](#default-directories), outside the workspace. Each workspace has a subfolder named by a 16-digit hexadecimal key derived from its path. **Settings -> Workspace -> Open backups folder** opens the active workspace's subfolder, creating it if needed.
+Saves, Clear History, and list deletion keep earlier list files in `backups/` beside the [local settings file](#default-directories), outside the workspace. Syncing the workspace does not transfer these local backups between computers.
+
+Each workspace has a subfolder named by a 16-digit hexadecimal key derived from its path. **Settings -> Workspace -> Open backups folder** opens the active workspace's subfolder, creating it if needed.
 
 ```text
 backups/<workspace key>/
@@ -136,7 +138,9 @@ Missing `context` loads as empty; an empty context is omitted when writing. See 
 
 ### Format compatibility
 
-The app supports list format `1` and checks that version before decoding task contents. Unsupported files remain on disk and produce a warning naming the file and supported version. Other supported lists can still open. Saving an unsupported in-memory list is also refused. If another app replaces an open list with an unsupported file, the last loaded contents may remain visible, but the replacement cannot be overwritten, renamed, or deleted through that cached list.
+The app supports list format `1` and checks that version before decoding task contents. Unsupported files remain on disk and produce a warning naming the file and supported version. Update the app on that computer before editing the affected list. Other supported lists can still open.
+
+Saving an unsupported in-memory list is also refused. If another app replaces an open list with an unsupported file, the last loaded contents may remain visible, but the replacement cannot be overwritten, renamed, or deleted through that cached list.
 
 Within the supported format, unknown JSON fields are retained on lists, tasks, subtasks, and archive entries. Editing, moving, or archiving a task keeps those fields with the objects that survive the operation. Deleting an object removes its fields too; restoring a task from History removes its archive entry, including fields belonging only to that entry.
 
