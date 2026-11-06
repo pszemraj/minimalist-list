@@ -33,7 +33,7 @@ Paste a list into task entry, a checklist's add field, or [Quick add](#quick-add
 
 Down from task entry focuses the first task. Up and Down move between task rows, including from their secondary controls; Home and End focus the first and last task. Up from the first task returns to entry.
 
-Right opens a task's checklist and focuses its first child, or its add field when empty. Up/Down moves through children and the add field; Down from an expanded parent enters its checklist. Up from the first child returns to its parent. Home selects the first child and End reaches the add field when a child control is focused. Enter or Space on a child's completion control toggles it. Left outside text, or Escape, closes the checklist and returns to its parent. Left/Right/Home/End inside the entry keep editing text.
+Right from a task row or its controls opens its checklist and focuses its first child, or its add field when empty. Opening **Add subtasks** also focuses the add field. Up/Down moves through children and the add field; Down from an expanded parent enters its checklist. Up from the first child returns to its parent. Home selects the first child and End reaches the add field when a child control is focused. Enter or Space on a child's completion control toggles it. Left outside text, or Escape, closes the checklist and returns to its parent. Navigation keys inside an existing child's text editor move the cursor; Left/Right/Home/End also keep editing in the add field.
 
 Enable **Settings -> Appearance -> Show subtasks below tasks** to preview every task's children. Each task's chevron collapses or expands its preview independently; **Edit subtasks** opens the full checklist editor. With this preference off, the checklist opens only when requested.
 
@@ -101,6 +101,8 @@ Down from the last task reaches **Show history**, or Down from task entry when n
 
 Use Up and Down to select a result, Enter to open it, and Escape to close Find. The selected task scrolls into view and is briefly highlighted. Opening an archived child reveals its read-only History contents. Results show each child's own completion state, with History labeled separately. Reopening Find retains the query and selection. Scrolling the results with a wheel or trackpad keeps the selection.
 
+Opening Find from task context preserves the notes draft. Escape returns to that draft; opening a result saves it first. If saving fails, the original notes editor stays open for recovery.
+
 <img src="../assets/find.png" alt="Find on Linux matching notes, History, and task titles across four lists" width="360">
 
 `Ctrl+Tab` and `Ctrl+Shift+Tab` move between lists, including on macOS, where Command+Tab switches applications. Each list remembers its own scroll position during the session.
@@ -125,7 +127,7 @@ Typography settings control proportional or monospace text, real regular or bold
 
 For active task titles, **Long titles** has two modes: **Scroll** (the default) keeps one line, uses an ellipsis at rest, and scrolls horizontally after a short hover delay; **Wrap** shows the full title across as many lines as needed. Scrolling stops at the end, or when you leave the title, edit, or drag. Leave and reenter the title to scroll again.
 
-Keyboard focus shows a truncated task title in a wrapped tooltip. In Wrap mode, hovering a card or task for two seconds shows its full title and basic information; context stays hidden.
+Keyboard focus shows a truncated task title in a wrapped tooltip. In Wrap mode, hovering a card or task for two seconds shows its full title and basic information. Task previews include saved context; move the pointer into a long preview to scroll it.
 
 **Background opacity** starts at 85% and can be adjusted from 20% to 100%. It affects background surfaces, including in pinned mode, while task text and controls stay fully opaque. Low opacity reduces text contrast over bright backgrounds. Desktop transparency depends on the operating system's compositor.
 

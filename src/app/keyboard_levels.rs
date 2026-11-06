@@ -177,6 +177,17 @@ impl MinimalistApp {
             self.focus_now(ctx, FocusItem::Task(list, tasks[0].id).id());
         } else if take_key(ctx, Key::End, Modifiers::NONE) {
             self.focus_now(ctx, FocusItem::Task(list, tasks.last().unwrap().id).id());
+        } else if take_key(ctx, Key::ArrowRight, Modifiers::NONE) {
+            self.switch_subtask_panel(Some((list, task.id)));
+            let target = task
+                .subtasks
+                .first()
+                .map_or(Id::new(("new-subtask", list, task.id)), |subtask| {
+                    FocusItem::Subtask(list, task.id, subtask.id).id()
+                });
+            self.focus_now(ctx, target);
+        } else if take_key(ctx, Key::ArrowLeft, Modifiers::NONE) {
+            self.switch_subtask_panel(None);
         } else if focused == Some(row) {
             self.keyboard.anchor = Some((row, FocusItem::Task(list, task.id)));
             drop_repeated_delete(ctx);
@@ -198,17 +209,6 @@ impl MinimalistApp {
                 self.apply_row_action(RowAction::Toggle(list, task.id));
             } else if take_shortcut(ctx, DELETE_TASK) {
                 self.apply_row_action(RowAction::Delete(list, task.id));
-            } else if take_key(ctx, Key::ArrowRight, Modifiers::NONE) {
-                self.switch_subtask_panel(Some((list, task.id)));
-                let target = task
-                    .subtasks
-                    .first()
-                    .map_or(Id::new(("new-subtask", list, task.id)), |subtask| {
-                        FocusItem::Subtask(list, task.id, subtask.id).id()
-                    });
-                self.focus_now(ctx, target);
-            } else if take_key(ctx, Key::ArrowLeft, Modifiers::NONE) {
-                self.switch_subtask_panel(None);
             }
         }
     }
@@ -252,6 +252,9 @@ impl MinimalistApp {
             } else {
                 take_key(ctx, Key::ArrowDown, Modifiers::NONE);
             }
+            return true;
+        }
+        if ctx.text_edit_focused() {
             return true;
         }
         let Some(position) = position else {

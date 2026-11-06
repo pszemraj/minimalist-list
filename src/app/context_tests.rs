@@ -118,7 +118,17 @@ fn archived_context_is_read_only_and_complete_copy_keeps_it() {
     fs::remove_dir_all(&app.workspace).unwrap();
 }
 
-fn app_frame(
+/// Runs a notes interaction frame at the standard test window size.
+///
+/// # Arguments
+/// - `ctx` - Context retaining focus, hover, and widget state.
+/// - `app` - Application under test.
+/// - `events` - Input events for this frame.
+/// - `time` - Monotonic test clock in seconds.
+///
+/// # Returns
+/// The rendered output without texture updates.
+pub(super) fn app_frame(
     ctx: &egui::Context,
     app: &mut MinimalistApp,
     events: Vec<egui::Event>,
@@ -432,36 +442,6 @@ fn context_draft_returns_after_find_quick_add_and_shortcuts_without_writing() {
     assert!(app.task_context.is_none());
     assert_eq!(fs::read(&app.lists[0].path).unwrap(), before);
     fs::remove_dir_all(&app.workspace).unwrap();
-}
-
-#[test]
-fn wrap_preview_waits_two_seconds_and_never_displays_context() {
-    for mode in [TitleOverflow::Wrap, TitleOverflow::Scroll] {
-        let (ctx, mut app) = test_app();
-        let mut task = Task::new("Task title for metadata preview");
-        task.context = "PRIVATE_CONTEXT_NOT_FOR_HOVER".into();
-        let id = task.id;
-        app.lists[0].data.tasks.push(task);
-        app.view_zoom = 1.0;
-        app.request_task_focus = false;
-        app.settings.title_overflow = mode;
-        app_frame(&ctx, &mut app, vec![], 1.0);
-        let rect = ctx.read_response(Id::new(("task-text", id))).unwrap().rect;
-        app_frame(
-            &ctx,
-            &mut app,
-            vec![egui::Event::PointerMoved(rect.center())],
-            1.2,
-        );
-        let early = app_frame(&ctx, &mut app, vec![], 3.0);
-        assert!(!early.shapes.iter().any(|shape| matches!(&shape.shape, egui::epaint::Shape::Text(text) if text.galley.text().contains("Created"))));
-        app_frame(&ctx, &mut app, vec![], 3.3);
-        let late = app_frame(&ctx, &mut app, vec![], 3.4);
-        let metadata = late.shapes.iter().any(|shape| matches!(&shape.shape, egui::epaint::Shape::Text(text) if text.galley.text().contains("Created")));
-        assert_eq!(metadata, mode == TitleOverflow::Wrap);
-        assert!(!late.shapes.iter().any(|shape| matches!(&shape.shape, egui::epaint::Shape::Text(text) if text.galley.text().contains("PRIVATE_CONTEXT_NOT_FOR_HOVER"))));
-        fs::remove_dir_all(&app.workspace).unwrap();
-    }
 }
 
 #[test]

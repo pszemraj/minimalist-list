@@ -795,6 +795,9 @@ impl MinimalistApp {
     }
 
     fn activate_search_hit(&mut self, hit: SearchHit) {
+        if !self.save_task_context() {
+            return;
+        }
         self.open_list(hit.list_id);
         self.request_task_focus = false;
         self.keyboard.overlay_return = None;

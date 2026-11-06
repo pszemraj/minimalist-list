@@ -129,6 +129,10 @@ impl MinimalistApp {
             self.task_context = Some(editor);
             return false;
         };
+        if task.context == editor.text {
+            self.keyboard.pending = editor.return_focus;
+            return true;
+        }
         task.context.clone_from(&editor.text);
         match self.save_list_candidate(index, candidate) {
             Ok(()) => {
@@ -466,13 +470,13 @@ impl MinimalistApp {
         }
     }
 
-    /// Shows a delayed metadata preview only for wrapped task rows.
+    /// Shows a delayed, scrollable title and notes preview for wrapped task rows.
     ///
     /// # Arguments
     ///
     /// - `ui` - Row UI.
     /// - `response` - Hovered task row or title.
-    /// - `task` - Task whose public title and basic metadata are shown.
+    /// - `task` - Task whose title, metadata, and saved notes are shown.
     /// - `palette` - Tooltip colors.
     pub(super) fn wrapped_task_preview(
         &self,
@@ -483,8 +487,29 @@ impl MinimalistApp {
     ) {
         let id = Id::new(("task-preview-hover", task.id));
         let now = ui.input(|input| input.time);
+        let over_preview = response.is_tooltip_open()
+            && ui
+                .ctx()
+                .input(|input| {
+                    input
+                        .pointer
+                        .hover_pos()
+                        .map(|pos| (pos, input.pointer.direction()))
+                })
+                .is_some_and(|(pos, direction)| {
+                    ui.ctx().memory(|memory| {
+                        memory
+                            .area_rect(egui::Tooltip::tooltip_id(response.id, 0))
+                            .is_some_and(|rect| {
+                                rect.expand(4.0).contains(pos)
+                                    || (direction != egui::Vec2::ZERO
+                                        && rect.intersects_ray(pos, direction.normalized()))
+                            })
+                    })
+                });
         let hovered = self.settings.title_overflow == TitleOverflow::Wrap
-            && response.hovered()
+            && response.enabled()
+            && (response.hovered() || over_preview)
             && self.drag.is_none()
             && self.editing.is_none();
         let started = ui.ctx().data_mut(|data| {
@@ -503,28 +528,45 @@ impl MinimalistApp {
         if let Some(started) = started {
             if now - started >= 2.0 {
                 egui::Tooltip::for_widget(response).show(|ui| {
-                    ui.add(
-                        egui::Label::new(self.content_rich(&task.text, 16.0, palette.text)).wrap(),
-                    );
-                    let (done, total) = task.progress().unwrap_or((0, 0));
-                    ui.label(self.rich(
-                        format!(
-                            "{} · {done}/{total} subtasks",
-                            if task.completed {
-                                "Completed"
-                            } else {
-                                "Active"
+                    egui::ScrollArea::vertical()
+                        .id_salt(("task-preview-scroll", task.id))
+                        .max_height(ui.ctx().content_rect().height() * 0.6)
+                        .show(ui, |ui| {
+                            ui.add(
+                                egui::Label::new(self.content_rich(&task.text, 16.0, palette.text))
+                                    .wrap(),
+                            );
+                            let (done, total) = task.progress().unwrap_or((0, 0));
+                            ui.label(self.rich(
+                                format!(
+                                    "{} · {done}/{total} subtasks",
+                                    if task.completed {
+                                        "Completed"
+                                    } else {
+                                        "Active"
+                                    }
+                                ),
+                                12.0,
+                                palette.muted,
+                            ));
+                            let created = relative_age(
+                                "Created",
+                                task.created_at_unix,
+                                crate::model::now_unix_seconds(),
+                            );
+                            ui.label(self.rich(created, 12.0, palette.muted));
+                            if !task.context.is_empty() {
+                                ui.separator();
+                                ui.add(
+                                    egui::Label::new(self.content_rich(
+                                        &task.context,
+                                        14.0,
+                                        palette.text,
+                                    ))
+                                    .wrap(),
+                                );
                             }
-                        ),
-                        12.0,
-                        palette.muted,
-                    ));
-                    let created = relative_age(
-                        "Created",
-                        task.created_at_unix,
-                        crate::model::now_unix_seconds(),
-                    );
-                    ui.label(self.rich(created, 12.0, palette.muted));
+                        });
                 });
             } else {
                 ui.ctx()
@@ -539,3 +581,11 @@ impl MinimalistApp {
 #[cfg(test)]
 #[path = "context_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "context_navigation_tests.rs"]
+mod navigation_tests;
+
+#[cfg(test)]
+#[path = "context_preview_tests.rs"]
+mod preview_tests;
