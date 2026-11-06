@@ -1,6 +1,6 @@
 //! Local list snapshots and recoverable list deletion, kept beside the settings file.
 
-use super::{StoredList, list_file_name, read_list, settings_path};
+use super::{StoredList, format, list_file_name, settings_path};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -220,6 +220,7 @@ pub(super) fn snapshot_into(
 /// Returns an error when another readable file has the same identity or the file
 /// cannot be kept in backups and removed. The list file then stays in place.
 pub fn delete_list(workspace: &Path, list: &StoredList) -> Result<(), String> {
+    format::check_version(list.data.format_version)?;
     if let Some(directory) = list.path.parent() {
         for entry in fs::read_dir(directory)
             .map_err(|error| format!("could not read {}: {error}", directory.display()))?
@@ -228,8 +229,7 @@ pub fn delete_list(workspace: &Path, list: &StoredList) -> Result<(), String> {
             let path = entry.path();
             if path != list.path
                 && path.extension().and_then(|extension| extension.to_str()) == Some("json")
-                && let Ok((other, _)) = read_list(&path)
-                && other.key == list.key
+                && format::read_identity(&path).is_ok_and(|id| id == list.key)
             {
                 return Err(format!(
                     "could not delete list: duplicate list identity in {}; resolve the duplicate files first",
@@ -253,6 +253,7 @@ pub fn delete_list(workspace: &Path, list: &StoredList) -> Result<(), String> {
             "the list path is no longer a file",
         )));
     }
+    format::check_file_format(&list.path)?;
     let directory = backups_dir(workspace).join("deleted");
     fs::create_dir_all(&directory).map_err(fail)?;
     // Never replace an earlier deleted copy that shares the same second and name.

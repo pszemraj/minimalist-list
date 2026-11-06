@@ -130,6 +130,7 @@ pub(super) fn cleanup_stale_temps(directory: &Path) {
 /// Returns an error when the list changed on disk since loading or saving it,
 /// or when it cannot be serialized, written, or replaced.
 pub fn save_list(list: &StoredList) -> Result<(), String> {
+    super::format::check_version(list.data.format_version)?;
     let (metadata, bytes) = write_json_atomic_checked(&list.path, &list.data, || {
         if list_changed_on_disk(list)? {
             return Err(format!(

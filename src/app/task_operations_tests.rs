@@ -859,3 +859,93 @@ fn deletion_undo_and_history_restore_keep_manual_positions_while_view_is_sorted(
     );
     fs::remove_dir_all(&app.workspace).unwrap();
 }
+
+#[test]
+fn unknown_shared_fields_follow_move_history_undo_and_local_copy() {
+    use crate::model::Subtask;
+    use serde_json::json;
+
+    let (_ctx, mut app) = test_app();
+    let source = app.lists[0].key;
+    app.lists[0]
+        .data
+        .extra
+        .insert("future_list".into(), json!({"keep": [null, 1]}));
+    let mut task = Task::new("Keep newer fields");
+    task.extra
+        .insert("future_task".into(), json!({"keep": true}));
+    let mut child = Subtask::new("Keep child fields");
+    child
+        .extra
+        .insert("future_child".into(), json!(["value", null]));
+    task.subtasks.push(child);
+    let task_id = task.id;
+    app.lists[0].data.tasks.push(task);
+    assert!(app.save_list_index(0));
+    let destination = storage::create_list(&app.workspace, "Destination", Accent::Sky).unwrap();
+    let destination_id = destination.key;
+    app.lists.push(destination);
+
+    assert!(app.move_task_to_list(source, task_id, destination_id));
+    let moved = storage::load_workspace(&app.workspace)
+        .unwrap()
+        .lists
+        .into_iter()
+        .find(|list| list.key == destination_id)
+        .unwrap();
+    assert_eq!(
+        moved.data.tasks[0].extra["future_task"],
+        json!({"keep": true})
+    );
+    assert_eq!(
+        moved.data.tasks[0].subtasks[0].extra["future_child"],
+        json!(["value", null])
+    );
+    app.undo_last();
+    let index = app.list_index(source).unwrap();
+    assert_eq!(app.lists[index].data.tasks[0].id, task_id);
+    app.lists[index].data.tasks[0].toggle();
+    app.archive_completed(source);
+    app.lists[index].data.archive[0]
+        .extra
+        .insert("future_archive".into(), json!({"keep": "entry"}));
+    assert!(app.save_list_index(index));
+    app.delete_archived(source, task_id);
+    app.undo_last();
+    assert_eq!(
+        app.lists[index].data.archive[0].extra["future_archive"],
+        json!({"keep": "entry"})
+    );
+    let archived: serde_json::Value =
+        serde_json::from_slice(&fs::read(&app.lists[index].path).unwrap()).unwrap();
+    assert_eq!(
+        archived["archive"][0]["future_archive"],
+        json!({"keep": "entry"})
+    );
+    app.restore_archived(source, task_id);
+    let copy = storage::create_local_copy(&app.workspace, &app.lists[index]).unwrap();
+    let reloaded = storage::load_workspace(&app.workspace).unwrap();
+    let original = reloaded
+        .lists
+        .iter()
+        .find(|list| list.key == source)
+        .unwrap();
+    let copied = reloaded
+        .lists
+        .iter()
+        .find(|list| list.key == copy.key)
+        .unwrap();
+    assert_ne!(copied.data.tasks[0].id, task_id);
+    for list in [original, copied] {
+        assert_eq!(list.data.extra["future_list"], json!({"keep": [null, 1]}));
+        assert_eq!(
+            list.data.tasks[0].extra["future_task"],
+            json!({"keep": true})
+        );
+        assert_eq!(
+            list.data.tasks[0].subtasks[0].extra["future_child"],
+            json!(["value", null])
+        );
+    }
+    fs::remove_dir_all(app.workspace).unwrap();
+}

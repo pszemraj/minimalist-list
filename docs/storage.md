@@ -132,4 +132,12 @@ List files are pretty-printed and hand-editable. `format_version` is currently `
 
 Timestamps are Unix seconds. `accent` is one of `Mint`, `Charcoal`, `Crimson`, `Sand`, `Sky`, or `Lavender`.
 
-Missing `context` loads as empty; an empty context is omitted when writing. Older versions without task-context support discard this field when rewriting a list. See [task context](usage.md#add-task-context) for editing and copying notes.
+Missing `context` loads as empty; an empty context is omitted when writing. See [task context](usage.md#add-task-context) for editing and copying notes.
+
+### Format compatibility
+
+The app supports list format `1` and checks that version before decoding task contents. Unsupported files remain on disk and produce a warning naming the file and supported version. Other supported lists can still open. Saving an unsupported in-memory list is also refused. If another app replaces an open list with an unsupported file, the last loaded contents may remain visible, but the replacement cannot be overwritten, renamed, or deleted through that cached list.
+
+Within the supported format, unknown JSON fields are retained on lists, tasks, subtasks, and archive entries. Editing, moving, or archiving a task keeps those fields with the objects that survive the operation. Deleting an object removes its fields too; restoring a task from History removes its archive entry, including fields belonging only to that entry.
+
+Optional additions with defaults can keep the same format when existing editing behavior remains valid. Changes to field types, required structure, or behavior that older writers must understand require a new format and an explicit conversion from supported older formats. There is currently no older list format to migrate. Opening a workspace does not upgrade or rewrite all of its files. Format compatibility does not merge simultaneous edits; the [file-sync rules](#file-sync-behavior) still apply.

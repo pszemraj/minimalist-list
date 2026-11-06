@@ -36,6 +36,7 @@ src/app/theme.rs            Fonts, palettes, and shared rendering helpers
 src/app/window.rs           Tray hiding, restoration, and shutdown
 src/model.rs                Serializable list and task model
 src/storage.rs              Paths, preference merging, and list loading
+src/storage_format.rs       Shared-list format checks and version-independent identities
 src/storage_io.rs           Guarded list saves, atomic replacement, and temporary-file cleanup
 src/storage_backup.rs       Workspace keys, local list snapshots, and recoverable list deletion
 src/tray.rs                 Native tray icon and menu actions

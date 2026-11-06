@@ -27,6 +27,9 @@ pub use io::{list_changed_on_disk, save_list};
 mod backup;
 pub use backup::{backups_dir, delete_list, snapshot_list, snapshot_list_now, workspace_key};
 
+#[path = "storage_format.rs"]
+mod format;
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 /// User preferences persisted outside the task workspace.
@@ -540,26 +543,17 @@ fn read_list(path: &Path) -> Result<(StoredList, u8), String> {
         .map_err(|error| format!("could not inspect {}: {error}", path.display()))?;
     let bytes =
         fs::read(path).map_err(|error| format!("could not read {}: {error}", path.display()))?;
+    format::check_list_format(&bytes, path)?;
     let mut data = serde_json::from_slice::<TodoList>(&bytes)
         .map_err(|error| format!("ignored {}: {error}", path.display()))?;
 
-    let stem = path
-        .file_stem()
-        .and_then(|stem| stem.to_str())
-        .unwrap_or_default();
-    let legacy_id = Uuid::parse_str(stem).ok();
-    let descriptive = stem.rsplit_once("--").and_then(|(name, id)| {
-        (!name.is_empty())
-            .then(|| Uuid::parse_str(id).ok().map(|id| (name, id)))
-            .flatten()
-    });
-    let file_id = legacy_id.or_else(|| descriptive.map(|(_, id)| id));
-    let canonical_name = match descriptive {
-        Some((name, _)) if name == filename_title(&data.title) => 2,
-        _ if file_id.is_some() => 1,
-        _ => 0,
+    let identity = format::filename_identity(path);
+    let canonical_name = match identity {
+        Some((_, Some(name))) if name == filename_title(&data.title) => 2,
+        Some(_) => 1,
+        None => 0,
     };
-    let key = file_id.unwrap_or(data.id);
+    let key = identity.map_or(data.id, |(id, _)| id);
     data.id = key;
 
     Ok((
@@ -680,6 +674,7 @@ fn list_file_name(title: &str, id: Uuid) -> String {
 /// # Errors
 /// Returns an error if the destination already exists or the original cannot be renamed.
 pub fn rename_list_file(list: &mut StoredList) -> Result<(), String> {
+    format::check_version(list.data.format_version)?;
     let destination = list
         .path
         .with_file_name(list_file_name(&list.data.title, list.key));
@@ -701,6 +696,7 @@ pub fn rename_list_file(list: &mut StoredList) -> Result<(), String> {
             ));
         }
     }
+    format::check_file_format(&list.path)?;
     fs::rename(&list.path, &destination).map_err(|error| {
         format!(
             "could not rename {} to {}: {error}",
