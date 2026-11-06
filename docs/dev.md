@@ -8,7 +8,7 @@ src/instance.rs             Workspace instance claims and window reveal requests
 src/macos.rs                Native app-bundle reopen delegate
 src/hotkey.rs               Native global shortcut registration and wakeups
 src/linux.rs                X11 cursor, taskbar state, and native event-loop setup
-src/linux_cursor.rs         XSettings cursor parsing and scale selection
+src/linux_cursor.rs         XSettings cursor theme and pixel-size parsing
 src/linux_taskbar.rs        EWMH state preservation and taskbar request payloads
 src/app.rs                  Application state, navigation, syncing, and eframe wiring
 src/app/drafts.rs           Session drafts scoped to workspace, list, and task

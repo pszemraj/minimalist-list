@@ -15,6 +15,26 @@ pub enum Action {
     Quit,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Result of checking whether an existing native tray can still reopen the window.
+pub(crate) enum Availability {
+    Available,
+    Unavailable,
+    /// The check failed without confirming that the host disappeared.
+    #[cfg(any(target_os = "linux", target_os = "windows", test))]
+    Unknown,
+}
+
+impl Availability {
+    /// Keeps an established tray's hiding behavior during an inconclusive check.
+    ///
+    /// # Returns
+    /// Whether hiding remains possible; applications without a tray use `Unavailable`.
+    pub(crate) fn can_hide(self) -> bool {
+        self != Self::Unavailable
+    }
+}
+
 /// Keeps the native icon alive and receives its menu actions.
 pub struct Tray {
     _icon: TrayIcon,
@@ -115,13 +135,15 @@ impl Tray {
     ///
     /// # Returns
     ///
-    /// Whether the hidden window can be reopened through the tray.
-    pub fn available(&self) -> bool {
+    /// Whether the host is present, absent, or temporarily could not be checked.
+    pub(crate) fn availability(&self) -> Availability {
         #[cfg(target_os = "linux")]
-        return self
-            .host
-            .get_property::<bool>("IsStatusNotifierHostRegistered")
-            .unwrap_or(false);
+        {
+            let result = self
+                .host
+                .get_property::<bool>("IsStatusNotifierHostRegistered");
+            linux_availability(result, self.host.connection().is_closed())
+        }
         #[cfg(target_os = "windows")]
         {
             #[link(name = "user32")]
@@ -132,10 +154,43 @@ impl Tray {
                 ) -> *mut std::ffi::c_void;
             }
             // A live icon object can outlast Explorer or precede its startup.
-            !unsafe { FindWindowA(c"Shell_TrayWnd".as_ptr(), std::ptr::null()) }.is_null()
+            if unsafe { FindWindowA(c"Shell_TrayWnd".as_ptr(), std::ptr::null()) }.is_null() {
+                Availability::Unavailable
+            } else {
+                Availability::Available
+            }
         }
         #[cfg(not(any(target_os = "linux", target_os = "windows")))]
-        true
+        Availability::Available
+    }
+}
+
+/// Distinguishes a missing Linux host from a failed availability query.
+///
+/// A closed connection or an explicit D-Bus service/owner/disconnection error
+/// confirms that the existing tray cannot be reached. Timeouts and other
+/// inconclusive property-read errors retain the established hiding behavior.
+///
+/// # Arguments
+/// - `result` - Native host property's reply or D-Bus error.
+/// - `connection_closed` - Whether the session-bus connection has closed.
+///
+/// # Returns
+/// The confirmed host state, or `Unknown` for an inconclusive query.
+#[cfg(target_os = "linux")]
+fn linux_availability(result: Result<bool, zbus::Error>, connection_closed: bool) -> Availability {
+    if connection_closed {
+        return Availability::Unavailable;
+    }
+    match result {
+        Ok(true) => Availability::Available,
+        Ok(false) => Availability::Unavailable,
+        Err(error) => match zbus::fdo::Error::from(error) {
+            zbus::fdo::Error::ServiceUnknown(_)
+            | zbus::fdo::Error::NameHasNoOwner(_)
+            | zbus::fdo::Error::Disconnected(_) => Availability::Unavailable,
+            _ => Availability::Unknown,
+        },
     }
 }
 
@@ -239,6 +294,48 @@ fn icon_rgba() -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_host_checks_distinguish_absence_from_transient_failures() {
+        use super::{Availability, linux_availability};
+        use zbus::fdo::Error;
+
+        assert_eq!(linux_availability(Ok(true), false), Availability::Available);
+        assert_eq!(
+            linux_availability(Ok(false), false),
+            Availability::Unavailable
+        );
+        for error in [
+            Error::ServiceUnknown("watcher is not registered".into()),
+            Error::NameHasNoOwner("watcher has no owner".into()),
+            Error::Disconnected("bus disconnected".into()),
+        ] {
+            assert_eq!(
+                linux_availability(Err(zbus::Error::FDO(Box::new(error))), false),
+                Availability::Unavailable
+            );
+        }
+        for error in [
+            Error::NoReply("temporary timeout".into()),
+            Error::Timeout("temporary timeout".into()),
+            Error::TimedOut("temporary timeout".into()),
+            Error::Failed("temporary property failure".into()),
+        ] {
+            assert_eq!(
+                linux_availability(Err(zbus::Error::FDO(Box::new(error))), false),
+                Availability::Unknown
+            );
+        }
+        assert_eq!(
+            linux_availability(Ok(true), true),
+            Availability::Unavailable
+        );
+        assert_eq!(
+            linux_availability(Err(zbus::Error::Failure("connection lost".into())), true),
+            Availability::Unavailable
+        );
+    }
+
     #[test]
     fn shell_and_window_icons_have_all_required_sizes_and_transparency() {
         let window = super::window_icon_data();
