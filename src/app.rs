@@ -243,6 +243,11 @@ impl MinimalistApp {
             .last_list_id
             .filter(|id| lists.iter().any(|item| item.key == *id))
             .or_else(|| lists.first().map(|item| item.key));
+        if workspace_failure.is_some() {
+            log::warn!("Workspace unavailable at startup; waiting for existing files");
+        } else {
+            log::debug!("Workspace loaded");
+        }
         let screen = initial.map(Screen::List).unwrap_or(Screen::Overview);
         let view_zoom = 1.0;
         let displayed_palette = initial
@@ -624,6 +629,7 @@ impl MinimalistApp {
                 if !snapshot.warnings.is_empty() {
                     self.status = Some(snapshot.warnings.join("\n"));
                 }
+                log::debug!("External workspace changes loaded");
 
                 match self.screen.clone() {
                     Screen::List(id) if self.list_index(id).is_none() => self.go_to_overview(),
@@ -650,6 +656,9 @@ impl MinimalistApp {
     /// Shows workspace recovery after the open folder disappears, becomes unreadable,
     /// or loses all of its list files.
     fn mark_workspace_unavailable(&mut self, error: String) {
+        if self.persistence.workspace_failure.is_none() {
+            log::warn!("Open workspace became unavailable; waiting for existing files");
+        }
         self.status = Some(format!(
             "Workspace {} unavailable: {error}",
             self.settings.workspace_path
@@ -736,6 +745,9 @@ impl MinimalistApp {
                     self.restore_overlay_drafts();
                 }
                 let recovered = self.persistence.workspace_failure.take().is_some();
+                if recovered {
+                    log::info!("Workspace access restored");
+                }
                 self.details = task_details::TaskDetailsState::default();
                 self.subtasks_for = None;
                 self.editing = None;
@@ -784,7 +796,8 @@ impl MinimalistApp {
 
 impl eframe::App for MinimalistApp {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
-        self.finish_pending_changes();
+        let saved = self.finish_pending_changes();
+        log::info!("Native shutdown (pending changes saved: {saved})");
     }
 
     fn persist_egui_memory(&self) -> bool {

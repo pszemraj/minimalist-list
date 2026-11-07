@@ -34,11 +34,16 @@ impl MinimalistApp {
     pub fn setup_tray(&mut self, ctx: &egui::Context, supports_hiding: bool) {
         // A desktop without a usable tray uses ordinary window behavior quietly.
         if !supports_hiding {
+            log::debug!("Tray setup skipped for this desktop");
             return;
         }
         match Tray::new(ctx, supports_hiding) {
-            Ok(tray) => self.tray = Some(tray),
+            Ok(tray) => {
+                log::debug!("Native tray installed");
+                self.tray = Some(tray);
+            }
             Err(error) => {
+                log::warn!("Could not install the native tray: {error}");
                 let message = format!("Tray unavailable: {error}");
                 self.status = Some(match self.status.take() {
                     Some(status) => format!("{status}\n{message}"),
@@ -90,6 +95,7 @@ impl MinimalistApp {
     /// - `ctx` - Native application's egui context.
     pub fn start_hidden(&mut self, ctx: &egui::Context) {
         if !self.hide_window(ctx, self.tray_availability()) {
+            log::info!("Hidden startup unavailable; showing the window");
             self.show_window(ctx);
         }
     }
@@ -120,11 +126,14 @@ impl MinimalistApp {
     ///
     /// - `ctx` - Context receiving native window commands.
     pub(super) fn close_window(&mut self, ctx: &egui::Context) {
+        log::debug!("Close requested through the app");
         if !self.finish_pending_changes() {
+            log::info!("Close canceled because changes need attention");
             self.show_window(ctx);
             return;
         }
         if !self.hide_window(ctx, self.tray_availability()) {
+            log::info!("Closing the window because the tray is unavailable");
             ctx.send_viewport_cmd(ViewportCommand::Close);
         }
     }
@@ -135,6 +144,7 @@ impl MinimalistApp {
     }
 
     fn hide_window(&mut self, ctx: &egui::Context, availability: Availability) -> bool {
+        log::debug!("Window hide requested (tray: {availability:?})");
         if !availability.can_hide() {
             return false;
         }
@@ -153,12 +163,16 @@ impl MinimalistApp {
         self.drag = None;
         self.hovered_title = None;
         self.window_hidden = true;
+        log::info!("Window hidden to tray");
         ctx.send_viewport_cmd(ViewportCommand::Visible(false));
         true
     }
 
     /// Reveals and focuses the existing native window.
     pub(super) fn show_window(&mut self, ctx: &egui::Context) {
+        if self.window_hidden {
+            log::info!("Window restored from tray");
+        }
         self.window_hidden = false;
         self.last_pin_state = None;
         // X11 window managers may remove state hints when a window is unmapped.
@@ -243,17 +257,22 @@ impl MinimalistApp {
             return;
         }
         if close_requested {
+            log::debug!("Native close requested (tray: {availability:?})");
             if !self.finish_pending_changes() {
+                log::info!("Native close canceled because changes need attention");
                 ctx.send_viewport_cmd(ViewportCommand::CancelClose);
                 self.show_window(ctx);
                 return;
             }
             if self.hide_window(ctx, availability.unwrap_or(Availability::Unavailable)) {
                 ctx.send_viewport_cmd(ViewportCommand::CancelClose);
+            } else {
+                log::info!("Native close accepted because the tray is unavailable");
             }
         } else if minimized && !self.window_hidden {
             self.hide_window(ctx, availability.unwrap_or(Availability::Unavailable));
         } else if self.window_hidden && availability == Some(Availability::Unavailable) {
+            log::warn!("Tray became unavailable while hidden; restoring the window");
             self.show_window(ctx);
             self.status =
                 Some("The desktop tray is unavailable; the window has been restored.".into());
@@ -263,10 +282,12 @@ impl MinimalistApp {
 
     fn quit(&mut self, ctx: &egui::Context) {
         if !self.finish_pending_changes() {
+            log::info!("Tray Quit canceled because changes need attention");
             self.show_window(ctx);
             return;
         }
         self.quitting = true;
+        log::info!("Tray Quit accepted");
         ctx.send_viewport_cmd(ViewportCommand::Close);
     }
 

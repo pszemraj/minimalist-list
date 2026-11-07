@@ -160,3 +160,21 @@ While the app is running, `Ctrl+Alt+Shift+L` shows its window and keeps it visib
 In **Settings -> Global shortcut** or **Settings -> Quick add shortcut**, type a chord and choose **Apply shortcut**, or choose **Disable shortcut**. Use Ctrl or Command with another modifier and a letter, number, Space, or function key. Each action needs its own chord. If registration fails, the previous shortcut remains active.
 
 On Linux, built-in global shortcuts use X11. Without an X11 display, bind the app launcher in your desktop settings to open or reveal the window.
+
+## Diagnostic logs
+
+Quit the running instance first, then start the executable with `--log` for lifecycle events or `--debug` for tray and window decisions, native-library warnings, and Rust panic backtraces. From a checkout:
+
+```bash
+cargo run --locked -- --debug
+```
+
+Add `--start-hidden` to reproduce a tray startup. Logging is opt-in for each process. Starting with either flag while the workspace is already open only logs the launch handoff.
+
+| Platform | Log directory |
+| --- | --- |
+| Linux | `$XDG_STATE_HOME/minimalist-list/logs/`, or `~/.local/state/minimalist-list/logs/` |
+| macOS | `~/Library/Logs/minimalist-list/` |
+| Windows | `%LOCALAPPDATA%\minimalist-list\logs\` |
+
+Each file is named `YYYY-MM-DD.log` in UTC. Entries include the process ID so you can distinguish launches and follow a running process across dates. Logs stay outside the shared workspace. The app omits task text and notes. Native diagnostics can include system paths. A forced termination or desktop crash can leave the log without a shutdown entry. On Linux, `journalctl --user _COMM=minimalist-list` can show output captured by the desktop.

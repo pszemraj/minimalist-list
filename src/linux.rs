@@ -135,6 +135,14 @@ pub(crate) fn run_native(
         hook(&mut builder);
     }
     let event_loop = builder.build()?;
+    if let Ok(handle) = event_loop.display_handle() {
+        let backend = match handle.as_raw() {
+            RawDisplayHandle::Xlib(_) => "X11",
+            RawDisplayHandle::Wayland(_) => "Wayland",
+            _ => "unknown",
+        };
+        log::debug!("Linux display backend: {backend}");
+    }
     configure_cursor_display(&event_loop);
     let mut app = eframe::create_native(app_name, options, creator, &event_loop);
     event_loop.run_app(&mut app)?;

@@ -14,6 +14,7 @@ mod linux;
 mod linux_cursor;
 #[cfg(any(target_os = "linux", test))]
 mod linux_taskbar;
+mod logging;
 #[cfg(target_os = "macos")]
 mod macos;
 mod model;
@@ -37,6 +38,8 @@ const HELP: &str = concat!(
     "Options:\n",
     "      --data-dir <PATH>  Use PATH as the workspace for this launch\n",
     "      --start-hidden     Start in the tray when available\n",
+    "      --log              Write daily lifecycle logs to the per-user log directory\n",
+    "      --debug            Write detailed daily diagnostic logs\n",
     "  -h, --help             Print help\n",
     "  -V, --version          Print version\n\n",
     "Workspace precedence: --data-dir, MINIMALIST_LIST_WORKSPACE, saved setting, platform default.\n",
@@ -47,6 +50,7 @@ enum LaunchAction {
     Run {
         data_dir: Option<String>,
         start_hidden: bool,
+        logging: logging::Mode,
     },
     Help,
     Version,
@@ -56,6 +60,7 @@ fn parse_launch_args(args: impl IntoIterator<Item = OsString>) -> Result<LaunchA
     let mut args = args.into_iter();
     let mut data_dir = None;
     let mut start_hidden = false;
+    let mut logging = logging::Mode::Off;
 
     while let Some(argument) = args.next() {
         let text = argument.to_string_lossy();
@@ -63,6 +68,12 @@ fn parse_launch_args(args: impl IntoIterator<Item = OsString>) -> Result<LaunchA
             "-h" | "--help" => return Ok(LaunchAction::Help),
             "-V" | "--version" => return Ok(LaunchAction::Version),
             "--start-hidden" => start_hidden = true,
+            "--log" => {
+                if logging != logging::Mode::Debug {
+                    logging = logging::Mode::Log;
+                }
+            }
+            "--debug" => logging = logging::Mode::Debug,
             "--data-dir" => {
                 let path = args
                     .next()
@@ -86,6 +97,7 @@ fn parse_launch_args(args: impl IntoIterator<Item = OsString>) -> Result<LaunchA
     Ok(LaunchAction::Run {
         data_dir,
         start_hidden,
+        logging,
     })
 }
 
@@ -114,11 +126,12 @@ fn claim_launch_instance(
 }
 
 fn main() -> eframe::Result {
-    let (data_dir, start_hidden) = match parse_launch_args(env::args_os().skip(1)) {
+    let (data_dir, start_hidden, logging) = match parse_launch_args(env::args_os().skip(1)) {
         Ok(LaunchAction::Run {
             data_dir,
             start_hidden,
-        }) => (data_dir, start_hidden),
+            logging,
+        }) => (data_dir, start_hidden, logging),
         Ok(LaunchAction::Help) => {
             print!("{HELP}");
             return Ok(());
@@ -132,7 +145,24 @@ fn main() -> eframe::Result {
             std::process::exit(2);
         }
     };
-    let (settings, warning) = storage::load_settings();
+    let logging_warning = logging::init(logging).err().map(|error| {
+        let warning = format!("Could not start diagnostic logging: {error}");
+        eprintln!("{warning}");
+        warning
+    });
+    log::info!(
+        "Starting Minimalist List {} on {} (start hidden: {start_hidden}, logging: {logging:?})",
+        env!("CARGO_PKG_VERSION"),
+        env::consts::OS
+    );
+    let (settings, settings_warning) = storage::load_settings();
+    if settings_warning.is_some() {
+        log::warn!("Local preferences could not be fully loaded");
+    }
+    let warning = match (settings_warning, logging_warning) {
+        (Some(settings), Some(logging)) => Some(format!("{settings}\n{logging}")),
+        (settings, logging) => settings.or(logging),
+    };
     let workspace_override =
         select_workspace_override(data_dir, env::var_os("MINIMALIST_LIST_WORKSPACE"));
 
@@ -149,9 +179,15 @@ fn main() -> eframe::Result {
         state_dir,
         start_hidden,
     ) {
-        Ok(instance::LaunchOutcome::Existing) => return Ok(()),
+        Ok(instance::LaunchOutcome::Existing) => {
+            log::info!("Existing workspace instance notified; this launch is exiting");
+            return Ok(());
+        }
         Ok(instance::LaunchOutcome::Primary(instance)) => instance,
-        Err(error) => return Err(eframe::Error::AppCreation(error.into())),
+        Err(error) => {
+            log::error!("Could not claim workspace instance: {error}");
+            return Err(eframe::Error::AppCreation(error.into()));
+        }
     };
     let level = if settings.always_on_top {
         WindowLevel::AlwaysOnTop
@@ -180,6 +216,7 @@ fn main() -> eframe::Result {
     let tray_supported = x11rb::connect(None).is_ok() && tray::linux_host_available();
     #[cfg(not(target_os = "linux"))]
     let tray_supported = true;
+    log::debug!("Native tray window hiding supported: {tray_supported}");
     #[cfg(target_os = "linux")]
     let options = {
         let mut options = options;
@@ -205,7 +242,7 @@ fn main() -> eframe::Result {
     let run_native = linux::run_native;
     #[cfg(not(target_os = "linux"))]
     let run_native = eframe::run_native;
-    run_native(
+    let result = run_native(
         "Minimalist List",
         options,
         Box::new(move |cc| {
@@ -224,7 +261,12 @@ fn main() -> eframe::Result {
             }
             Ok(Box::new(app))
         }),
-    )
+    );
+    match &result {
+        Ok(()) => log::info!("Native event loop exited normally"),
+        Err(error) => log::error!("Native event loop failed: {error}"),
+    }
+    result
 }
 
 #[cfg(test)]
@@ -276,6 +318,7 @@ mod tests {
             Ok(LaunchAction::Run {
                 data_dir: Some("/cli".to_owned()),
                 start_hidden: false,
+                logging: logging::Mode::Off,
             })
         );
     }
@@ -290,6 +333,7 @@ mod tests {
             Ok(LaunchAction::Run {
                 data_dir: Some("/workspace with spaces".into()),
                 start_hidden: true,
+                logging: logging::Mode::Off,
             })
         );
         assert_eq!(
@@ -297,8 +341,32 @@ mod tests {
             Ok(LaunchAction::Run {
                 data_dir: None,
                 start_hidden: false,
+                logging: logging::Mode::Off,
             })
         );
+    }
+
+    #[test]
+    fn logging_flags_select_detail_level_without_changing_launch_options() {
+        for (flags, expected) in [
+            (&["--log"][..], logging::Mode::Log),
+            (&["--log", "--debug"][..], logging::Mode::Debug),
+            (&["--debug", "--log"][..], logging::Mode::Debug),
+        ] {
+            let args = flags
+                .iter()
+                .copied()
+                .chain(["--start-hidden", "--data-dir=workspace"])
+                .map(OsString::from);
+            assert_eq!(
+                parse_launch_args(args),
+                Ok(LaunchAction::Run {
+                    data_dir: Some("workspace".into()),
+                    start_hidden: true,
+                    logging: expected,
+                }),
+            );
+        }
     }
 
     #[test]

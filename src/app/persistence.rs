@@ -95,6 +95,7 @@ impl MinimalistApp {
                 self.persistence.settings_dirty = false;
             }
             Err(error) => {
+                log::warn!("Could not save local preferences");
                 self.persistence.settings_dirty = true;
                 self.persistence.last_retry_error = Some(error.clone());
                 self.status = Some(error);
@@ -109,6 +110,7 @@ impl MinimalistApp {
         if let Err(error) = storage::snapshot_list(&self.workspace, list)
             && !self.persistence.backup_warned
         {
+            log::warn!("Could not write a local list snapshot");
             self.persistence.backup_warned = true;
             let message = format!("Local backup unavailable: {error}");
             self.status = Some(match self.status.take() {
@@ -116,7 +118,11 @@ impl MinimalistApp {
                 None => message,
             });
         }
-        storage::save_list(list)
+        let saved = storage::save_list(list);
+        if saved.is_err() {
+            log::warn!("List save failed; the local changes need recovery");
+        }
+        saved
     }
 
     /// Saves one list and retains failed content for explicit retry.

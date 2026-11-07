@@ -931,7 +931,11 @@ fn xdg_dir_from(
         .unwrap_or_else(|| home.join(fallback))
 }
 
-fn home_dir() -> PathBuf {
+/// Returns the home directory using the current platform's environment.
+///
+/// # Returns
+/// The configured home directory or a relative fallback when none is available.
+pub(crate) fn home_dir() -> PathBuf {
     home_dir_from(PathPlatform::current(), &|name| env::var_os(name))
 }
 

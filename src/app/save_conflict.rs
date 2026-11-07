@@ -170,6 +170,7 @@ impl MinimalistApp {
             snapshot.lists.into_iter().find(|stored| stored.key == list),
         );
         self.acknowledge("Local changes kept in a separate list.".into());
+        log::info!("Save conflict resolved by keeping a local copy");
         true
     }
 
@@ -195,6 +196,7 @@ impl MinimalistApp {
         };
         self.finish_conflict_reload(list, original);
         self.acknowledge(message.into());
+        log::info!("Save conflict resolved by discarding the rejected edit");
         true
     }
 
