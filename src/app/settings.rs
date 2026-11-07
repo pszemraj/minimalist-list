@@ -547,7 +547,7 @@ impl MinimalistApp {
                     .chain(data.archive.iter().map(|item| &item.task))
                     .map(|task| task.subtasks.len())
                     .sum::<usize>();
-                ui.add(Label::new(self.rich(format!("{} active tasks, {} completed tasks, {} archived tasks, and {children} subtasks will be removed. A copy is kept in local backups.", data.active_count(), data.completed_count(), data.archive.len()), 13.0, palette.text)).wrap());
+                ui.add(Label::new(self.rich(format!("{} active tasks, {} completed tasks, {} archived tasks, and {children} subtasks will be removed. A backup copy is kept on this computer.", data.active_count(), data.completed_count(), data.archive.len()), 13.0, palette.text)).wrap());
             }
             let text = if self.delete_armed {
                 "Confirm delete list"
@@ -690,9 +690,11 @@ impl MinimalistApp {
                     self.persistence.dirty_lists.remove(&list_id);
                     self.persistence.pending_filenames.remove(&list_id);
                     storage::remove_file_from_fingerprint(&mut self.fingerprint, &list.path);
-                    self.prune_list_preferences();
+                    self.remove_list_preferences(list_id);
                     self.manual_task_order.remove(&list_id);
-                    self.settings.last_list_id = self.lists.first().map(|item| item.key);
+                    if self.settings.last_list_id == Some(list_id) {
+                        self.settings.last_list_id = self.lists.first().map(|item| item.key);
+                    }
                     self.save_settings();
                     self.go_to_overview();
                     self.return_screen = None;

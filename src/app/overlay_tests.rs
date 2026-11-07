@@ -468,6 +468,119 @@ fn unsubmitted_or_explicitly_cancelled_quick_add_does_not_block_shutdown() {
 }
 
 #[test]
+fn quick_add_backdrop_preserves_drafts_until_explicit_cancellation() {
+    for (text, batch) in [("", false), ("Call the bank", false), ("", true)] {
+        let (ctx, mut app) = super::super::tests::test_app();
+        app.open_quick_capture(None);
+        let state = app.quick_capture.as_mut().unwrap();
+        state.text = text.into();
+        if batch {
+            state.pending_batch = vec!["One".into(), "Two".into()];
+            state.failure = Some("Previous save failed".into());
+        }
+        for _ in 0..3 {
+            overlay_frame(&ctx, &mut app, vec![]);
+        }
+        let pos = egui::pos2(1.0, 1.0);
+        overlay_frame(
+            &ctx,
+            &mut app,
+            vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        if batch || !text.is_empty() {
+            let state = app.quick_capture.as_ref().unwrap();
+            assert_eq!(state.text, text);
+            assert_eq!(!state.pending_batch.is_empty(), batch);
+            overlay_frame(
+                &ctx,
+                &mut app,
+                crate::app::tests::chord(Key::Escape, egui::Modifiers::NONE),
+            );
+        }
+        assert!(app.quick_capture.is_none());
+        assert!(app.lists[0].data.tasks.is_empty());
+        std::fs::remove_dir_all(app.workspace).unwrap();
+    }
+}
+
+#[test]
+fn global_capture_remembers_hidden_origin_and_can_finish_without_a_tray() {
+    for (hidden, submit) in [(false, true), (true, true), (true, false)] {
+        let (ctx, mut app) = super::super::tests::test_app();
+        app.window_hidden = hidden;
+        let _ = ctx.run_logic(&Default::default(), |ctx| app.request_global_quick_add(ctx));
+        crate::app::tests::settle_keyboard(&ctx, &mut app);
+        let state = app.quick_capture.as_mut().unwrap();
+        assert_eq!(state.return_to_tray, hidden);
+        state.text = "Captured from another app".into();
+        let events = if submit {
+            enter()
+        } else {
+            crate::app::tests::chord(Key::Escape, egui::Modifiers::NONE)
+        };
+        overlay_frame(&ctx, &mut app, events);
+        assert!(app.quick_capture.is_none());
+        assert!(!app.window_hidden, "no tray is available");
+        assert!(!app.quitting);
+        assert_eq!(app.lists[0].data.tasks.len(), usize::from(submit));
+        std::fs::remove_dir_all(app.workspace).unwrap();
+    }
+}
+
+#[test]
+fn cancelling_quick_add_preserves_a_notes_save_conflict() {
+    let (ctx, mut app) = super::super::tests::test_app();
+    let list = app.lists[0].key;
+    let task = Task::new("Original");
+    let task_id = task.id;
+    app.lists[0].data.tasks.push(task);
+    assert!(app.save_list_index(0));
+    let mut remote = crate::storage::load_workspace(&app.workspace)
+        .unwrap()
+        .lists
+        .remove(0);
+    remote.data.tasks[0].text = "Remote title".into();
+    crate::storage::save_list(&remote).unwrap();
+    app.open_task_context(list, task_id, false);
+    app.task_context.as_mut().unwrap().text = "Unsaved notes".into();
+    assert!(!app.save_task_context());
+    app.next_scan = Instant::now();
+    app.scan_external_changes();
+    assert_eq!(app.lists[0].data.tasks[0].text, "Original");
+    app.open_quick_capture(Some(list));
+    for _ in 0..3 {
+        overlay_frame(&ctx, &mut app, vec![]);
+    }
+    overlay_frame(
+        &ctx,
+        &mut app,
+        crate::app::tests::chord(Key::Escape, egui::Modifiers::NONE),
+    );
+    assert!(app.quick_capture.is_none());
+    assert!(app.has_save_conflict(list));
+    assert_eq!(app.task_context.as_ref().unwrap().text, "Unsaved notes");
+    app.task_context = None;
+    app.forget_save_conflict(list);
+    app.scan_external_changes();
+    assert_eq!(app.lists[0].data.tasks[0].text, "Remote title");
+    std::fs::remove_dir_all(app.workspace).unwrap();
+}
+
+#[test]
 fn quick_add_success_preserves_unrelated_diagnostics_including_after_retry() {
     for fail_first in [false, true] {
         for diagnostic in [

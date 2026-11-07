@@ -416,7 +416,8 @@ fn vanished_workspace_shows_recovery_without_recreating_the_folder() {
     assert!(app.persistence.workspace_failure.is_some());
     fs::remove_dir(&lists).unwrap();
     fs::rename(&moved_lists, &lists).unwrap();
-    app.open_workspace(&workspace.to_string_lossy(), false);
+    app.next_scan = Instant::now();
+    app.scan_external_changes();
     assert!(app.persistence.workspace_failure.is_none());
     assert_eq!(fs::read_dir(&lists).unwrap().count(), 1);
     fs::remove_dir_all(&workspace).unwrap();
@@ -455,6 +456,60 @@ fn missing_or_empty_saved_workspace_starts_in_recovery_but_explicit_launches_cre
     assert!(launched.persistence.workspace_failure.is_none());
     assert_eq!(fs::read_dir(selected.join("lists")).unwrap().count(), 1);
     fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn failed_startup_and_temporary_list_absence_preserve_local_preferences() {
+    let (ctx, original) = test_app();
+    let workspace = original.workspace.clone();
+    let key = workspace.to_string_lossy().into_owned();
+    let first = original.lists[0].key;
+    let second = storage::create_list(&workspace, "Second", Accent::Sky).unwrap();
+    let mut settings = original.settings;
+    settings.last_list_id = Some(second.key);
+    settings
+        .list_order
+        .insert(key.clone(), vec![second.key, first]);
+    let sort_key = format!("{key}::{}", second.key);
+    settings
+        .task_sort
+        .insert(sort_key.clone(), crate::model::TaskSort::Title);
+    storage::save_settings(&settings).unwrap();
+    let offline = workspace.with_extension("offline");
+    fs::rename(&workspace, &offline).unwrap();
+
+    let mut app = MinimalistApp::new(&ctx, settings.clone(), None, None);
+    assert!(app.persistence.workspace_failure.is_some());
+    app.next_scan = Instant::now();
+    app.scan_external_changes();
+    assert!(!workspace.exists());
+    fs::rename(&offline, &workspace).unwrap();
+    app.next_scan = Instant::now();
+    app.scan_external_changes();
+    assert!(app.persistence.workspace_failure.is_none());
+    assert!(matches!(app.screen, super::Screen::List(id) if id == second.key));
+    assert_eq!(app.lists[0].key, second.key);
+
+    let pending = workspace.join("temporarily-offline.json");
+    fs::rename(&second.path, &pending).unwrap();
+    app.next_scan = Instant::now();
+    app.scan_external_changes();
+    assert!(app.list_index(second.key).is_none());
+    app.save_settings();
+    let saved = storage::load_settings().0;
+    assert_eq!(saved.last_list_id, settings.last_list_id);
+    assert_eq!(saved.list_order, settings.list_order);
+    assert_eq!(saved.task_sort, settings.task_sort);
+    fs::rename(&pending, &second.path).unwrap();
+    app.next_scan = Instant::now();
+    app.scan_external_changes();
+    assert_eq!(app.lists[0].key, second.key);
+    assert_eq!(
+        app.task_sort_mode(second.key),
+        crate::model::TaskSort::Title
+    );
+    assert!(app.settings.task_sort.contains_key(&sort_key));
+    fs::remove_dir_all(workspace).unwrap();
 }
 
 #[test]

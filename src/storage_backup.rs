@@ -111,7 +111,7 @@ struct Snapshot {
     path: PathBuf,
 }
 
-/// Lists timestamped snapshots, including earlier backups with no sequence suffix.
+/// Lists snapshots named by timestamp and creation sequence.
 fn snapshot_files(directory: &Path) -> std::io::Result<Vec<Snapshot>> {
     let mut snapshots = Vec::new();
     for entry in fs::read_dir(directory)?.flatten() {
@@ -119,7 +119,9 @@ fn snapshot_files(directory: &Path) -> std::io::Result<Vec<Snapshot>> {
         let Some(stem) = name.to_str().and_then(|name| name.strip_suffix(".json")) else {
             continue;
         };
-        let (time, sequence) = stem.split_once('-').unwrap_or((stem, "0"));
+        let Some((time, sequence)) = stem.split_once('-') else {
+            continue;
+        };
         if time.bytes().all(|byte| byte.is_ascii_digit())
             && sequence.bytes().all(|byte| byte.is_ascii_digit())
             && let (Ok(time), Ok(sequence)) = (time.parse(), sequence.parse())
@@ -220,7 +222,6 @@ pub(super) fn snapshot_into(
 /// Returns an error when another readable file has the same identity or the file
 /// cannot be kept in backups and removed. The list file then stays in place.
 pub fn delete_list(workspace: &Path, list: &StoredList) -> Result<(), String> {
-    format::check_version(list.data.format_version)?;
     if let Some(directory) = list.path.parent() {
         for entry in fs::read_dir(directory)
             .map_err(|error| format!("could not read {}: {error}", directory.display()))?

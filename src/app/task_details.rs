@@ -55,7 +55,7 @@ pub(super) struct MoveDialog {
     request_focus: bool,
 }
 
-/// The latest deletion or move, retained for one-step Undo.
+/// The latest deletion, move, or paste batch, retained for one-step Undo.
 enum UndoItem {
     Task {
         list: Uuid,
@@ -79,6 +79,11 @@ enum UndoItem {
         position: usize,
         task: Uuid,
         destination: Uuid,
+    },
+    Pasted {
+        list: Uuid,
+        parent: Option<Uuid>,
+        ids: HashSet<Uuid>,
     },
 }
 

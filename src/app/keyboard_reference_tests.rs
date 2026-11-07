@@ -73,7 +73,7 @@ fn global_quick_add_replaces_the_reference_and_returns_focus_beneath_it() {
     assert!(beneath.is_some());
     key(&ctx, &mut app, Key::Slash, Modifiers::COMMAND);
     assert!(app.shortcuts.is_some());
-    app.open_global_quick_add(&ctx);
+    app.open_global_quick_add(&ctx, false);
     idle(&ctx, &mut app);
     assert!(app.shortcuts.is_none() && app.quick_capture.is_some());
     assert_eq!(
@@ -104,7 +104,7 @@ fn global_quick_add_dismisses_the_move_dialog_and_open_menus() {
     egui::Popup::open_id(&ctx, Id::new("unrelated-menu"));
     idle(&ctx, &mut app);
     assert!(app.details.move_task.is_some());
-    app.open_global_quick_add(&ctx);
+    app.open_global_quick_add(&ctx, false);
     idle(&ctx, &mut app);
     assert!(app.details.move_task.is_none() && !egui::Popup::is_any_open(&ctx));
     assert!(app.quick_capture.is_some());
@@ -124,7 +124,7 @@ fn global_quick_add_keeps_an_open_draft_and_refocuses_its_field() {
     type_text(&ctx, &mut app, "Half-typed capture");
     ctx.memory_mut(|memory| memory.surrender_focus(Id::new("quick-capture-text")));
     idle(&ctx, &mut app);
-    app.open_global_quick_add(&ctx);
+    app.open_global_quick_add(&ctx, false);
     idle(&ctx, &mut app);
     assert_eq!(
         app.quick_capture.as_ref().unwrap().text,
@@ -526,7 +526,7 @@ fn reference_uses_shared_bindings_and_native_key_names() {
             KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::C),
         ),
         (
-            "Undo deletion or move",
+            "Undo deletion, move, or paste",
             KeyboardShortcut::new(Modifiers::COMMAND, Key::Z),
         ),
         ("Move to another list", MOVE_TO_LIST),

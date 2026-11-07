@@ -129,6 +129,11 @@ impl MinimalistApp {
         }
     }
 
+    /// Restores Quick add's previous hidden state while the tray is usable.
+    pub(super) fn return_to_tray_after_capture(&mut self, ctx: &egui::Context) {
+        self.hide_window(ctx, self.tray_availability());
+    }
+
     fn hide_window(&mut self, ctx: &egui::Context, availability: Availability) -> bool {
         if !availability.can_hide() {
             return false;

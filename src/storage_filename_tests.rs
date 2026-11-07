@@ -90,7 +90,7 @@ fn descriptive_filename_identity_wins_over_json_and_sync_conflict_copies() {
     assert_eq!(loaded.lists[0].key, list.key);
     assert_eq!(loaded.lists[0].data.id, list.key);
     assert_eq!(loaded.lists[0].data.title, "Current title");
-    assert_eq!(loaded.warnings.len(), 2);
+    assert_eq!(loaded.duplicate_paths.len(), 2);
     assert!(copy.path.exists() && legacy.exists());
     fs::remove_dir_all(root).unwrap();
 }
@@ -183,7 +183,7 @@ fn rename_collision_reloads_the_latest_saved_contents_without_replacing_copies()
             serde_json::to_value(&loaded.lists[0].data).unwrap(),
             serde_json::to_value(&list.data).unwrap()
         );
-        assert_eq!(loaded.warnings.len(), 1);
+        assert_eq!(loaded.duplicate_paths, [stale.path.clone()]);
         assert_eq!(fs::read(&stale.path).unwrap(), stale_bytes);
 
         // A subsequent real edit to the destination must beat the older source.

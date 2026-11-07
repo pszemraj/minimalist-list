@@ -349,7 +349,7 @@ fn task_saves_and_reopening_selected_list_do_not_write_settings() {
 }
 
 #[test]
-fn pruning_list_preferences_keeps_other_workspaces_and_live_lists() {
+fn removing_a_list_preference_keeps_other_workspaces_and_lists() {
     let (_, mut app, list, _) = fixture();
     let removed = Uuid::new_v4();
     let workspace = app.workspace.to_string_lossy().into_owned();
@@ -371,6 +371,9 @@ fn pruning_list_preferences_keeps_other_workspaces_and_live_lists() {
         .list_order
         .insert(elsewhere.clone(), vec![removed]);
     app.capture_loaded_task_orders();
+    assert_eq!(app.settings.task_sort.len(), 3);
+    assert_eq!(app.settings.list_order[&workspace], vec![removed, list]);
+    app.remove_list_preferences(removed);
     assert_eq!(app.settings.task_sort.len(), 2);
     assert_eq!(
         app.settings.task_sort[&app.task_order_key(list)],

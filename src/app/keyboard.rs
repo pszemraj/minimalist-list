@@ -254,7 +254,7 @@ pub(super) fn shortcut_groups(show_window: String, quick_add: String) -> Vec<Sho
                 ("Move to another list", shortcut(MOVE_TO_LIST)),
                 ("Edit task context", shortcut(TASK_CONTEXT)),
                 (
-                    "Undo deletion or move",
+                    "Undo deletion, move, or paste",
                     shortcut(KeyboardShortcut::new(Modifiers::COMMAND, Key::Z)),
                 ),
                 (
@@ -438,7 +438,9 @@ impl MinimalistApp {
         {
             return;
         }
-        if !ctx.text_edit_focused() && take_key(ctx, Key::Z, Modifiers::COMMAND) {
+        if (!ctx.text_edit_focused() || self.can_undo_paste_in_entry(ctx))
+            && take_key(ctx, Key::Z, Modifiers::COMMAND)
+        {
             self.undo_last();
             return;
         }

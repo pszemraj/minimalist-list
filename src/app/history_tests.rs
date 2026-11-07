@@ -231,12 +231,12 @@ fn clearing_history_empties_the_archive_and_keeps_live_tasks() {
     fs::remove_dir_all(&app.workspace).unwrap();
 }
 
-/// Orders snapshots by creation sequence and older timestamp-only backups by time.
+/// Orders snapshots by creation sequence.
 fn snapshots_in_save_order(app: &MinimalistApp, list: Uuid) -> Vec<std::path::PathBuf> {
     let mut files = snapshot_files(app, list);
     files.sort_by_key(|path| {
         let stem = path.file_stem()?.to_str()?;
-        let (time, sequence) = stem.split_once('-').unwrap_or((stem, "0"));
+        let (time, sequence) = stem.split_once('-')?;
         Some((sequence.parse::<u64>().ok()?, time.parse::<u64>().ok()?))
     });
     files
@@ -274,9 +274,9 @@ fn clearing_history_keeps_its_snapshot_when_the_clock_has_moved_back() {
     let earlier_contents = fs::read(&original).unwrap();
     fs::remove_file(&original).unwrap();
     let future = now_unix_seconds() + 86_400;
-    for timestamp in future..future + 100 {
+    for (sequence, timestamp) in (1..).zip(future..future + 100) {
         fs::write(
-            directory.join(format!("{timestamp}.json")),
+            directory.join(format!("{timestamp}-{sequence}.json")),
             &earlier_contents,
         )
         .unwrap();

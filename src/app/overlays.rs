@@ -29,6 +29,8 @@ pub(super) struct QuickCaptureState {
     pub(super) failure: Option<String>,
     /// Parsed tasks waiting for a retry after a failed paste save.
     pub(super) pending_batch: Vec<String>,
+    /// Returns to the tray when a capture that revealed the window finishes.
+    return_to_tray: bool,
 }
 
 impl QuickCaptureState {
@@ -179,6 +181,7 @@ impl MinimalistApp {
             request_focus: true,
             failure: None,
             pending_batch: Vec::new(),
+            return_to_tray: false,
         });
     }
 
@@ -197,15 +200,19 @@ impl MinimalistApp {
     /// # Arguments
     /// - `ctx` - Context receiving the native window commands.
     pub(super) fn request_global_quick_add(&mut self, ctx: &egui::Context) {
+        *self.global_quick_add_requested.get_or_insert(false) |= self.window_hidden;
         self.show_window(ctx);
-        self.global_quick_add_requested = true;
     }
 
     /// Opens quick capture for a request from outside the window, above other transient layers.
     ///
     /// Dismissing the keyboard reference or Move keeps its return focus for Quick add. Open
     /// menus are dismissed. An already open Quick add keeps its draft and regains focus.
-    pub(super) fn open_global_quick_add(&mut self, ctx: &egui::Context) {
+    ///
+    /// # Arguments
+    /// - `ctx` - Context used to focus the capture field.
+    /// - `was_hidden` - Whether this request revealed the window from the tray.
+    pub(super) fn open_global_quick_add(&mut self, ctx: &egui::Context, was_hidden: bool) {
         if let Some(reference) = self.shortcuts.take() {
             self.keyboard.pending = reference.return_focus;
         }
@@ -222,6 +229,9 @@ impl MinimalistApp {
         }
         egui::Popup::close_all(ctx);
         self.open_quick_add_here(ctx);
+        if let Some(state) = &mut self.quick_capture {
+            state.return_to_tray |= was_hidden;
+        }
     }
 
     /// Opens global search and requests focus for its query field.
@@ -352,6 +362,7 @@ impl MinimalistApp {
         let Some(mut state) = self.quick_capture.take() else {
             return;
         };
+        let previous_destination = state.selected_list_id;
         let choices = self
             .lists
             .iter()
@@ -375,6 +386,8 @@ impl MinimalistApp {
 
         let mut submit = false;
         let mut recover = false;
+        let mut discard = false;
+        let mut cancel = false;
         if state.request_focus {
             ctx.memory_mut(|memory| memory.request_focus(Id::new("quick-capture-text")));
         }
@@ -405,7 +418,10 @@ impl MinimalistApp {
                         .selected_list_id
                         .is_some_and(|id| self.has_save_conflict(id))
                     {
-                        recover = ui.button("Keep local copy and reload").clicked();
+                        ui.horizontal_wrapped(|ui| {
+                            recover = ui.button("Keep local copy and reload").clicked();
+                            discard = ui.button("Discard my change and reload").clicked();
+                        });
                     }
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
@@ -479,25 +495,25 @@ impl MinimalistApp {
                             12.0,
                             palette.muted,
                         ));
-                        if conflicted {
-                            return;
-                        }
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            submit |= ui
-                                .add_enabled(
-                                    state.selected_list_id.is_some() && state.has_input(),
-                                    Button::new(self.rich(
-                                        if state.failure.is_some() {
-                                            "Retry save"
-                                        } else {
-                                            "Add"
-                                        },
-                                        14.0,
-                                        palette.accent,
-                                    ))
-                                    .frame(false),
-                                )
-                                .clicked();
+                            if !conflicted {
+                                submit |= ui
+                                    .add_enabled(
+                                        state.selected_list_id.is_some() && state.has_input(),
+                                        Button::new(self.rich(
+                                            if state.failure.is_some() {
+                                                "Retry save"
+                                            } else {
+                                                "Add"
+                                            },
+                                            14.0,
+                                            palette.accent,
+                                        ))
+                                        .frame(false),
+                                    )
+                                    .clicked();
+                            }
+                            cancel = ui.button("Cancel").clicked();
                         });
                     });
                     if !conflicted {
@@ -507,9 +523,11 @@ impl MinimalistApp {
                 });
         });
 
+        if previous_destination != state.selected_list_id {
+            self.forget_abandoned_capture_conflict(previous_destination, state.failure.is_some());
+        }
         if batch_saved && !state.has_input() {
-            self.restore_overlay_focus();
-            ctx.request_repaint();
+            self.finish_quick_capture(ctx, state.return_to_tray);
             return;
         }
         if submit {
@@ -527,7 +545,7 @@ impl MinimalistApp {
                 match self.save_capture(list_id, items, state.failure.as_deref()) {
                     Ok(()) => {
                         if !retry_batch || typed.is_empty() {
-                            self.restore_overlay_focus();
+                            self.finish_quick_capture(ctx, state.return_to_tray);
                             return;
                         }
                         state.pending_batch.clear();
@@ -538,25 +556,53 @@ impl MinimalistApp {
             }
         }
 
-        if recover {
-            let list = state.selected_list_id;
+        if let Some(list) = state.selected_list_id.filter(|_| recover || discard) {
+            let return_to_tray = state.return_to_tray;
             self.quick_capture = Some(state);
-            if let Some(id) = list {
-                self.keep_local_copy_and_reload(id);
+            let resolved = if recover {
+                self.keep_local_copy_and_reload(list)
+            } else {
+                self.discard_local_change_and_reload(list)
+            };
+            if resolved {
+                self.finish_quick_capture(ctx, return_to_tray);
             }
-        } else if !modal.should_close() {
-            self.quick_capture = Some(state);
         } else {
-            if let Some(list) = state.selected_list_id
-                && !self.persistence.dirty_lists.contains(&list)
-            {
-                self.forget_save_conflict(list);
+            let clicked_outside = modal.backdrop_response.clicked();
+            if cancel || (modal.should_close() && (!clicked_outside || !state.has_input())) {
+                self.forget_abandoned_capture_conflict(
+                    state.selected_list_id,
+                    state.failure.is_some(),
+                );
+                self.finish_quick_capture(ctx, state.return_to_tray);
+            } else {
+                state.request_focus |= clicked_outside;
+                self.quick_capture = Some(state);
             }
-            self.restore_overlay_focus();
         }
     }
 
-    /// Saves captured tasks at the top of a list in one write and acknowledges them.
+    fn forget_abandoned_capture_conflict(&mut self, destination: Option<Uuid>, failed: bool) {
+        if let Some(list) = destination.filter(|_| failed)
+            && !self.persistence.dirty_lists.contains(&list)
+            && self
+                .task_context
+                .as_ref()
+                .is_none_or(|editor| editor.list != list || editor.failure.is_none())
+        {
+            self.forget_save_conflict(list);
+        }
+    }
+
+    fn finish_quick_capture(&mut self, ctx: &egui::Context, return_to_tray: bool) {
+        self.restore_overlay_focus();
+        if return_to_tray {
+            self.return_to_tray_after_capture(ctx);
+        }
+        ctx.request_repaint();
+    }
+
+    /// Saves captured tasks at the top of a list, replaying once on a clean external edit.
     ///
     /// # Arguments
     /// - `list_id` - Destination list identity.
@@ -584,13 +630,11 @@ impl MinimalistApp {
         };
         let tasks = new_tasks(items);
         let newest = tasks.first().map(|task| task.id);
-        let mut candidate = self.lists[index].clone();
-        candidate.data.tasks.splice(0..0, tasks);
-        let title = candidate.data.title.clone();
-        if let Err(error) = self.save_list_candidate(index, candidate) {
+        if let Err(error) = self.write_capture_tasks(index, &tasks) {
             self.status = Some(error.clone());
             return Err(error);
         }
+        self.record_paste_undo(list_id, None, tasks.iter().map(|task| task.id));
         self.newest_task = newest.map(|id| (id, Instant::now()));
         self.settings.last_capture_list_id = Some(list_id);
         self.save_settings();
@@ -601,6 +645,7 @@ impl MinimalistApp {
         {
             self.status = None;
         }
+        let title = &self.lists[index].data.title;
         self.acknowledge(match items {
             [_] => format!("Added to {title}"),
             _ => format!("Added {} tasks to {title}", items.len()),

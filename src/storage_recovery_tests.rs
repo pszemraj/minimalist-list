@@ -340,7 +340,7 @@ fn snapshot_keys(directory: &Path) -> Vec<(u64, u64)> {
         .filter_map(|entry| {
             let name = entry.file_name();
             let stem = name.to_str()?.strip_suffix(".json")?;
-            let (time, sequence) = stem.split_once('-').unwrap_or((stem, "0"));
+            let (time, sequence) = stem.split_once('-')?;
             Some((time.parse().ok()?, sequence.parse().ok()?))
         })
         .collect::<Vec<_>>();
@@ -410,8 +410,12 @@ fn a_same_second_history_snapshot_survives_the_next_ordinary_saves() {
     let directory = root();
     fs::create_dir_all(&directory).unwrap();
     let now = 1_700_000_000;
-    for stamp in now - 99..=now {
-        fs::write(directory.join(format!("{stamp}.json")), b"Older version").unwrap();
+    for (sequence, stamp) in (1..).zip(now - 99..=now) {
+        fs::write(
+            directory.join(format!("{stamp}-{sequence}.json")),
+            b"Older version",
+        )
+        .unwrap();
     }
 
     backup::snapshot_into(&directory, b"History before clearing", now, true).unwrap();
@@ -420,7 +424,7 @@ fn a_same_second_history_snapshot_survives_the_next_ordinary_saves() {
 
     assert_eq!(fs::read_dir(&directory).unwrap().count(), 100);
     assert_eq!(
-        fs::read(directory.join(format!("{now}-1.json"))).unwrap(),
+        fs::read(directory.join(format!("{now}-101.json"))).unwrap(),
         b"History before clearing"
     );
     fs::remove_dir_all(directory).unwrap();
@@ -431,8 +435,12 @@ fn history_snapshot_survives_a_clock_rollback_after_clearing() {
     let directory = root();
     fs::create_dir_all(&directory).unwrap();
     let now = 1_700_000_000;
-    for stamp in now - 99..now {
-        fs::write(directory.join(format!("{stamp}.json")), b"Older version").unwrap();
+    for (sequence, stamp) in (1..).zip(now - 99..now) {
+        fs::write(
+            directory.join(format!("{stamp}-{sequence}.json")),
+            b"Older version",
+        )
+        .unwrap();
     }
 
     backup::snapshot_into(&directory, b"History before clearing", now, true).unwrap();
@@ -441,11 +449,11 @@ fn history_snapshot_survives_a_clock_rollback_after_clearing() {
 
     assert_eq!(fs::read_dir(&directory).unwrap().count(), 100);
     assert_eq!(
-        fs::read(directory.join(format!("{now}-1.json"))).unwrap(),
+        fs::read(directory.join(format!("{now}-100.json"))).unwrap(),
         b"History before clearing"
     );
     assert_eq!(
-        fs::read(directory.join(format!("{}-2.json", now - 10))).unwrap(),
+        fs::read(directory.join(format!("{}-101.json", now - 10))).unwrap(),
         b"Cleared History"
     );
     fs::remove_dir_all(directory).unwrap();
@@ -482,6 +490,7 @@ fn snapshots_are_capped_at_one_hundred_and_other_files_are_untouched() {
     let foreign = [
         "notes.txt",
         "backup.json",
+        "8.json",
         "12ab.json",
         "5.json.bak",
         ".5.json.tmp",

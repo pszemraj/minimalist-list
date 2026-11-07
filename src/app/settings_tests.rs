@@ -235,7 +235,7 @@ fn deletion_confirmation_names_all_affected_content() {
         text.iter()
             .any(|(text, _)| text == &format!("Delete “{}”?", app.lists[0].data.title))
     );
-    assert!(text.iter().any(|(text, _)| text == "1 active tasks, 1 completed tasks, 1 archived tasks, and 2 subtasks will be removed. A copy is kept in local backups."));
+    assert!(text.iter().any(|(text, _)| text == "1 active tasks, 1 completed tasks, 1 archived tasks, and 2 subtasks will be removed. A backup copy is kept on this computer."));
     assert!(text.iter().any(|(text, _)| text == "Cancel deletion"));
     std::fs::remove_dir_all(&app.workspace).unwrap();
 }

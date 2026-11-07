@@ -29,7 +29,7 @@ In **Manual** order, drag overview tiles to rearrange them. **Sort lists** tempo
 
 Type into the field above a list and press Enter to add a task. Task and subtask entry keep focus after Enter, including an empty submission. Unfinished entries stay with their originating workspace and list or task during navigation and after closing a checklist. They last until the app quits.
 
-Paste a list into task entry, a checklist's add field, or [Quick add](#quick-add) to create one incomplete item per line. The app trims whitespace, strips leading bullets, numbers, and Markdown checkboxes, and skips blank items. A paste with fewer than two items goes into the field as ordinary text. A batch leaves separately typed text in the field. In Quick add a successful batch goes to the selected list and closes the overlay if the field was empty.
+Paste a list into task entry, a checklist's add field, or [Quick add](#quick-add) to create one incomplete item per line. The app trims whitespace, strips leading bullets, numbers, and Markdown checkboxes, and skips blank items. A paste with fewer than two items goes into the field as ordinary text. A batch leaves separately typed text in the field and can be undone in one step. In Quick add a successful batch goes to the selected list and closes the overlay if the field was empty.
 
 Down from task entry focuses the first task. Up and Down move between task rows, including from their secondary controls; Home and End focus the first and last task. Up from the first task returns to entry.
 
@@ -43,9 +43,9 @@ Click task or child text to edit it inline, or press Enter on a focused task row
 
 Press `Ctrl+N` or select the header's `add` action. Quick add defaults to the open list. From outside a list, it tries the last successful capture destination, the last opened list, then the first available list. Choose a destination and press Enter or **Add**. The success message names the destination.
 
-Switching between Quick add and Find preserves their drafts. A nonempty capture keeps its destination until you change it or that list disappears. If the list disappears, choose another to save. An empty draft chooses a destination again when reopened. Escape cancels the capture. See [save recovery](storage.md#save-recovery) if a capture fails.
+Switching between Quick add and Find preserves their drafts. A nonempty capture keeps its destination until you change it or that list disappears. If the list disappears, choose another to save. An empty draft chooses a destination again when reopened. Use Escape or **Cancel** to discard a draft. Clicking outside leaves it open. See [save recovery](storage.md#save-recovery) if a capture fails.
 
-You can also open Quick add from the [tray](#startup-and-system-tray) or with its [global shortcut](#global-shortcuts).
+You can also open Quick add from the [tray](#startup-and-system-tray) or with its [global shortcut](#global-shortcuts). If it reveals a hidden window, completing or canceling the capture returns the window to the tray while the tray is available.
 
 <img src="../assets/quick-add.png" alt="Quick add on Linux with a draft task and Today selected as the destination" width="360">
 
@@ -79,9 +79,9 @@ Drag a task vertically to reorder it. Drag right past the threshold to complete 
 
 `Ctrl+Shift+Backspace` or **Archive N completed** moves the displayed count of completed tasks into restorable History. The shortcut works from an empty task or subtask entry; nonempty fields and inline editors keep editing text. With no completed tasks, it leaves the list file untouched.
 
-Deleting a task, child, or History entry, or moving a task, shows **Undo**. Select it or press `Ctrl+Z` outside a text editor. Undo restores a deleted item with its contents, completion, and original position, including the archive time for a History entry. Undo returns a moved task to its original position in its source list.
+Deleting a task, child, or History entry, moving a task, or pasting a batch shows **Undo**. Select it or press `Ctrl+Z` outside a text editor. You can also undo a batch from its empty task or checklist entry. Undo restores a deleted item with its contents, completion, and original position, including the archive time for a History entry. It returns a moved task to its original position in its source list and removes only the items created by a paste batch.
 
-Undo applies to the latest deletion or move and lasts until the next deletion or move, dismissal, workspace switch, or restart. If a moved task or either list is gone, or the original list already holds the task, Undo explains why and stays available.
+Undo applies to the latest deletion, move, or batch paste until dismissal, a workspace switch, or restart. If a moved task or either list is gone, or the original list already holds the task, Undo explains why and stays available.
 
 Right-click a task and choose **Move to list**, or press `Ctrl+Shift+M` with focus on a task row, one of its controls, a checklist item, or its title editor. The app saves inline edits first. The picker starts on the last destination used this session if it is still available, or the first other list. Use Up and Down to change the destination, Enter or **Move** to confirm, and Escape to return to the task. If the destination disappears while the picker is open, choose another.
 

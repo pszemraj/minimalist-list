@@ -69,7 +69,6 @@ impl MinimalistApp {
         &mut self,
         retained_paths: &[std::path::PathBuf],
     ) {
-        self.prune_list_preferences();
         self.manual_task_order
             .retain(|id, _| self.lists.iter().any(|list| list.key == *id));
         for list in &self.lists {
@@ -83,17 +82,12 @@ impl MinimalistApp {
         }
     }
 
-    /// Removes preferences for lists no longer present in the current workspace.
-    pub(super) fn prune_list_preferences(&mut self) {
+    /// Removes local order and sort preferences after a confirmed list deletion.
+    pub(super) fn remove_list_preferences(&mut self, list: Uuid) {
+        self.settings.task_sort.remove(&self.task_order_key(list));
         let workspace = self.workspace.to_string_lossy();
-        let prefix = format!("{workspace}::");
-        let live: HashSet<_> = self.lists.iter().map(|list| list.key).collect();
-        self.settings.task_sort.retain(|key, _| {
-            key.strip_prefix(&prefix)
-                .is_none_or(|id| id.parse::<Uuid>().is_ok_and(|id| live.contains(&id)))
-        });
         if let Some(order) = self.settings.list_order.get_mut(workspace.as_ref()) {
-            order.retain(|id| live.contains(id));
+            order.retain(|id| *id != list);
         }
     }
 

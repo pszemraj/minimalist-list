@@ -142,6 +142,9 @@ fn task_entry_paste_adds_one_task_per_line_at_the_top_with_one_save() {
     frame(&mut f, vec![Event::Text("Single".into())]);
     frame(&mut f, chord(Key::Enter, Modifiers::NONE));
     assert_eq!(titles(&saved(&f).tasks)[..2], ["Single", "Milk"]);
+    idle(&mut f);
+    frame(&mut f, chord(Key::Z, Modifiers::COMMAND));
+    assert_eq!(titles(&saved(&f).tasks), ["Single", "Old A", "Old B"]);
     cleanup(f);
 }
 
@@ -252,6 +255,9 @@ fn checklist_paste_appends_subtasks_in_order_and_keeps_the_draft() {
     paste(&mut f, "Last\n");
     assert_eq!(f.app.new_subtask, "Last ");
     assert_eq!(saved(&f).tasks[0].subtasks.len(), 4);
+    f.app.undo_last();
+    assert_eq!(children(&saved(&f).tasks), ["Existing"]);
+    assert_eq!(f.app.new_subtask, "Last ", "Undo preserves a typed draft");
     cleanup(f);
 }
 
@@ -293,6 +299,8 @@ fn quick_add_paste_keeps_a_nonempty_draft_open() {
     assert!(f.app.quick_capture.is_none());
     assert_eq!(titles(&saved(&f).tasks), ["Unfinished", "One", "Two"]);
     assert_eq!(notice(&f), Some("Added to Tasks"));
+    f.app.undo_last();
+    assert_eq!(titles(&saved(&f).tasks), ["Unfinished"]);
     cleanup(f);
 }
 
@@ -368,6 +376,9 @@ fn quick_add_retries_a_failed_batch_without_resubmitting_the_typed_draft() {
 #[test]
 fn quick_add_paste_conflict_recovery_keeps_the_batch_and_typed_draft_once() {
     let mut f = fixture(&["Existing"]);
+    let task = f.app.lists[0].data.tasks[0].id;
+    f.app.open_task_context(f.list, task, false);
+    f.app.task_context.as_mut().unwrap().text = "Unsaved notes".into();
     open_quick_add(&mut f, "Unfinished");
     let mut remote = storage::load_workspace(&f.app.workspace)
         .unwrap()
@@ -396,7 +407,47 @@ fn quick_add_paste_conflict_recovery_keeps_the_batch_and_typed_draft_once() {
         titles(&copy.data.tasks),
         ["One", "Two", "Unfinished", "Existing"]
     );
+    assert_eq!(copy.data.tasks[3].context, "Unsaved notes");
     cleanup(f);
+}
+
+#[test]
+fn standalone_capture_replays_once_on_fresh_manual_order() {
+    for batch in [false, true] {
+        let mut f = fixture(&["Zulu", "Alpha"]);
+        f.app.sort_tasks(f.list, TaskSort::Title);
+        open_quick_add(&mut f, if batch { "" } else { "One" });
+        let mut remote = storage::load_workspace(&f.app.workspace)
+            .unwrap()
+            .lists
+            .remove(0);
+        remote.data.tasks.swap(0, 1);
+        remote.data.tasks.insert(0, Task::new("Remote"));
+        storage::save_list(&remote).unwrap();
+
+        if batch {
+            remote.data.title = "Renamed elsewhere".into();
+            storage::save_list(&remote).unwrap();
+            storage::rename_list_file(&mut remote).unwrap();
+            paste(&mut f, "One\nTwo");
+        } else {
+            frame(&mut f, chord(Key::Enter, Modifiers::NONE));
+        }
+        assert!(f.app.quick_capture.is_none());
+        assert!(!f.app.has_save_conflict(f.list));
+        assert_eq!(f.app.lists[0].path, remote.path);
+        let expected: &[&str] = if batch {
+            &["One", "Two", "Remote", "Alpha", "Zulu"]
+        } else {
+            &["One", "Remote", "Alpha", "Zulu"]
+        };
+        assert_eq!(titles(&saved(&f).tasks), expected);
+        if batch {
+            f.app.undo_last();
+            assert_eq!(titles(&saved(&f).tasks), ["Remote", "Alpha", "Zulu"]);
+        }
+        cleanup(f);
+    }
 }
 
 #[test]

@@ -58,7 +58,10 @@ fn deferred_reload_during_inline_edit_cannot_overwrite_synced_task_changes() {
     assert_eq!(fs::read(&remote.path).unwrap(), remote_bytes);
     assert!(!app.retry_dirty_lists());
     assert_eq!(fs::read(&remote.path).unwrap(), remote_bytes);
+    app.status = Some("Unrelated sync warning".into());
     assert!(app.keep_local_copy_and_reload(list_id));
+    assert_eq!(app.status.as_deref(), Some("Unrelated sync warning"));
+    assert!(app.persistence.notice.is_some());
     assert!(app.persistence.dirty_lists.is_empty());
     assert!(app.finish_pending_changes());
     assert_eq!(fs::read(&remote.path).unwrap(), remote_bytes);
@@ -78,6 +81,61 @@ fn deferred_reload_during_inline_edit_cannot_overwrite_synced_task_changes() {
     assert_eq!(
         original.data.tasks[0].text,
         "Synced task title with another device edit"
+    );
+    fs::remove_dir_all(app.workspace).unwrap();
+}
+
+#[test]
+fn unresolved_list_keeps_local_edits_while_other_lists_reload_and_can_be_discarded() {
+    let (_, mut app) = test_app();
+    let original = app.lists[0].key;
+    let independent =
+        storage::create_list(&app.workspace, "Independent", crate::model::Accent::Mint).unwrap();
+    app.next_scan = Instant::now();
+    app.scan_external_changes();
+    let original_index = app.list_index(original).unwrap();
+    let mut synced = app.lists[original_index].clone();
+    synced.data.tasks.push(Task::new("Synced original"));
+    storage::save_list(&synced).unwrap();
+    app.lists[original_index]
+        .data
+        .tasks
+        .push(Task::new("Rejected local edit"));
+    assert!(!app.save_list_index(original_index));
+
+    let mut independent = independent;
+    independent
+        .data
+        .tasks
+        .push(Task::new("Updated independently"));
+    storage::save_list(&independent).unwrap();
+    app.next_scan = Instant::now();
+    app.scan_external_changes();
+    assert!(app.has_save_conflict(original));
+    assert!(app.persistence.dirty_lists.contains(&original));
+    assert_eq!(
+        app.lists[app.list_index(original).unwrap()].data.tasks[0].text,
+        "Rejected local edit"
+    );
+    assert_eq!(
+        app.lists[app.list_index(independent.key).unwrap()]
+            .data
+            .tasks[0]
+            .text,
+        "Updated independently"
+    );
+    let remote_bytes = fs::read(&synced.path).unwrap();
+    assert!(app.discard_local_change_and_reload(original));
+    assert!(!app.has_save_conflict(original));
+    assert!(app.retry_dirty_lists());
+    assert_eq!(
+        app.lists[app.list_index(original).unwrap()].data.tasks[0].text,
+        "Synced original"
+    );
+    assert_eq!(fs::read(&synced.path).unwrap(), remote_bytes);
+    assert_eq!(
+        fs::read_dir(app.workspace.join("lists")).unwrap().count(),
+        2
     );
     fs::remove_dir_all(app.workspace).unwrap();
 }
@@ -172,6 +230,7 @@ fn conflict_copy_preserves_latest_context_draft_without_blocking_shutdown() {
 fn conflict_copy_preserves_latest_failed_quick_capture_without_duplicate_tasks() {
     let (ctx, mut app) = test_app();
     let list = app.lists[0].key;
+    app.persistence.dirty_lists.insert(list);
     app.open_quick_capture(Some(list));
     app.quick_capture.as_mut().unwrap().text = "Accepted captured task".into();
     let mut remote = storage::load_workspace(&app.workspace)
@@ -319,6 +378,7 @@ fn retry_save_only_appears_for_independent_recoverable_writes() {
             })
         };
         assert!(shown("Keep local copy and reload"), "{independent}");
+        assert!(shown("Discard my change and reload"), "{independent}");
         assert_eq!(shown("Retry save"), independent != "none", "{independent}");
         assert!(!app.retry_dirty_lists());
         assert!(app.persistence.dirty_lists.contains(&conflicted));
@@ -372,6 +432,8 @@ fn conflicted_context_and_quick_add_offer_recovery_without_retry_actions() {
             app.task_context.as_mut().unwrap().text = "Local context draft".into();
             assert!(!app.save_task_context());
         } else {
+            app.open_task_context(list, task_id, false);
+            app.task_context.as_mut().unwrap().text = "Unsubmitted notes".into();
             app.open_quick_capture(Some(list));
             app.quick_capture.as_mut().unwrap().text = "Quick add draft".into();
             run_frame(&ctx, Default::default(), |_| {
@@ -404,6 +466,7 @@ fn conflicted_context_and_quick_add_offer_recovery_without_retry_actions() {
             })
         };
         assert!(shown("Keep local copy and reload"));
+        assert!(shown("Discard my change and reload"));
         assert!(!shown("Retry save"));
         assert!(!shown(if context { "Save" } else { "Add" }));
         if !context {

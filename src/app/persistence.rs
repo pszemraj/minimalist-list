@@ -170,6 +170,35 @@ impl MinimalistApp {
         mut candidate: StoredList,
     ) -> Result<(), String> {
         let manual = self.prepare_list_for_save(&mut candidate);
+        self.save_prepared_candidate(index, candidate, manual)
+    }
+
+    /// Saves a capture replay using the freshly loaded file's manual task order.
+    ///
+    /// # Arguments
+    /// - `index` - Loaded destination to replace after saving.
+    /// - `candidate` - Fresh disk contents with the new tasks already inserted.
+    ///
+    /// # Returns
+    /// Success after writing and adopting the candidate.
+    ///
+    /// # Errors
+    /// Returns the save error without replacing the displayed list.
+    pub(in crate::app) fn save_reloaded_capture(
+        &mut self,
+        index: usize,
+        candidate: StoredList,
+    ) -> Result<(), String> {
+        let manual = candidate.data.tasks.iter().map(|task| task.id).collect();
+        self.save_prepared_candidate(index, candidate, manual)
+    }
+
+    fn save_prepared_candidate(
+        &mut self,
+        index: usize,
+        candidate: StoredList,
+        manual: Vec<Uuid>,
+    ) -> Result<(), String> {
         if let Err(error) = self.write_list(&candidate) {
             self.record_save_conflict(&candidate);
             return Err(error);
@@ -267,7 +296,8 @@ impl MinimalistApp {
         saved
     }
 
-    fn retry_workspace(&mut self) {
+    /// Reopens the selected workspace once its existing files are accessible.
+    pub(in crate::app) fn retry_workspace(&mut self) {
         let Some(selected) = self.persistence.workspace_failure.clone() else {
             return;
         };
@@ -289,6 +319,13 @@ impl MinimalistApp {
             || !self.persistence.pending_filenames.is_empty()
             || self.persistence.settings_dirty;
         let failed_workspace = self.persistence.workspace_failure.clone();
+        let conflict = self
+            .lists
+            .iter()
+            .find(|list| {
+                self.persistence.dirty_lists.contains(&list.key) && self.has_save_conflict(list.key)
+            })
+            .map(|list| (list.key, list.data.title.clone()));
         let notice = self
             .persistence
             .notice
@@ -299,9 +336,16 @@ impl MinimalistApp {
         let message = failed_workspace
             .as_ref()
             .map(|path| format!("Workspace unavailable: {path}. Retry or choose another folder."))
-            .or_else(|| self.status.clone())
-            .or(notice)
-            .unwrap_or_else(|| "Changes are unsaved.".into());
+            .or_else(|| {
+                self.status
+                    .as_ref()
+                    .filter(|status| {
+                        conflict.is_none()
+                            || Some(*status) != self.persistence.last_retry_error.as_ref()
+                    })
+                    .cloned()
+            })
+            .or_else(|| (dirty && conflict.is_none()).then(|| "Changes are unsaved.".into()));
         Frame::NONE
             .fill(if success_only {
                 palette.surface
@@ -311,15 +355,31 @@ impl MinimalistApp {
             .corner_radius(CornerRadius::same(10))
             .inner_margin(Margin::same(8))
             .show(ui, |ui| {
-                if failed_workspace.is_some() {
-                    ui.add(egui::Label::new(self.rich(message, 13.0, palette.text)).wrap());
-                } else {
-                    egui::ScrollArea::vertical()
-                        .id_salt("status-message")
-                        .max_height(54.0)
-                        .show(ui, |ui| {
-                            ui.add(egui::Label::new(self.rich(message, 13.0, palette.text)).wrap());
-                        });
+                if let Some((_, title)) = &conflict {
+                    ui.add(egui::Label::new(self.rich(title, 13.0, palette.text)).truncate())
+                        .on_hover_text(title);
+                    ui.add(
+                        egui::Label::new(self.rich(
+                            "This list changed on disk. Your changes are unsaved.",
+                            13.0,
+                            palette.text,
+                        ))
+                        .wrap(),
+                    );
+                }
+                if let Some(message) = message {
+                    let label = egui::Label::new(self.rich(message, 13.0, palette.text)).wrap();
+                    if failed_workspace.is_some() {
+                        ui.add(label);
+                    } else {
+                        egui::ScrollArea::vertical()
+                            .id_salt("status-message")
+                            .max_height((ui.available_height() * 0.25).max(54.0))
+                            .show(ui, |ui| ui.add(label));
+                    }
+                }
+                if let Some(notice) = notice {
+                    ui.add(egui::Label::new(self.rich(notice, 13.0, palette.text)).wrap());
                 }
                 if !success_only {
                     ui.horizontal_wrapped(|ui| {
@@ -333,16 +393,13 @@ impl MinimalistApp {
                         if retryable && ui.button("Retry save").clicked() {
                             self.retry_dirty_lists();
                         }
-                        let conflict = self
-                            .persistence
-                            .conflicted_candidates
-                            .keys()
-                            .copied()
-                            .find(|id| self.persistence.dirty_lists.contains(id));
-                        if let Some(id) = conflict
-                            && ui.button("Keep local copy and reload").clicked()
-                        {
-                            self.keep_local_copy_and_reload(id);
+                        if let Some((id, _)) = conflict {
+                            if ui.button("Keep local copy and reload").clicked() {
+                                self.keep_local_copy_and_reload(id);
+                            }
+                            if ui.button("Discard my change and reload").clicked() {
+                                self.discard_local_change_and_reload(id);
+                            }
                         }
                         if failed_workspace.is_some() && ui.button("Retry workspace").clicked() {
                             self.retry_workspace();

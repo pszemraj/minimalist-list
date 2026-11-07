@@ -7,7 +7,7 @@ use crate::{
     storage,
 };
 use eframe::egui::{self, Id};
-use std::time::Instant;
+use std::{collections::HashSet, time::Instant};
 use uuid::Uuid;
 
 impl MinimalistApp {
@@ -50,12 +50,16 @@ impl MinimalistApp {
         texts: &[String],
     ) -> Option<bool> {
         let index = self.list_index(list)?;
-        let parent = self.lists[index]
+        let parent_index = self.lists[index]
             .data
             .tasks
-            .iter_mut()
-            .find(|item| item.id == task)?;
-        parent.subtasks.extend(texts.iter().map(Subtask::new));
+            .iter()
+            .position(|item| item.id == task)?;
+        let subtasks: Vec<_> = texts.iter().map(Subtask::new).collect();
+        self.record_paste_undo(list, Some(task), subtasks.iter().map(|child| child.id));
+        self.lists[index].data.tasks[parent_index]
+            .subtasks
+            .extend(subtasks);
         Some(self.save_list_index(index))
     }
 
@@ -290,7 +294,52 @@ impl MinimalistApp {
         }
     }
 
-    /// Reverses the latest deletion or move in one step, preserving all content.
+    /// Tracks a multi-item paste as one Undo entry, leaving ordinary additions alone.
+    ///
+    /// # Arguments
+    /// - `list` - Destination list.
+    /// - `parent` - Parent task for a checklist paste, if any.
+    /// - `ids` - Identities assigned to the pasted items.
+    pub(in crate::app) fn record_paste_undo(
+        &mut self,
+        list: Uuid,
+        parent: Option<Uuid>,
+        ids: impl ExactSizeIterator<Item = Uuid>,
+    ) {
+        if ids.len() > 1 {
+            self.details.undo = Some(UndoItem::Pasted {
+                list,
+                parent,
+                ids: ids.collect(),
+            });
+        }
+    }
+
+    /// Identifies an empty entry where Ctrl+Z can undo a paste without undoing draft text.
+    ///
+    /// # Returns
+    /// Whether the matching entry owns focus and has no text input to undo.
+    pub(in crate::app) fn can_undo_paste_in_entry(&self, ctx: &egui::Context) -> bool {
+        let Some(UndoItem::Pasted { list, parent, .. }) = &self.details.undo else {
+            return false;
+        };
+        let (field, draft) = match parent {
+            Some(task) => (Id::new(("new-subtask", list, task)), &self.new_subtask),
+            None => (Id::new(("new-task", list)), &self.new_task),
+        };
+        draft.is_empty()
+            && ctx.memory(|memory| memory.has_focus(field))
+            && !ctx.input(|input| {
+                input.events.iter().any(|event| {
+                    matches!(
+                        event,
+                        egui::Event::Text(_) | egui::Event::Paste(_) | egui::Event::Ime(_)
+                    )
+                })
+            })
+    }
+
+    /// Reverses the latest deletion, move, or paste in one step.
     pub(in crate::app) fn undo_last(&mut self) {
         match self.details.undo.take() {
             Some(UndoItem::Task {
@@ -315,7 +364,48 @@ impl MinimalistApp {
                 position,
                 item,
             }) => self.undo_archived_deletion(list, position, item),
+            Some(UndoItem::Pasted { list, parent, ids }) => self.undo_paste(list, parent, ids),
             None => {}
+        }
+    }
+
+    fn undo_paste(&mut self, list: Uuid, parent: Option<Uuid>, ids: HashSet<Uuid>) {
+        self.finish_inline_edit();
+        let neighbors = self.focus_neighbors();
+        let Some(index) = self.list_index(list) else {
+            self.details.undo = Some(UndoItem::Pasted { list, parent, ids });
+            self.status = Some("The pasted items' list is unavailable.".into());
+            return;
+        };
+        let data = &mut self.lists[index].data;
+        let removed = if let Some(task) = parent {
+            let Some(parent_task) = data
+                .tasks
+                .iter_mut()
+                .chain(data.archive.iter_mut().map(|item| &mut item.task))
+                .find(|item| item.id == task)
+            else {
+                self.details.undo = Some(UndoItem::Pasted { list, parent, ids });
+                self.status = Some("The pasted items' parent task is unavailable.".into());
+                return;
+            };
+            let before = parent_task.subtasks.len();
+            parent_task
+                .subtasks
+                .retain(|child| !ids.contains(&child.id));
+            before - parent_task.subtasks.len()
+        } else {
+            let before = data.tasks.len() + data.archive.len();
+            data.tasks.retain(|task| !ids.contains(&task.id));
+            data.archive.retain(|item| !ids.contains(&item.task.id));
+            before - data.tasks.len() - data.archive.len()
+        };
+        if removed > 0 {
+            self.drag = None;
+            if self.save_list_index(index) {
+                self.acknowledge("Paste undone".into());
+            }
+            self.repair_focus(&neighbors);
         }
     }
 
@@ -639,7 +729,7 @@ impl MinimalistApp {
         }
     }
 
-    /// Renders one-step Undo for deletions and moves, then the Move dialog.
+    /// Renders one-step Undo for task changes, then the Move dialog.
     ///
     /// # Panics
     ///
@@ -652,6 +742,15 @@ impl MinimalistApp {
                         format!("Moved to {}", clipped(&self.lists[index].data.title, 40))
                     }),
             ),
+            Some(UndoItem::Pasted { parent, ids, .. }) => Some(format!(
+                "Pasted {} {}",
+                ids.len(),
+                if parent.is_some() {
+                    "subtasks"
+                } else {
+                    "tasks"
+                },
+            )),
             Some(_) => Some("Deleted".to_owned()),
             None => None,
         };

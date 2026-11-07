@@ -164,6 +164,7 @@ impl MinimalistApp {
         };
         let mut save = false;
         let mut recover = false;
+        let mut discard = false;
         let mut cancel = false;
         let palette = self.palette();
         let modal = egui::Modal::new(Id::new("task-context-modal")).show(ctx, |ui| {
@@ -224,7 +225,10 @@ impl MinimalistApp {
             }
             let conflicted = self.has_save_conflict(editor.list);
             if conflicted && !editor.archived {
-                recover = ui.button("Keep local copy and reload").clicked();
+                ui.horizontal_wrapped(|ui| {
+                    recover = ui.button("Keep local copy and reload").clicked();
+                    discard = ui.button("Discard my change and reload").clicked();
+                });
             }
             ui.horizontal(|ui| {
                 if !editor.archived && !conflicted {
@@ -252,6 +256,8 @@ impl MinimalistApp {
         let dismiss = modal.should_close() && (read_only || !modal.backdrop_response.clicked());
         if recover {
             self.keep_local_copy_and_reload(list);
+        } else if discard {
+            self.discard_local_change_and_reload(list);
         } else if cancel || dismiss {
             if !self.persistence.dirty_lists.contains(&list) {
                 self.forget_save_conflict(list);

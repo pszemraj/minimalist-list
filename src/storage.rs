@@ -30,6 +30,10 @@ pub use backup::{backups_dir, delete_list, snapshot_list, snapshot_list_now, wor
 #[path = "storage_format.rs"]
 mod format;
 
+#[path = "storage_conflict_recovery.rs"]
+mod conflict_recovery;
+pub use conflict_recovery::{create_local_copy, recover_duplicate};
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 /// User preferences persisted outside the task workspace.
@@ -110,6 +114,7 @@ pub struct WorkspaceSnapshot {
     pub fingerprint: WorkspaceFingerprint,
     pub warnings: Vec<String>,
     pub failed_paths: Vec<PathBuf>,
+    pub duplicate_paths: Vec<PathBuf>,
 }
 
 /// Loads persisted settings, keeping every valid preference from a damaged file.
@@ -399,21 +404,35 @@ fn resolve_workspace_path(raw: &str, create_missing: bool) -> Result<PathBuf, St
         return Err("workspace path is empty".into());
     }
     let path = expand_tilde(raw.trim());
-    let absolute = if path.is_absolute() {
+    let mut absolute = if path.is_absolute() {
         path
     } else {
         env::current_dir()
             .map_err(|error| format!("could not resolve current directory: {error}"))?
             .join(path)
     };
+    // An existing nested workspace still takes precedence over its parent's lists.
+    if create_missing
+        && absolute.file_name().is_some_and(|name| name == "lists")
+        && !absolute.join("lists").exists()
+        && fs::read_dir(&absolute).is_ok_and(|entries| {
+            entries.flatten().any(|entry| {
+                let path = entry.path();
+                is_list_path(&path) && format::read_identity(&path).is_ok()
+            })
+        })
+    {
+        absolute.pop();
+    }
     let lists = absolute.join("lists");
-    if !create_missing && !lists.is_dir() {
+    if create_missing {
+        fs::create_dir_all(&lists)
+            .map_err(|error| format!("could not create {}: {error}", absolute.display()))?;
+    } else if !lists.is_dir() {
         // A synced lists folder can vanish while its parent remains.
         let missing = if absolute.is_dir() { &lists } else { &absolute };
         return Err(format!("{} is missing", missing.display()));
     }
-    fs::create_dir_all(&lists)
-        .map_err(|error| format!("could not create {}: {error}", absolute.display()))?;
     absolute
         .canonicalize()
         .map_err(|error| format!("could not resolve {}: {error}", absolute.display()))
@@ -464,10 +483,7 @@ fn load_lists(root: &Path, initialize: bool) -> Result<WorkspaceSnapshot, String
         .map_err(|error| format!("could not read {}: {error}", lists_dir.display()))?
         .filter_map(Result::ok)
         .map(|entry| entry.path())
-        .filter(|path| {
-            path.is_file()
-                && path.extension().and_then(|extension| extension.to_str()) == Some("json")
-        })
+        .filter(|path| is_list_path(path))
         .collect::<Vec<_>>();
     paths.sort();
 
@@ -482,6 +498,7 @@ fn load_lists(root: &Path, initialize: bool) -> Result<WorkspaceSnapshot, String
             fingerprint,
             warnings: Vec::new(),
             failed_paths: Vec::new(),
+            duplicate_paths: Vec::new(),
         });
     }
 
@@ -517,14 +534,12 @@ fn load_lists(root: &Path, initialize: bool) -> Result<WorkspaceSnapshot, String
 
     let mut seen_ids = HashSet::new();
     let mut lists = Vec::new();
+    let mut duplicate_paths = Vec::new();
     for (stored, _) in candidates {
         if seen_ids.insert(stored.key) {
             lists.push(stored);
         } else {
-            warnings.push(format!(
-                "ignored duplicate list identity in {}; the file remains untouched on disk",
-                stored.path.display()
-            ));
+            duplicate_paths.push(stored.path);
         }
     }
     sort_lists(&mut lists);
@@ -534,7 +549,15 @@ fn load_lists(root: &Path, initialize: bool) -> Result<WorkspaceSnapshot, String
         fingerprint,
         warnings,
         failed_paths,
+        duplicate_paths,
     })
+}
+
+fn is_list_path(path: &Path) -> bool {
+    path.is_file()
+        && path
+            .extension()
+            .is_some_and(|extension| extension == "json")
 }
 
 fn read_list(path: &Path) -> Result<(StoredList, u8), String> {
@@ -606,34 +629,6 @@ fn save_new_list(root: &Path, data: TodoList) -> Result<StoredList, String> {
     Ok(stored)
 }
 
-/// Preserves local contents in an independent ordinary list before conflict recovery.
-///
-/// # Arguments
-/// - `root` - Active workspace root.
-/// - `source` - Local contents to preserve.
-///
-/// # Returns
-/// The saved local copy, with independent list, task, and checklist identities.
-///
-/// # Errors
-/// Returns an error when the copy cannot be saved.
-pub fn create_local_copy(root: &Path, source: &StoredList) -> Result<StoredList, String> {
-    let mut data = source.data.clone();
-    data.id = Uuid::new_v4();
-    data.title = format!("{} (local copy)", data.title);
-    for task in data
-        .tasks
-        .iter_mut()
-        .chain(data.archive.iter_mut().map(|entry| &mut entry.task))
-    {
-        task.id = Uuid::new_v4();
-        for child in &mut task.subtasks {
-            child.id = Uuid::new_v4();
-        }
-    }
-    save_new_list(root, data)
-}
-
 fn filename_title(title: &str) -> String {
     let mut clean = String::new();
     let mut separator = false;
@@ -674,7 +669,6 @@ fn list_file_name(title: &str, id: Uuid) -> String {
 /// # Errors
 /// Returns an error if the destination already exists or the original cannot be renamed.
 pub fn rename_list_file(list: &mut StoredList) -> Result<(), String> {
-    format::check_version(list.data.format_version)?;
     let destination = list
         .path
         .with_file_name(list_file_name(&list.data.title, list.key));
@@ -726,9 +720,7 @@ pub fn workspace_fingerprint(root: &Path) -> Result<WorkspaceFingerprint, String
         .flatten()
     {
         let path = entry.path();
-        if !path.is_file()
-            || path.extension().and_then(|extension| extension.to_str()) != Some("json")
-        {
+        if !is_list_path(&path) {
             continue;
         }
         let Ok(metadata) = entry.metadata() else {
