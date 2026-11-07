@@ -2,6 +2,11 @@
 
 use eframe::egui;
 use std::sync::mpsc::{self, Receiver};
+#[cfg(target_os = "linux")]
+use std::{
+    cell::Cell,
+    time::{Duration, Instant},
+};
 use tray_icon::{
     Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent,
     menu::{Menu, MenuEvent, MenuItem},
@@ -20,7 +25,7 @@ pub enum Action {
 pub(crate) enum Availability {
     Available,
     Unavailable,
-    /// The check failed without confirming that the host disappeared.
+    /// The check was inconclusive or an absence is still awaiting confirmation.
     #[cfg(any(target_os = "linux", target_os = "windows", test))]
     Unknown,
 }
@@ -41,6 +46,8 @@ pub struct Tray {
     actions: Receiver<Action>,
     #[cfg(target_os = "linux")]
     host: zbus::blocking::Proxy<'static>,
+    #[cfg(target_os = "linux")]
+    host_missing_since: Cell<Option<Instant>>,
 }
 
 impl Tray {
@@ -119,6 +126,8 @@ impl Tray {
             actions,
             #[cfg(target_os = "linux")]
             host,
+            #[cfg(target_os = "linux")]
+            host_missing_since: Cell::new(None),
         })
     }
 
@@ -142,7 +151,15 @@ impl Tray {
             let result = self
                 .host
                 .get_property::<bool>("IsStatusNotifierHostRegistered");
-            linux_availability(result, self.host.connection().is_closed())
+            let closed = self.host.connection().is_closed();
+            let availability = linux_availability(&result, closed);
+            if availability == Availability::Unavailable && self.host_missing_since.get().is_none()
+            {
+                log::debug!(
+                    "Linux tray watcher unavailable; waiting for confirmation (connection closed: {closed}, reply: {result:?})"
+                );
+            }
+            confirm_linux_availability(availability, &self.host_missing_since, Instant::now())
         }
         #[cfg(target_os = "windows")]
         {
@@ -176,22 +193,49 @@ impl Tray {
 /// - `connection_closed` - Whether the session-bus connection has closed.
 ///
 /// # Returns
-/// The confirmed host state, or `Unknown` for an inconclusive query.
+/// The state reported by this probe, or `Unknown` for an inconclusive query.
 #[cfg(target_os = "linux")]
-fn linux_availability(result: Result<bool, zbus::Error>, connection_closed: bool) -> Availability {
+fn linux_availability(result: &Result<bool, zbus::Error>, connection_closed: bool) -> Availability {
     if connection_closed {
         return Availability::Unavailable;
     }
     match result {
         Ok(true) => Availability::Available,
         Ok(false) => Availability::Unavailable,
-        Err(error) => match zbus::fdo::Error::from(error) {
+        Err(error) => match zbus::fdo::Error::from(error.clone()) {
             zbus::fdo::Error::ServiceUnknown(_)
             | zbus::fdo::Error::NameHasNoOwner(_)
             | zbus::fdo::Error::Disconnected(_) => Availability::Unavailable,
             _ => Availability::Unknown,
         },
     }
+}
+
+#[cfg(target_os = "linux")]
+const HOST_LOSS_GRACE: Duration = Duration::from_secs(5);
+
+#[cfg(target_os = "linux")]
+fn confirm_linux_availability(
+    availability: Availability,
+    missing_since: &Cell<Option<Instant>>,
+    now: Instant,
+) -> Availability {
+    if availability != Availability::Unavailable {
+        if missing_since.take().is_some() {
+            log::debug!("Linux tray loss check cleared ({availability:?})");
+        }
+        return availability;
+    }
+    // GNOME can briefly release the watcher name while changing session modes.
+    // Only act on absence that is still confirmed after the watcher can return.
+    let Some(first_missing) = missing_since.get() else {
+        missing_since.set(Some(now));
+        return Availability::Unknown;
+    };
+    if now.duration_since(first_missing) < HOST_LOSS_GRACE {
+        return Availability::Unknown;
+    }
+    Availability::Unavailable
 }
 
 /// Reports whether Linux has a registered desktop tray host.
@@ -300,9 +344,12 @@ mod tests {
         use super::{Availability, linux_availability};
         use zbus::fdo::Error;
 
-        assert_eq!(linux_availability(Ok(true), false), Availability::Available);
         assert_eq!(
-            linux_availability(Ok(false), false),
+            linux_availability(&Ok(true), false),
+            Availability::Available
+        );
+        assert_eq!(
+            linux_availability(&Ok(false), false),
             Availability::Unavailable
         );
         for error in [
@@ -311,7 +358,7 @@ mod tests {
             Error::Disconnected("bus disconnected".into()),
         ] {
             assert_eq!(
-                linux_availability(Err(zbus::Error::FDO(Box::new(error))), false),
+                linux_availability(&Err(zbus::Error::FDO(Box::new(error))), false),
                 Availability::Unavailable
             );
         }
@@ -322,18 +369,38 @@ mod tests {
             Error::Failed("temporary property failure".into()),
         ] {
             assert_eq!(
-                linux_availability(Err(zbus::Error::FDO(Box::new(error))), false),
+                linux_availability(&Err(zbus::Error::FDO(Box::new(error))), false),
                 Availability::Unknown
             );
         }
         assert_eq!(
-            linux_availability(Ok(true), true),
+            linux_availability(&Ok(true), true),
             Availability::Unavailable
         );
         assert_eq!(
-            linux_availability(Err(zbus::Error::Failure("connection lost".into())), true),
+            linux_availability(&Err(zbus::Error::Failure("connection lost".into())), true),
             Availability::Unavailable
         );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_tray_loss_requires_absence_on_separated_checks() {
+        use super::{Availability::*, Cell, HOST_LOSS_GRACE, Instant, confirm_linux_availability};
+
+        for intervening in [Available, Unknown] {
+            let start = Instant::now();
+            let missing_since = Cell::new(None);
+            let check =
+                |reply, elapsed| confirm_linux_availability(reply, &missing_since, start + elapsed);
+            assert_eq!(check(Unavailable, HOST_LOSS_GRACE / 2), Unknown);
+            assert_eq!(check(Unavailable, HOST_LOSS_GRACE * 3 / 4), Unknown);
+            assert_eq!(check(intervening, HOST_LOSS_GRACE), intervening);
+            assert_eq!(check(Unavailable, HOST_LOSS_GRACE * 2), Unknown);
+            assert_eq!(check(Unavailable, HOST_LOSS_GRACE * 3), Unavailable);
+            assert_eq!(check(Available, HOST_LOSS_GRACE * 4), Available);
+            assert_eq!(check(Unavailable, HOST_LOSS_GRACE * 5), Unknown);
+        }
     }
 
     #[test]
