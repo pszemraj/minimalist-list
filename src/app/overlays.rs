@@ -104,6 +104,18 @@ impl SearchHit {
 }
 
 impl MinimalistApp {
+    /// Checks for a modal covering the current screen.
+    ///
+    /// # Returns
+    /// Whether a modal is open.
+    pub(super) fn has_modal(&self) -> bool {
+        self.quick_capture.is_some()
+            || self.find.is_some()
+            || self.shortcuts.is_some()
+            || self.details.move_task.is_some()
+            || self.task_context.is_some()
+    }
+
     /// Reopens an accepted capture that still needs its explicit save retry.
     ///
     /// # Returns

@@ -1,7 +1,7 @@
 //! Recovery of independently synced list files that share an identity.
 
 use super::{
-    StoredList, backups_dir, list_changed_on_disk, load_existing_workspace, read_list,
+    StoredList, backups_dir, list_changed_on_disk, load_existing_workspace, load_lists, read_list,
     save_new_list,
 };
 use std::{
@@ -95,11 +95,20 @@ fn keep_original(root: &Path, name: &OsStr, bytes: &[u8]) -> std::io::Result<()>
 /// - `source` - Local list contents to preserve.
 ///
 /// # Returns
-/// A new list with independent list, task, and checklist identities.
+/// A new list with independent identities and the original list if it is still readable.
 /// # Errors
-/// Returns an error when the copy cannot be saved.
-pub fn create_local_copy(root: &Path, source: &StoredList) -> Result<StoredList, String> {
-    create_independent_copy(root, source, "local copy")
+/// Returns an error when the existing lists folder cannot be read or the copy cannot be saved.
+pub fn create_local_copy(
+    root: &Path,
+    source: &StoredList,
+) -> Result<(StoredList, Option<StoredList>), String> {
+    // The original may have been deleted, but an absent lists folder may be offline.
+    let original = load_lists(root, false)?
+        .lists
+        .into_iter()
+        .find(|list| list.key == source.key);
+    let copy = create_independent_copy(root, source, "local copy")?;
+    Ok((copy, original))
 }
 
 fn create_independent_copy(

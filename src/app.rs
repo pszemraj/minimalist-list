@@ -582,24 +582,24 @@ impl MinimalistApp {
     }
 
     fn scan_external_changes(&mut self) {
-        if Instant::now() < self.next_scan
-            || self.drag.is_some()
+        if Instant::now() < self.next_scan {
+            return;
+        }
+        self.next_scan = Instant::now() + SCAN_INTERVAL;
+        self.refresh_save_conflicts();
+        if self.drag.is_some()
             || self.overview_drag.is_some()
-            || self
-                .task_context
-                .as_ref()
-                .is_some_and(|editor| !self.has_save_conflict(editor.list))
+            || self.task_context.as_ref().is_some_and(|editor| {
+                editor.failure.is_none() && !self.has_save_conflict(editor.list)
+            })
             || self.editing.is_some()
             || self.details.editor.is_some()
         {
             return;
         }
-        self.next_scan = Instant::now() + SCAN_INTERVAL;
-        if self.persistence.workspace_failure.is_some() {
-            if self.persistence.dirty_lists.is_empty()
-                && self.persistence.pending_filenames.is_empty()
-                && !matches!(self.screen, Screen::Settings)
-            {
+        let recovering = self.persistence.workspace_failure.is_some();
+        if recovering && self.lists.is_empty() {
+            if !matches!(self.screen, Screen::Settings) {
                 self.retry_workspace();
             }
             return;
@@ -611,43 +611,56 @@ impl MinimalistApp {
                 return;
             }
         };
-        if current == self.fingerprint && !current.0.is_empty() {
+        if !recovering && current == self.fingerprint && self.cached_list_paths_present(&current) {
             return;
         }
         match storage::load_existing_workspace(&self.workspace) {
-            Ok(snapshot) => {
+            Ok(mut snapshot) => {
                 let focus_neighbors = self.focus_neighbors();
                 let mut lists = snapshot.lists;
-                let mut retained_paths = snapshot.failed_paths;
+                let mut retained_ids = Vec::new();
                 for previous in &self.lists {
+                    let has_replacement = lists.iter().any(|list| list.key == previous.key);
                     if self.persistence.dirty_lists.contains(&previous.key)
                         || self.persistence.pending_filenames.contains(&previous.key)
                         || self.has_save_conflict(previous.key)
+                        || self
+                            .task_context
+                            .as_ref()
+                            .is_some_and(|editor| editor.list == previous.key)
+                        || (!has_replacement && self.has_pending_list_draft(previous.key))
                     {
                         lists.retain(|list| list.key != previous.key);
-                        retained_paths.push(previous.path.clone());
-                        lists.push(previous.clone());
-                    } else if retained_paths.contains(&previous.path)
-                        && !lists.iter().any(|list| list.key == previous.key)
-                    {
-                        lists.push(previous.clone());
+                        storage::remove_file_from_fingerprint(
+                            &mut snapshot.fingerprint,
+                            &previous.path,
+                        );
+                    } else if has_replacement || !snapshot.failed_paths.contains(&previous.path) {
+                        continue;
                     }
+                    retained_ids.push(previous.key);
+                    lists.push(previous.clone());
                 }
                 self.cancel_overview_drag();
                 self.lists = lists;
                 self.apply_list_order();
-                self.capture_loaded_task_orders_except(&retained_paths);
+                self.capture_loaded_task_orders_except(&retained_ids);
                 self.apply_task_sorts();
                 self.fingerprint = snapshot.fingerprint;
                 if self.duplicate_paths.first() != snapshot.duplicate_paths.first() {
                     self.duplicate_recovery_error = None;
                 }
                 self.duplicate_paths = snapshot.duplicate_paths;
+                if self.persistence.workspace_failure.take().is_some() {
+                    self.status = None;
+                    log::info!("Workspace access restored");
+                }
                 if !snapshot.warnings.is_empty() {
                     self.status = Some(snapshot.warnings.join("\n"));
                 }
                 log::debug!("External workspace changes loaded");
 
+                let modal_focus = self.has_modal().then_some(self.keyboard.pending);
                 match self.screen.clone() {
                     Screen::List(id) if self.list_index(id).is_none() => self.go_to_overview(),
                     Screen::Settings => {
@@ -665,6 +678,9 @@ impl MinimalistApp {
                     Screen::Overview | Screen::List(_) => {}
                 }
                 self.repair_focus(&focus_neighbors);
+                if let Some(pending) = modal_focus {
+                    self.keyboard.pending = pending;
+                }
             }
             Err(error) => self.mark_workspace_unavailable(error),
         }
@@ -956,12 +972,7 @@ impl eframe::App for MinimalistApp {
                 .layout(Layout::top_down(Align::LEFT)),
         );
         content_ui.set_opacity(0.14 + eased * 0.86);
-        if self.quick_capture.is_some()
-            || self.find.is_some()
-            || self.shortcuts.is_some()
-            || self.details.move_task.is_some()
-            || self.task_context.is_some()
-        {
+        if self.has_modal() {
             content_ui.disable();
         }
         let screen = self.screen.clone();

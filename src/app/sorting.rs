@@ -64,15 +64,12 @@ impl MinimalistApp {
     /// Captures fresh JSON orders without replacing snapshots of cached lists.
     ///
     /// # Arguments
-    /// - `retained_paths` - Unreadable files whose already sorted cached lists survived a scan.
-    pub(super) fn capture_loaded_task_orders_except(
-        &mut self,
-        retained_paths: &[std::path::PathBuf],
-    ) {
+    /// - `retained_ids` - Cached lists carried over from the previous scan.
+    pub(super) fn capture_loaded_task_orders_except(&mut self, retained_ids: &[Uuid]) {
         self.manual_task_order
             .retain(|id, _| self.lists.iter().any(|list| list.key == *id));
         for list in &self.lists {
-            if retained_paths.contains(&list.path) {
+            if retained_ids.contains(&list.key) {
                 continue;
             }
             self.manual_task_order.insert(

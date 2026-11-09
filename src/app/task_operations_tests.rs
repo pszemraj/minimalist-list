@@ -923,7 +923,7 @@ fn unknown_shared_fields_follow_move_history_undo_and_local_copy() {
         json!({"keep": "entry"})
     );
     app.restore_archived(source, task_id);
-    let copy = storage::create_local_copy(&app.workspace, &app.lists[index]).unwrap();
+    let (copy, _) = storage::create_local_copy(&app.workspace, &app.lists[index]).unwrap();
     let reloaded = storage::load_workspace(&app.workspace).unwrap();
     let original = reloaded
         .lists

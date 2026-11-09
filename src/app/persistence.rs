@@ -144,8 +144,8 @@ impl MinimalistApp {
                 self.complete_list_save(index)
             }
             Err(error) => {
-                self.record_save_conflict(&list);
                 self.persistence.dirty_lists.insert(id);
+                self.record_save_conflict(&list);
                 let error = format!("Changes are unsaved: {error}");
                 self.persistence.last_retry_error = Some(error.clone());
                 self.status = Some(error);
@@ -261,6 +261,7 @@ impl MinimalistApp {
     /// # Returns
     /// Whether all retained writes succeeded.
     pub(super) fn retry_dirty_lists(&mut self) -> bool {
+        self.refresh_save_conflicts();
         let live: HashSet<_> = self.lists.iter().map(|list| list.key).collect();
         self.persistence.dirty_lists.retain(|id| live.contains(id));
         self.persistence
@@ -302,11 +303,50 @@ impl MinimalistApp {
         saved
     }
 
+    /// Returns whether every cached list still has a path in the latest scan.
+    ///
+    /// # Returns
+    /// False while a list retained for an edit is missing or the workspace is empty.
+    pub(super) fn cached_list_paths_present(
+        &self,
+        fingerprint: &storage::WorkspaceFingerprint,
+    ) -> bool {
+        !fingerprint.0.is_empty()
+            && self.lists.iter().all(|list| {
+                list.path
+                    .file_name()
+                    .is_some_and(|name| fingerprint.0.contains_key(name.to_string_lossy().as_ref()))
+            })
+    }
+
+    /// Returns whether dropping a missing list would detach a pending draft from it.
+    ///
+    /// # Returns
+    /// Whether a rename or failed capture still targets the list.
+    pub(super) fn has_pending_list_draft(&self, list: Uuid) -> bool {
+        (self.settings_list_id == Some(list)
+            && !self.rename_input.trim().is_empty()
+            && self.rename_input.trim() != self.rename_baseline.trim())
+            || self
+                .quick_capture
+                .iter()
+                .chain(&self.capture_draft)
+                .any(|draft| draft.failure.is_some() && draft.selected_list_id == Some(list))
+    }
+
     /// Reopens the selected workspace once its existing files are accessible.
     pub(in crate::app) fn retry_workspace(&mut self) {
         let Some(selected) = self.persistence.workspace_failure.clone() else {
             return;
         };
+        if !self.lists.is_empty() {
+            self.next_scan = Instant::now();
+            self.scan_external_changes();
+            if self.persistence.workspace_failure.is_none() {
+                self.keyboard.pending = self.default_focus();
+            }
+            return;
+        }
         if !self.retry_dirty_lists() {
             return;
         }
@@ -374,7 +414,7 @@ impl MinimalistApp {
                         .on_hover_text(title);
                     ui.add(
                         egui::Label::new(self.rich(
-                            "This list changed on disk. Your changes are unsaved.",
+                            "This list changed on disk or could not be read. Your changes are unsaved.",
                             13.0,
                             palette.text,
                         ))

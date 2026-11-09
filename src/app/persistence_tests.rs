@@ -426,6 +426,38 @@ fn vanished_workspace_shows_recovery_without_recreating_the_folder() {
 }
 
 #[test]
+fn partial_workspace_recovery_keeps_the_pending_rename_attached_to_its_list() {
+    let (_ctx, mut app) = test_app();
+    let original = app.lists[0].path.clone();
+    let list = app.lists[0].key;
+    app.open_settings(Some(list));
+    app.rename_input = "Pending name".into();
+    let lists = app.workspace.join("lists");
+    let offline = app.workspace.join("offline");
+    fs::rename(&lists, &offline).unwrap();
+    app.next_scan = Instant::now();
+    app.scan_external_changes();
+    assert!(app.persistence.workspace_failure.is_some());
+
+    let other = storage::create_list(&app.workspace, "Synced", Accent::Sky).unwrap();
+    app.next_scan = Instant::now();
+    app.scan_external_changes();
+    assert!(app.persistence.workspace_failure.is_none());
+    assert!(app.list_index(other.key).is_some());
+    assert_eq!(app.settings_list_id, Some(list));
+    assert_eq!(app.rename_input, "Pending name");
+
+    fs::rename(offline.join(original.file_name().unwrap()), original).unwrap();
+    app.next_scan = Instant::now();
+    app.scan_external_changes();
+    app.close_settings();
+    let saved = storage::load_workspace(&app.workspace).unwrap();
+    let renamed = saved.lists.iter().find(|item| item.key == list).unwrap();
+    assert_eq!(renamed.data.title, "Pending name");
+    fs::remove_dir_all(&app.workspace).unwrap();
+}
+
+#[test]
 fn missing_or_empty_saved_workspace_starts_in_recovery_but_explicit_launches_create_it() {
     let root = std::env::temp_dir().join(format!("missing-saved-{}", Uuid::new_v4()));
     let selected = root.join("synced");

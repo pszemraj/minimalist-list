@@ -2,8 +2,8 @@
 
 use super::*;
 use crate::{
-    app::tests::{chord, focus_widget, keyboard_frame, settle_keyboard, test_app},
-    model::{Subtask, TaskSort, TodoList},
+    app::tests::{chord, focus_widget, keyboard_frame, label_center, settle_keyboard, test_app},
+    model::{Accent, Subtask, TaskSort, TodoList},
     storage,
 };
 use egui::{Key, Modifiers};
@@ -359,6 +359,8 @@ fn quick_add_retries_a_failed_batch_without_resubmitting_the_typed_draft() {
 
     fs::remove_file(&lists).unwrap();
     fs::rename(&offline, &lists).unwrap();
+    f.app.next_scan = std::time::Instant::now();
+    f.app.scan_external_changes();
     idle(&mut f);
     frame(&mut f, chord(Key::Enter, Modifiers::NONE));
     let state = f.app.quick_capture.as_ref().unwrap();
@@ -409,6 +411,179 @@ fn quick_add_paste_conflict_recovery_keeps_the_batch_and_typed_draft_once() {
     );
     assert_eq!(copy.data.tasks[3].context, "Unsaved notes");
     cleanup(f);
+}
+
+#[test]
+fn quick_add_recovers_a_pasted_batch_after_the_last_list_disappears() {
+    let mut f = fixture(&["Existing"]);
+    open_quick_add(&mut f, "Unfinished");
+    let path = f.app.lists[0].path.clone();
+    fs::remove_file(&path).unwrap();
+    paste(&mut f, "One\nTwo");
+    assert!(f.app.has_save_conflict(f.list));
+
+    let lists = f.app.workspace.join("lists");
+    let offline = f.app.workspace.join("offline");
+    fs::rename(&lists, &offline).unwrap();
+    assert!(!f.app.keep_local_copy_and_reload(f.list));
+    assert!(!lists.exists());
+    assert!(f.app.quick_capture.as_ref().unwrap().failure.is_some());
+
+    fs::rename(&offline, &lists).unwrap();
+    assert!(f.app.keep_local_copy_and_reload(f.list));
+    assert!(f.app.quick_capture.is_none());
+    assert!(!path.exists());
+    let reloaded = storage::load_workspace(&f.app.workspace).unwrap();
+    assert_eq!(reloaded.lists.len(), 1);
+    let copy = &reloaded.lists[0];
+    assert_ne!(copy.key, f.list);
+    assert_eq!(
+        titles(&copy.data.tasks),
+        ["One", "Two", "Unfinished", "Existing"]
+    );
+    cleanup(f);
+}
+
+#[test]
+fn quick_add_can_retry_when_the_original_file_returns_unchanged() {
+    for directory_missing in [false, true] {
+        let mut f = fixture(&["Existing"]);
+        let mut notes = storage::create_list(&f.app.workspace, "Notes", Accent::Mint).unwrap();
+        let task = Task::new("Other task");
+        let task_id = task.id;
+        notes.data.tasks.push(task);
+        storage::save_list(&notes).unwrap();
+        let notes_id = notes.key;
+        f.app.lists.push(notes);
+        f.app.open_task_context(notes_id, task_id, false);
+        open_quick_add(&mut f, "");
+        let list = f.app.lists[0].path.clone();
+        let missing = if directory_missing {
+            list.parent().unwrap().to_owned()
+        } else {
+            list
+        };
+        let offline = f.app.workspace.join("offline");
+        fs::rename(&missing, &offline).unwrap();
+        paste(&mut f, "One\nTwo");
+        assert!(f.app.quick_capture.as_ref().unwrap().failure.is_some());
+        assert!(f.app.has_save_conflict(f.list));
+
+        fs::rename(&offline, &missing).unwrap();
+        f.app.next_scan = std::time::Instant::now();
+        f.app.scan_external_changes();
+        assert!(!f.app.has_save_conflict(f.list));
+        idle(&mut f);
+        frame(&mut f, chord(Key::Enter, Modifiers::NONE));
+        assert!(f.app.quick_capture.is_none());
+        assert!(f.app.task_context.is_some());
+        assert_eq!(titles(&saved(&f).tasks), ["One", "Two", "Existing"]);
+        cleanup(f);
+    }
+}
+
+#[test]
+fn workspace_recovery_exposes_new_lists_without_interrupting_find_or_losing_capture() {
+    let mut f = fixture(&["Existing"]);
+    open_quick_add(&mut f, "");
+    let original = f.app.lists[0].path.clone();
+    let lists = f.app.workspace.join("lists");
+    let offline = f.app.workspace.join("offline");
+    fs::rename(&lists, &offline).unwrap();
+    f.app.next_scan = std::time::Instant::now();
+    f.app.scan_external_changes();
+    assert!(f.app.persistence.workspace_failure.is_some());
+    paste(&mut f, "One\nTwo");
+    assert!(f.app.quick_capture.as_ref().unwrap().failure.is_some());
+    f.app.open_find();
+
+    let other = storage::create_list(&f.app.workspace, "Synced", Accent::Sky).unwrap();
+    f.app.next_scan = std::time::Instant::now();
+    f.app.scan_external_changes();
+    assert!(f.app.persistence.workspace_failure.is_none());
+    assert!(f.app.find.is_some());
+    assert!(f.app.quick_capture.is_none());
+    assert!(f.app.list_index(other.key).is_some());
+    f.app.open_quick_add_here(&f.ctx);
+    idle(&mut f);
+    assert_eq!(
+        f.app.quick_capture.as_ref().unwrap().selected_list_id,
+        Some(f.list)
+    );
+    for label in ["Tasks", "Synced"] {
+        let mut output = keyboard_frame(&f.ctx, &mut f.app, vec![], 430.0);
+        // The modal's label is drawn above the list's title with the same name.
+        output.shapes.reverse();
+        let pos = label_center(&output, label);
+        for pressed in [true, false] {
+            frame(
+                &mut f,
+                vec![
+                    Event::PointerMoved(pos),
+                    Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: Modifiers::NONE,
+                    },
+                ],
+            );
+        }
+        idle(&mut f);
+    }
+    assert_eq!(
+        f.app.quick_capture.as_ref().unwrap().selected_list_id,
+        Some(other.key)
+    );
+    idle(&mut f);
+    frame(&mut f, chord(Key::Enter, Modifiers::NONE));
+    let recovered = storage::load_workspace(&f.app.workspace).unwrap();
+    let target = recovered
+        .lists
+        .iter()
+        .find(|list| list.key == other.key)
+        .unwrap();
+    assert_eq!(titles(&target.data.tasks), ["One", "Two"]);
+    f.app.next_scan = std::time::Instant::now();
+    f.app.scan_external_changes();
+    assert!(f.app.list_index(f.list).is_none());
+    fs::rename(offline.join(original.file_name().unwrap()), &original).unwrap();
+    f.app.next_scan = std::time::Instant::now();
+    f.app.scan_external_changes();
+    let returned = f.app.list_index(f.list).unwrap();
+    assert_eq!(titles(&f.app.lists[returned].data.tasks), ["Existing"]);
+    cleanup(f);
+}
+
+#[test]
+fn partial_recovery_leaves_the_open_modal_focused_when_the_underlying_list_disappears() {
+    for find in [false, true] {
+        let mut f = fixture(&[]);
+        open_quick_add(&mut f, "Draft");
+        let field = if find {
+            f.app.open_find();
+            Id::new("find-query")
+        } else {
+            Id::new("quick-capture-text")
+        };
+        idle(&mut f);
+        assert_eq!(focused(&f), Some(field));
+        fs::rename(
+            f.app.workspace.join("lists"),
+            f.app.workspace.join("offline"),
+        )
+        .unwrap();
+        f.app.next_scan = std::time::Instant::now();
+        f.app.scan_external_changes();
+        assert!(f.app.persistence.workspace_failure.is_some());
+        storage::create_list(&f.app.workspace, "Synced", Accent::Sky).unwrap();
+        f.app.next_scan = std::time::Instant::now();
+        f.app.scan_external_changes();
+        assert!(matches!(f.app.screen, Screen::Overview));
+        idle(&mut f);
+        assert_eq!(focused(&f), Some(field));
+        cleanup(f);
+    }
 }
 
 #[test]

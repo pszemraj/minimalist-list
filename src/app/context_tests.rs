@@ -91,6 +91,51 @@ fn failed_context_save_retains_exact_draft_and_retry_saves_once() {
 }
 
 #[test]
+fn canceling_a_failed_context_draft_reloads_the_file_skipped_by_the_scan() {
+    use crate::{app::tests::keyboard_frame, storage};
+    use std::time::Instant;
+
+    let (ctx, mut app) = test_app();
+    let list = app.lists[0].key;
+    let task = Task::new("Original");
+    let id = task.id;
+    app.lists[0].data.tasks.push(task);
+    assert!(app.save_list_index(0));
+    app.open_task_context(list, id, false);
+    app.task_context.as_mut().unwrap().text = "Unsaved notes".into();
+    let lists = app.workspace.join("lists");
+    let offline = app.workspace.join("offline");
+    fs::rename(&lists, &offline).unwrap();
+    fs::write(&lists, "temporarily inaccessible").unwrap();
+    assert!(!app.save_task_context());
+    assert!(!app.has_save_conflict(list));
+    fs::remove_file(&lists).unwrap();
+    fs::rename(&offline, &lists).unwrap();
+    let mut changed = storage::load_existing_workspace(&app.workspace)
+        .unwrap()
+        .lists
+        .remove(0);
+    changed.data.tasks[0].text = "Changed elsewhere".into();
+    storage::save_list(&changed).unwrap();
+
+    app.next_scan = Instant::now();
+    app.scan_external_changes();
+    assert_eq!(app.lists[0].data.tasks[0].text, "Original");
+    keyboard_frame(&ctx, &mut app, vec![], 430.0);
+    keyboard_frame(
+        &ctx,
+        &mut app,
+        chord(egui::Key::Escape, egui::Modifiers::NONE),
+        430.0,
+    );
+    assert!(app.task_context.is_none());
+    app.next_scan = Instant::now();
+    app.scan_external_changes();
+    assert_eq!(app.lists[0].data.tasks[0].text, "Changed elsewhere");
+    fs::remove_dir_all(app.workspace).unwrap();
+}
+
+#[test]
 fn archived_context_is_read_only_and_complete_copy_keeps_it() {
     let (ctx, mut app) = test_app();
     let list = app.lists[0].key;

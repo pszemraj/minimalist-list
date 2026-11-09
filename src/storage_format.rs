@@ -45,17 +45,28 @@ pub(super) fn check_list_format(bytes: &[u8], path: &Path) -> Result<(), String>
         .map_err(|error| format!("ignored {}: {error}", path.display()))
 }
 
-/// Checks the current file before renaming or removing a potentially stale cached list.
+/// Checks the current file's format and identity before a cached list can rename or remove it.
+///
+/// # Arguments
+/// - `path` - Current list file.
+/// - `expected` - Identity of the cached list.
 ///
 /// # Returns
-/// `Ok(())` when the file declares a supported format.
+/// `Ok(())` when the file declares a supported format and belongs to this list.
 ///
 /// # Errors
-/// Returns an error when the file cannot be read or has an unsupported format.
-pub(super) fn check_file_format(path: &Path) -> Result<(), String> {
+/// Returns an error for an unreadable file, unsupported format, or changed identity.
+pub(super) fn check_file_for_mutation(path: &Path, expected: Uuid) -> Result<(), String> {
     let bytes =
         fs::read(path).map_err(|error| format!("could not read {}: {error}", path.display()))?;
-    check_list_format(&bytes, path)
+    check_list_format(&bytes, path)?;
+    if identity_from_bytes(&bytes, path)? != expected {
+        return Err(format!(
+            "{} belongs to a different list. Reload before changing it.",
+            path.display()
+        ));
+    }
+    Ok(())
 }
 
 /// Returns an authoritative filename UUID and its optional descriptive title prefix.
@@ -83,8 +94,12 @@ pub(super) fn filename_identity(path: &Path) -> Option<(Uuid, Option<&str>)> {
 /// Returns an error when the file is unreadable, is not a JSON object, or has no list identity.
 pub(super) fn read_identity(path: &Path) -> Result<Uuid, String> {
     let bytes = fs::read(path).map_err(|error| error.to_string())?;
+    identity_from_bytes(&bytes, path)
+}
+
+fn identity_from_bytes(bytes: &[u8], path: &Path) -> Result<Uuid, String> {
     let fields: serde_json::Map<String, serde_json::Value> =
-        serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
+        serde_json::from_slice(bytes).map_err(|error| error.to_string())?;
     filename_identity(path)
         .map(|(id, _)| id)
         .or_else(|| fields.get("id")?.as_str()?.parse().ok())

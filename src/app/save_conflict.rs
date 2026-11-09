@@ -8,16 +8,35 @@ use crate::{
 use uuid::Uuid;
 
 impl MinimalistApp {
-    /// Remembers the exact candidate rejected because its associated file changed.
+    /// Remembers edits when the original changed, disappeared, or cannot be read.
     ///
     /// # Arguments
     /// - `candidate` - Local contents that were not written.
     pub(in crate::app) fn record_save_conflict(&mut self, candidate: &StoredList) {
-        if storage::list_changed_on_disk(candidate).unwrap_or(false) {
+        let conflict = match storage::list_changed_on_disk(candidate) {
+            Ok(changed) => changed,
+            // Accepted mutations need a discard action even while the folder is
+            // unavailable. Modal drafts already have Cancel and can retry.
+            Err(_) => {
+                self.persistence.dirty_lists.contains(&candidate.key)
+                    || candidate
+                        .path
+                        .parent()
+                        .is_some_and(|dir| std::fs::read_dir(dir).is_ok())
+            }
+        };
+        if conflict {
             self.persistence
                 .conflicted_candidates
                 .insert(candidate.key, candidate.clone());
         }
+    }
+
+    /// Makes pending edits retryable when their original disk contents return.
+    pub(in crate::app) fn refresh_save_conflicts(&mut self) {
+        self.persistence
+            .conflicted_candidates
+            .retain(|_, candidate| storage::list_changed_on_disk(candidate) != Ok(false));
     }
 
     /// Returns whether this list has a retained candidate needing conflict recovery.
@@ -154,10 +173,7 @@ impl MinimalistApp {
             candidate.data.title = self.rename_input.trim().to_owned();
         }
         self.prepare_list_for_save(&mut candidate);
-        let result = storage::load_existing_workspace(&self.workspace).and_then(|snapshot| {
-            storage::create_local_copy(&self.workspace, &candidate).map(|copy| (snapshot, copy))
-        });
-        let (snapshot, copy) = match result {
+        let (copy, original) = match storage::create_local_copy(&self.workspace, &candidate) {
             Ok(saved) => saved,
             Err(error) => {
                 self.status = Some(error);
@@ -165,10 +181,7 @@ impl MinimalistApp {
             }
         };
         self.lists.push(copy);
-        self.finish_conflict_reload(
-            list,
-            snapshot.lists.into_iter().find(|stored| stored.key == list),
-        );
+        self.finish_conflict_reload(list, original);
         self.acknowledge("Local changes kept in a separate list.".into());
         log::info!("Save conflict resolved by keeping a local copy");
         true

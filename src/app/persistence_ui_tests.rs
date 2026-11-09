@@ -141,6 +141,106 @@ fn unresolved_list_keeps_local_edits_while_other_lists_reload_and_can_be_discard
 }
 
 #[test]
+fn a_pending_save_can_be_discarded_when_the_lists_folder_stays_unavailable() {
+    for obstructed in [false, true] {
+        let (_, mut app) = test_app();
+        let list = app.lists[0].key;
+        let lists = app.workspace.join("lists");
+        let offline = app.workspace.join("offline");
+        fs::rename(&lists, &offline).unwrap();
+        if obstructed {
+            fs::write(&lists, "Obstruction").unwrap();
+        }
+        app.lists[0].data.tasks.push(Task::new("Pending edit"));
+        assert!(!app.save_list_index(0));
+        assert!(app.has_save_conflict(list));
+        assert!(!app.finish_pending_changes());
+        assert!(app.discard_local_change_and_reload(list));
+        assert!(app.finish_pending_changes());
+        assert!(!lists.is_dir());
+        assert_eq!(fs::read_dir(offline).unwrap().count(), 1);
+        fs::remove_dir_all(app.workspace).unwrap();
+    }
+}
+
+#[test]
+fn a_retained_list_does_not_replace_the_synced_order_of_a_different_list_at_its_path() {
+    let (_, mut app) = test_app();
+    let original = app.lists[0].key;
+    let imported = app.lists[0].path.with_file_name("imported.json");
+    fs::rename(&app.lists[0].path, &imported).unwrap();
+    let mut remote =
+        storage::create_list(&app.workspace, "Remote", crate::model::Accent::Sky).unwrap();
+    let first = Task::new("First");
+    let second = Task::new("Second");
+    let synced_order = [second.id, first.id];
+    remote.data.tasks = vec![first, second];
+    storage::save_list(&remote).unwrap();
+    app.next_scan = Instant::now();
+    app.scan_external_changes();
+
+    remote.data.tasks.swap(0, 1);
+    storage::save_list(&remote).unwrap();
+    fs::write(&imported, fs::read(&remote.path).unwrap()).unwrap();
+    fs::remove_file(&remote.path).unwrap();
+    let index = app.list_index(original).unwrap();
+    app.lists[index].data.tasks.push(Task::new("Pending edit"));
+    assert!(!app.save_list_index(index));
+    app.next_scan = Instant::now();
+    app.scan_external_changes();
+    let index = app.list_index(remote.key).unwrap();
+    app.lists[index].data.tasks[0].toggle();
+    assert!(app.save_list_index(index));
+    let saved = storage::load_existing_workspace(&app.workspace).unwrap();
+    let order = saved.lists[0]
+        .data
+        .tasks
+        .iter()
+        .map(|task| task.id)
+        .collect::<Vec<_>>();
+    assert_eq!(order, synced_order);
+    fs::remove_dir_all(app.workspace).unwrap();
+}
+
+#[test]
+fn a_workspace_can_reopen_with_an_unreadable_list_and_a_pending_save() {
+    let (_, mut app) = test_app();
+    let original = app.lists[0].key;
+    let path = app.lists[0].path.clone();
+    let lists = app.workspace.join("lists");
+    let offline = app.workspace.join("offline");
+    fs::rename(&lists, &offline).unwrap();
+    app.lists[0]
+        .data
+        .tasks
+        .push(Task::new("Pending local edit"));
+    assert!(!app.save_list_index(0));
+    app.next_scan = Instant::now();
+    app.scan_external_changes();
+    assert!(app.persistence.workspace_failure.is_some());
+
+    let other = storage::create_list(&app.workspace, "Synced", crate::model::Accent::Sky).unwrap();
+    fs::create_dir(&path).unwrap();
+    app.retry_workspace();
+    assert!(app.persistence.workspace_failure.is_none());
+    assert!(app.list_index(other.key).is_some());
+    assert!(app.persistence.dirty_lists.contains(&original));
+    assert!(!app.retry_dirty_lists());
+    assert!(app.has_save_conflict(original));
+    assert!(app.keep_local_copy_and_reload(original));
+    assert!(path.is_dir());
+    assert!(app.finish_pending_changes());
+    let reloaded = storage::load_workspace(&app.workspace).unwrap();
+    let copy = reloaded
+        .lists
+        .iter()
+        .find(|list| list.key != other.key)
+        .unwrap();
+    assert_eq!(copy.data.tasks[0].text, "Pending local edit");
+    fs::remove_dir_all(app.workspace).unwrap();
+}
+
+#[test]
 fn narrow_workspace_warning_keeps_the_entire_instruction_and_actions_visible() {
     let (ctx, mut app) = test_app();
     app.persistence.workspace_failure =

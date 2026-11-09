@@ -474,7 +474,14 @@ pub fn load_workspace(root: &Path) -> Result<WorkspaceSnapshot, String> {
 ///
 /// Returns an error when the workspace list directory is missing, unreadable, or empty.
 pub fn load_existing_workspace(root: &Path) -> Result<WorkspaceSnapshot, String> {
-    load_lists(root, false)
+    let snapshot = load_lists(root, false)?;
+    if snapshot.lists.is_empty() && snapshot.failed_paths.is_empty() {
+        return Err(format!(
+            "{} has no list files",
+            root.join("lists").display()
+        ));
+    }
+    Ok(snapshot)
 }
 
 fn load_lists(root: &Path, initialize: bool) -> Result<WorkspaceSnapshot, String> {
@@ -496,10 +503,7 @@ fn load_lists(root: &Path, initialize: bool) -> Result<WorkspaceSnapshot, String
         .collect::<Vec<_>>();
     paths.sort();
 
-    if paths.is_empty() {
-        if !initialize {
-            return Err(format!("{} has no list files", lists_dir.display()));
-        }
+    if paths.is_empty() && initialize {
         let list = create_list(root, "Tasks", Accent::default())?;
         update_fingerprint_for_file(&mut fingerprint, &list)?;
         return Ok(WorkspaceSnapshot {
@@ -699,7 +703,7 @@ pub fn rename_list_file(list: &mut StoredList) -> Result<(), String> {
             ));
         }
     }
-    format::check_file_format(&list.path)?;
+    format::check_file_for_mutation(&list.path, list.key)?;
     fs::rename(&list.path, &destination).map_err(|error| {
         format!(
             "could not rename {} to {}: {error}",
@@ -781,8 +785,8 @@ pub fn update_fingerprint_for_file(
 /// - `fingerprint` - Snapshot to update in place.
 /// - `path` - List file whose entry should be removed.
 pub fn remove_file_from_fingerprint(fingerprint: &mut WorkspaceFingerprint, path: &Path) {
-    if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
-        fingerprint.0.remove(name);
+    if let Some(name) = path.file_name() {
+        fingerprint.0.remove(name.to_string_lossy().as_ref());
     }
 }
 

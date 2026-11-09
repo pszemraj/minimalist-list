@@ -10,7 +10,7 @@ publish = false
 [dependencies]
 eframe = { version = "0.36.2", default-features = false, features = ["accesskit", "default_fonts", "glow", "persistence", "wayland", "x11"] }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde_json = { version = "1", features = ["arbitrary_precision"] }
 rfd = "0.17"
 tray-icon = { version = "0.26", default-features = false, features = ["ksni"] }
 uuid = { version = "1", features = ["serde", "v4"] }

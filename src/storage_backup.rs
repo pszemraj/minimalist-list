@@ -254,7 +254,7 @@ pub fn delete_list(workspace: &Path, list: &StoredList) -> Result<(), String> {
             "the list path is no longer a file",
         )));
     }
-    format::check_file_format(&list.path)?;
+    format::check_file_for_mutation(&list.path, list.key)?;
     let directory = backups_dir(workspace).join("deleted");
     fs::create_dir_all(&directory).map_err(fail)?;
     // Never replace an earlier deleted copy that shares the same second and name.

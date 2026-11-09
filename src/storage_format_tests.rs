@@ -123,6 +123,28 @@ fn cached_list_cannot_rename_or_delete_an_unsupported_replacement() {
 }
 
 #[test]
+fn cached_list_cannot_rename_or_delete_a_different_list_at_the_same_path() {
+    let root = root();
+    let original = create_list(&root, "Original", Accent::Mint).unwrap();
+    let path = original.path.with_file_name("imported.json");
+    fs::rename(&original.path, &path).unwrap();
+    let mut cached = load_workspace(&root).unwrap().lists.remove(0);
+    let replacement = create_list(&root, "Replacement", Accent::Sky).unwrap();
+    let bytes = fs::read(&replacement.path).unwrap();
+    fs::write(&path, &bytes).unwrap();
+    fs::remove_file(&replacement.path).unwrap();
+
+    cached.data.title = "Renamed".into();
+    let error = rename_list_file(&mut cached).unwrap_err();
+    assert!(error.contains("belongs to a different list"));
+    let error = delete_list(&root, &cached).unwrap_err();
+    assert!(error.contains("belongs to a different list"));
+    assert_eq!(fs::read(&path).unwrap(), bytes);
+    assert!(!backups_dir(&root).exists());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn future_duplicates_prevent_deletion_using_filename_or_embedded_identity() {
     for filename_identity in [true, false] {
         let root = root();
@@ -180,7 +202,7 @@ fn version_one_defaults_and_unknown_fields_survive_saved_edits() {
         "title": "Shared list",
         "created_at_unix": 100,
         "accent": "Mint",
-        "future_list": {"nested": [true, null, "keep"]},
+        "future_list": {"nested": ["large integer", "precise decimal", "large exponent"]},
         "tasks": [{
             "id": "22222222-2222-4222-8222-222222222222",
             "text": "Old task without notes or children",
@@ -207,15 +229,27 @@ fn version_one_defaults_and_unknown_fields_survive_saved_edits() {
             }
         }]
     });
-    fs::write(&path, serde_json::to_vec_pretty(&original).unwrap()).unwrap();
-    let mut list = load_workspace(&root).unwrap().lists.remove(0);
+    let original = original
+        .to_string()
+        .replace("\"large integer\"", "18446744073709551617")
+        .replace("\"precise decimal\"", "0.1234567890123456789")
+        .replace("\"large exponent\"", "1e+400");
+    fs::write(&path, &original).unwrap();
+    let snapshot = load_workspace(&root).unwrap();
+    assert!(snapshot.warnings.is_empty(), "{:?}", snapshot.warnings);
+    let mut list = snapshot.lists.into_iter().next().unwrap();
     assert!(list.data.tasks[0].context.is_empty());
     assert!(list.data.tasks[0].subtasks.is_empty());
     assert_eq!(list.data.tasks[0].completed_at_unix, None);
     list.data.title = "Edited list".into();
     list.data.tasks[0].toggle();
     save_list(&list).unwrap();
-    let saved: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    let saved = fs::read_to_string(&path).unwrap();
+    for number in ["18446744073709551617", "0.1234567890123456789", "1e+400"] {
+        assert!(saved.contains(number), "missing exact number {number}");
+    }
+    let saved: serde_json::Value = serde_json::from_str(&saved).unwrap();
+    let original: serde_json::Value = serde_json::from_str(&original).unwrap();
     assert_eq!(saved["format_version"], 1);
     assert_eq!(saved["title"], "Edited list");
     assert_eq!(saved["tasks"][0]["completed"], true);

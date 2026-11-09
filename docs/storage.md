@@ -33,7 +33,7 @@ Workspace selection follows this order:
 
 Choosing a folder in the application saves it for the next launch. Run `cargo run --locked -- --help` for the command summary.
 
-If the selected workspace is unavailable, the app offers **Retry workspace** and **Choose workspace...**. This can happen at startup or if the open workspace's `lists` folder disappears, becomes unreadable, or loses all its files. The app reopens the existing workspace on a scan once access returns and no edit is pending. The saved list selection and ordering preferences survive the interruption.
+If the selected workspace is unavailable, the app offers **Retry workspace** and **Choose workspace...**. This can happen at startup or if the open workspace's `lists` folder disappears, becomes unreadable, or loses all its files. When access returns, a scan reloads accessible lists and keeps pending edits available for [recovery](#save-recovery). The saved list selection and ordering preferences survive the interruption.
 
 The app creates missing folders and starts with a list when opening an empty platform default, launch override, or folder explicitly chosen in Settings. Other saved folders must already contain list files. This protects an unmounted or still-syncing workspace from accidental initialization.
 
