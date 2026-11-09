@@ -137,9 +137,12 @@ fn install_handlers(ctx: &egui::Context, sender: Sender<Action>) {
     }));
     let tray_ctx = ctx.clone();
     TrayIconEvent::set_event_handler(Some(move |event: TrayIconEvent| {
+        // GNOME reserves single left clicks for its menu and forwards middle clicks.
         if matches!(event, TrayIconEvent::Click {
-            id, button: MouseButton::Left, button_state: MouseButtonState::Up, ..
-        } if id.as_ref() == TRAY_ID)
+            id, button, button_state: MouseButtonState::Up, ..
+        } if id.as_ref() == TRAY_ID
+            && (button == MouseButton::Left
+                || (cfg!(target_os = "linux") && button == MouseButton::Middle)))
         {
             let _ = sender.send(Action::Show);
             tray_ctx.request_repaint();
