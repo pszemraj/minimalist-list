@@ -91,6 +91,8 @@ If files contain the same list UUID, filenames with a recognized UUID take prece
 
 A conflicting copy can contain changes missing from your lists. Choose **Recover as separate list** to import it with independent list, task, and subtask IDs and keep the original file in local backups. The imported list syncs like any other list. Resolve duplicate files before deleting a list that shares their identity.
 
+After importing a conflicting copy or keeping a local copy, a summary shows tasks found only in either version, changed tasks, and differences in list details or Manual order.
+
 ### Save recovery
 
 Before quitting or switching workspaces, the app saves inline edits, list title changes, open context drafts, and accepted archive/delete actions. Hiding also saves open editors and list names. A failed write keeps the window open and the changes in memory until you resolve the write. If the app is waiting for the folder, restore access and choose **Retry save**.

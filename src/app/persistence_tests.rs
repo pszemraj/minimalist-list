@@ -352,7 +352,7 @@ fn success_acknowledgement_expires_without_dismissing_save_errors() {
     app.acknowledge("Added to Tasks".into());
     assert!(app.persistence.notice.is_some());
     app.status = Some("Changes are unsaved".into());
-    app.persistence.notice.as_mut().unwrap().1 = Instant::now() - Duration::from_secs(4);
+    app.persistence.notice.as_mut().unwrap().1 = Some(Instant::now() - Duration::from_secs(4));
     app.update_motion(&ctx);
     assert!(app.persistence.notice.is_none());
     assert_eq!(app.status.as_deref(), Some("Changes are unsaved"));

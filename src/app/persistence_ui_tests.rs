@@ -70,7 +70,9 @@ fn deferred_reload_during_inline_edit_cannot_overwrite_synced_task_changes() {
     app.status = Some("Unrelated sync warning".into());
     assert!(app.keep_local_copy_and_reload(list_id));
     assert_eq!(app.status.as_deref(), Some("Unrelated sync warning"));
-    assert!(app.persistence.notice.is_some());
+    let (message, started) = app.persistence.notice.as_ref().unwrap();
+    assert!(message.contains("Changed (1) · Local edited title"));
+    assert!(started.is_none());
     assert!(app.persistence.dirty_lists.is_empty());
     assert!(app.finish_pending_changes());
     assert_eq!(fs::read(&remote.path).unwrap(), remote_bytes);

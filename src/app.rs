@@ -402,7 +402,7 @@ impl MinimalistApp {
 
     fn update_motion(&mut self, ctx: &egui::Context) {
         let now = Instant::now();
-        if let Some((_, started)) = &self.persistence.notice {
+        if let Some((_, Some(started))) = &self.persistence.notice {
             let remaining = Duration::from_secs(3).saturating_sub(started.elapsed());
             if remaining.is_zero() {
                 self.persistence.notice = None;

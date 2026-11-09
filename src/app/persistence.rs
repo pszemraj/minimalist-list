@@ -24,7 +24,7 @@ pub(super) struct PersistenceState {
     last_retry_error: Option<String>,
     pub(super) settings_dirty: bool,
     settings_save_after: Option<Instant>,
-    pub(super) notice: Option<(String, Instant)>,
+    pub(super) notice: Option<(String, Option<Instant>)>,
     backup_warned: bool,
 }
 
@@ -61,7 +61,12 @@ impl PersistenceState {
 impl MinimalistApp {
     /// Shows a short acknowledgement after a successful task operation.
     pub(super) fn acknowledge(&mut self, message: String) {
-        self.persistence.notice = Some((message, Instant::now()));
+        self.persistence.notice = Some((message, Some(Instant::now())));
+    }
+
+    /// Keeps a recovered-list comparison visible until dismissed or replaced.
+    pub(super) fn acknowledge_recovery(&mut self, message: String) {
+        self.persistence.notice = Some((message, None));
     }
 
     /// Coalesces continuous appearance edits into one preference write after a pause.
@@ -426,6 +431,11 @@ impl MinimalistApp {
             .map(|(message, _)| message.clone());
         let success_only =
             !dirty && failed_workspace.is_none() && self.status.is_none() && notice.is_some();
+        let dismissible = self
+            .persistence
+            .notice
+            .as_ref()
+            .is_some_and(|(_, started)| started.is_none());
         let message = failed_workspace
             .as_ref()
             .map(|path| {
@@ -488,7 +498,7 @@ impl MinimalistApp {
                 if let Some(notice) = notice {
                     ui.add(egui::Label::new(self.rich(notice, 13.0, palette.text)).wrap());
                 }
-                if !success_only {
+                if !success_only || dismissible {
                     ui.horizontal_wrapped(|ui| {
                         let retryable = waiting
                             || self.persistence.settings_dirty
@@ -516,7 +526,11 @@ impl MinimalistApp {
                         {
                             self.open_settings(None);
                         }
-                        if !dirty
+                        if dismissible {
+                            if ui.button("Dismiss summary").clicked() {
+                                self.persistence.notice = None;
+                            }
+                        } else if !dirty
                             && failed_workspace.is_none()
                             && ui.add(Button::new("Dismiss")).clicked()
                         {

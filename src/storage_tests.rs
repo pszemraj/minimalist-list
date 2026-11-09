@@ -531,7 +531,9 @@ fn canonical_file_wins_until_sync_conflict_copy_is_recovered() {
     assert_eq!(workspace_fingerprint(&root).unwrap(), snapshot.fingerprint);
     fs::remove_file(&conflicted_backups).unwrap();
 
-    let recovered = recover_duplicate(&root, &conflict.path).unwrap();
+    let (recovered, differences) = recover_duplicate(&root, &conflict.path).unwrap();
+    assert!(differences.contains("Only in copy (1) · Change from another machine"));
+    assert!(differences.contains("List details or Manual order differ"));
     let snapshot = load_existing_workspace(&root).unwrap();
     assert!(snapshot.duplicate_paths.is_empty());
     assert_eq!(snapshot.lists.len(), 2);

@@ -129,9 +129,16 @@ impl MinimalistApp {
                 return false;
             }
         };
+        let message = original.as_ref().map_or_else(
+            || "Local changes kept in a separate list. The original is unavailable.".into(),
+            |original| {
+                let differences = storage::recovery_summary(&original.data, &candidate.data);
+                format!("Local changes kept in a separate list. {differences}")
+            },
+        );
         self.lists.push(copy);
         self.finish_conflict_reload(list, original);
-        self.acknowledge("Local changes kept in a separate list.".into());
+        self.acknowledge_recovery(message);
         log::info!("Save conflict resolved by keeping a local copy");
         true
     }

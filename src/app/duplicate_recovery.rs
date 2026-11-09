@@ -50,12 +50,12 @@ impl MinimalistApp {
         }
         self.next_scan = Instant::now();
         match storage::recover_duplicate(&self.workspace, &path) {
-            Ok(copy) => {
+            Ok((copy, differences)) => {
                 self.duplicate_recovery_error = None;
                 self.duplicate_paths.retain(|duplicate| duplicate != &path);
                 self.lists.push(copy);
                 self.apply_list_order();
-                self.acknowledge("Recovered as a separate list.".into());
+                self.acknowledge_recovery(format!("Recovered as a separate list. {differences}"));
             }
             Err(error) => self.duplicate_recovery_error = Some(error),
         }
@@ -128,6 +128,9 @@ mod tests {
         assert!(!duplicate.exists());
         assert!(app.duplicate_recovery_error.is_none());
         assert_eq!(app.status.as_deref(), Some("Unrelated warning"));
+        let (message, started) = app.persistence.notice.as_ref().unwrap();
+        assert!(message.contains("No differences in task contents"));
+        assert!(started.is_none());
         fs::remove_dir_all(storage::backups_dir(&app.workspace)).unwrap();
         fs::remove_dir_all(app.workspace).unwrap();
     }

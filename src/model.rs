@@ -299,7 +299,7 @@ impl Subtask {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 /// A completed task retained with the time it entered history.
 pub struct ArchivedTask {
     pub task: Task,
