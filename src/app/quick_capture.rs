@@ -144,7 +144,6 @@ impl MinimalistApp {
     }
 
     /// Renders the active Quick add form and handles submission or dismissal.
-    /// Renders the active Quick add form and applies its submitted action.
     ///
     /// # Arguments
     /// - `ctx` - Context for modal input and focus.
