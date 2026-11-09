@@ -3,7 +3,6 @@
 use chrono::{DateTime, NaiveDate, SecondsFormat, Utc};
 use log::{Level, LevelFilter, Log, Metadata, Record};
 use std::{
-    env,
     fs::{self, File},
     io::{self, Write},
     path::{Path, PathBuf},
@@ -74,7 +73,7 @@ fn open_day(directory: &Path, date: NaiveDate) -> io::Result<File> {
 
 #[cfg(not(target_os = "macos"))]
 fn absolute_env(name: &str) -> Option<PathBuf> {
-    env::var_os(name)
+    std::env::var_os(name)
         .map(PathBuf::from)
         .filter(|path| path.is_absolute())
 }
@@ -143,7 +142,8 @@ mod tests {
 
     #[test]
     fn filters_levels_and_appends_to_the_file_for_each_utc_day() {
-        let directory = env::temp_dir().join(format!("minimalist-logs-{}", uuid::Uuid::new_v4()));
+        let directory =
+            std::env::temp_dir().join(format!("minimalist-logs-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&directory).unwrap();
         let first: DateTime<Utc> = "2026-11-05T23:59:59Z".parse().unwrap();
         let next: DateTime<Utc> = "2026-11-06T00:00:00Z".parse().unwrap();

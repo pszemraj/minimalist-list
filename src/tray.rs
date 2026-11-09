@@ -26,7 +26,7 @@ pub(crate) enum Availability {
     Available,
     Unavailable,
     /// The check was inconclusive or an absence is still awaiting confirmation.
-    #[cfg(any(target_os = "linux", target_os = "windows", test))]
+    #[cfg(any(target_os = "linux", test))]
     Unknown,
 }
 
