@@ -1,6 +1,6 @@
 //! Checklist edits, task recovery, and archival mutations.
 
-use super::{MinimalistApp, SubtaskEdit, UndoItem};
+use super::{MinimalistApp, PastedBatch, SubtaskEdit, UndoItem};
 use crate::{
     app::{CLEAR_ANIMATION_SECONDS, DELETE_ANIMATION_SECONDS, Screen, keyboard::FocusItem},
     model::{ArchivedTask, Subtask, Task},
@@ -56,7 +56,18 @@ impl MinimalistApp {
             .iter()
             .position(|item| item.id == task)?;
         let subtasks: Vec<_> = texts.iter().map(Subtask::new).collect();
-        self.record_paste_undo(list, Some(task), subtasks.iter().map(|child| child.id));
+        if subtasks.len() > 1 {
+            self.details.undo = Some(UndoItem::Pasted {
+                list,
+                batch: PastedBatch::Subtasks {
+                    parent: task,
+                    items: subtasks
+                        .iter()
+                        .map(|child| (child.id, child.clone()))
+                        .collect(),
+                },
+            });
+        }
         self.lists[index].data.tasks[parent_index]
             .subtasks
             .extend(subtasks);
@@ -294,23 +305,18 @@ impl MinimalistApp {
         }
     }
 
-    /// Tracks a multi-item paste as one Undo entry, leaving ordinary additions alone.
+    /// Tracks a task paste for Undo, including the contents before any later edit.
     ///
     /// # Arguments
     /// - `list` - Destination list.
-    /// - `parent` - Parent task for a checklist paste, if any.
-    /// - `ids` - Identities assigned to the pasted items.
-    pub(in crate::app) fn record_paste_undo(
-        &mut self,
-        list: Uuid,
-        parent: Option<Uuid>,
-        ids: impl ExactSizeIterator<Item = Uuid>,
-    ) {
-        if ids.len() > 1 {
+    /// - `tasks` - The tasks added in this operation.
+    pub(in crate::app) fn record_task_paste_undo(&mut self, list: Uuid, tasks: &[Task]) {
+        if tasks.len() > 1 {
             self.details.undo = Some(UndoItem::Pasted {
                 list,
-                parent,
-                ids: ids.collect(),
+                batch: PastedBatch::Tasks(
+                    tasks.iter().map(|task| (task.id, task.clone())).collect(),
+                ),
             });
         }
     }
@@ -320,10 +326,10 @@ impl MinimalistApp {
     /// # Returns
     /// Whether the matching entry owns focus and has no text input to undo.
     pub(in crate::app) fn can_undo_paste_in_entry(&self, ctx: &egui::Context) -> bool {
-        let Some(UndoItem::Pasted { list, parent, .. }) = &self.details.undo else {
+        let Some(UndoItem::Pasted { list, batch }) = &self.details.undo else {
             return false;
         };
-        let (field, draft) = match parent {
+        let (field, draft) = match batch.parent() {
             Some(task) => (Id::new(("new-subtask", list, task)), &self.new_subtask),
             None => (Id::new(("new-task", list)), &self.new_task),
         };
@@ -364,49 +370,63 @@ impl MinimalistApp {
                 position,
                 item,
             }) => self.undo_archived_deletion(list, position, item),
-            Some(UndoItem::Pasted { list, parent, ids }) => self.undo_paste(list, parent, ids),
+            Some(UndoItem::Pasted { list, batch }) => self.undo_paste(list, batch),
             None => {}
         }
     }
 
-    fn undo_paste(&mut self, list: Uuid, parent: Option<Uuid>, ids: HashSet<Uuid>) {
+    fn undo_paste(&mut self, list: Uuid, batch: PastedBatch) {
         self.finish_inline_edit();
         let neighbors = self.focus_neighbors();
         let Some(index) = self.list_index(list) else {
-            self.details.undo = Some(UndoItem::Pasted { list, parent, ids });
+            self.details.undo = Some(UndoItem::Pasted { list, batch });
             self.status = Some("The pasted items' list is unavailable.".into());
             return;
         };
-        let data = &mut self.lists[index].data;
-        let removed = if let Some(task) = parent {
-            let Some(parent_task) = data
-                .tasks
-                .iter_mut()
-                .chain(data.archive.iter_mut().map(|item| &mut item.task))
-                .find(|item| item.id == task)
-            else {
-                self.details.undo = Some(UndoItem::Pasted { list, parent, ids });
-                self.status = Some("The pasted items' parent task is unavailable.".into());
-                return;
-            };
-            let before = parent_task.subtasks.len();
-            parent_task
-                .subtasks
-                .retain(|child| !ids.contains(&child.id));
-            before - parent_task.subtasks.len()
-        } else {
-            let before = data.tasks.len() + data.archive.len();
-            data.tasks.retain(|task| !ids.contains(&task.id));
-            data.archive.retain(|item| !ids.contains(&item.task.id));
-            before - data.tasks.len() - data.archive.len()
-        };
-        if removed > 0 {
-            self.drag = None;
-            if self.save_list_index(index) {
-                self.acknowledge("Paste undone".into());
+        let removed = match &batch {
+            PastedBatch::Tasks(items) => {
+                let protected: HashSet<_> = items
+                    .keys()
+                    .copied()
+                    .filter(|&task| self.has_subtask_draft(list, task))
+                    .collect();
+                let tasks = &mut self.lists[index].data.tasks;
+                let before = tasks.len();
+                tasks.retain(|task| {
+                    protected.contains(&task.id) || items.get(&task.id) != Some(task)
+                });
+                before - tasks.len()
             }
-            self.repair_focus(&neighbors);
+            PastedBatch::Subtasks { parent, items } => {
+                let Some(task) = self.lists[index]
+                    .data
+                    .tasks
+                    .iter_mut()
+                    .find(|task| task.id == *parent)
+                else {
+                    self.details.undo = Some(UndoItem::Pasted { list, batch });
+                    self.status = Some("The pasted items' parent task is not active.".into());
+                    return;
+                };
+                let before = task.subtasks.len();
+                task.subtasks
+                    .retain(|child| items.get(&child.id) != Some(child));
+                before - task.subtasks.len()
+            }
+        };
+        if removed == 0 {
+            self.acknowledge("No unchanged pasted items to remove.".into());
+            return;
         }
+        self.drag = None;
+        if self.save_list_index(index) {
+            self.acknowledge(if removed == batch.len() {
+                "Paste undone".into()
+            } else {
+                "Unchanged pasted items removed.".into()
+            });
+        }
+        self.repair_focus(&neighbors);
     }
 
     /// Reinserts a deleted task at its original Manual position.
@@ -741,10 +761,10 @@ impl MinimalistApp {
                         format!("Moved to {}", clipped(&self.lists[index].data.title, 40))
                     }),
             ),
-            Some(UndoItem::Pasted { parent, ids, .. }) => Some(format!(
+            Some(UndoItem::Pasted { batch, .. }) => Some(format!(
                 "Pasted {} {}",
-                ids.len(),
-                if parent.is_some() {
+                batch.len(),
+                if batch.parent().is_some() {
                     "subtasks"
                 } else {
                     "tasks"

@@ -315,7 +315,7 @@ impl MinimalistApp {
         let index = self.list_index(list_id)?;
         let tasks = new_tasks(texts);
         self.newest_task = Some((tasks.first()?.id, Instant::now()));
-        self.record_paste_undo(list_id, None, tasks.iter().map(|task| task.id));
+        self.record_task_paste_undo(list_id, &tasks);
         self.lists[index].data.tasks.splice(0..0, tasks);
         let saved = self.save_list_index(index);
         self.request_task_focus = true;

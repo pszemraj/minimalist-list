@@ -77,7 +77,7 @@ Drag a task vertically to reorder it. Drag right past the threshold to complete 
 
 `Ctrl+Shift+Backspace` or **Archive N completed** moves the displayed count of completed tasks into restorable History. The shortcut works from an empty task or subtask entry; nonempty fields and inline editors keep editing text. With no completed tasks, it leaves the list file untouched.
 
-Deleting a task, child, or History entry, moving a task, or pasting a batch shows **Undo**. Select it or press `Ctrl+Z` outside a text editor. You can also undo a batch from its empty task or checklist entry. Undo restores deleted items and moved tasks to their original positions and removes only the items created by a paste batch. Restored History entries keep their archive time.
+Deleting a task, child, or History entry, moving a task, or pasting a batch shows **Undo**. Select it or press `Ctrl+Z` outside a text editor. You can also undo a batch from its empty task or checklist entry. Paste Undo removes unchanged pasted items and keeps later edits and History entries. Undo restores deleted items and moved tasks to their original positions. Restored History entries keep their archive time.
 
 Undo applies to the latest deletion, move, or batch paste until dismissal, a workspace switch, or restart. If a moved task or either list is gone, or the original list already holds the task, Undo explains why and stays available.
 

@@ -124,17 +124,17 @@ fn pasted_items_split_lines_and_strip_one_marker() {
 fn task_entry_paste_adds_one_task_per_line_at_the_top_with_one_save() {
     let mut f = fixture(&["Old A", "Old B"]);
     f.app.new_task = "half-typed".into();
-    paste(&mut f, "- Milk\r\n- [ ] Eggs\n\n3. Bread\n");
-    let expected = ["Milk", "Eggs", "Bread", "Old A", "Old B"];
+    paste(&mut f, "- Milk\r\n- [ ] Eggs\n\n3. Bread\nJam");
+    let expected = ["Milk", "Eggs", "Bread", "Jam", "Old A", "Old B"];
     assert_eq!(titles(&f.app.lists[0].data.tasks), expected);
     assert_eq!(titles(&saved(&f).tasks), expected);
     assert_eq!(f.app.new_task, "half-typed", "the draft is untouched");
-    assert_eq!(notice(&f), Some("Added 3 tasks"));
+    assert_eq!(notice(&f), Some("Added 4 tasks"));
     assert_eq!(focused(&f), Some(Id::new(("new-task", f.list))));
     let tasks = &f.app.lists[0].data.tasks;
     assert!(tasks.iter().all(|task| !task.completed));
     assert_eq!(
-        tasks[0].created_at_unix, tasks[2].created_at_unix,
+        tasks[0].created_at_unix, tasks[3].created_at_unix,
         "a paste shares one creation time"
     );
     // The next ordinary submission still adds above the pasted tasks.
@@ -142,9 +142,24 @@ fn task_entry_paste_adds_one_task_per_line_at_the_top_with_one_save() {
     frame(&mut f, vec![Event::Text("Single".into())]);
     frame(&mut f, chord(Key::Enter, Modifiers::NONE));
     assert_eq!(titles(&saved(&f).tasks)[..2], ["Single", "Milk"]);
+    f.app.lists[0].data.tasks[1].context = "Added a note after pasting".into();
+    f.app.lists[0].data.tasks[2].completed = true;
+    f.app.archive_completed(f.list);
+    let bread = f.app.lists[0].data.tasks[2].id;
+    f.app.switch_subtask_panel(Some((f.list, bread)));
+    f.app.new_subtask = "Unsubmitted checklist item".into();
+    f.app.switch_subtask_panel(None);
     idle(&mut f);
     frame(&mut f, chord(Key::Z, Modifiers::COMMAND));
-    assert_eq!(titles(&saved(&f).tasks), ["Single", "Old A", "Old B"]);
+    let disk = saved(&f);
+    assert_eq!(
+        titles(&disk.tasks),
+        ["Single", "Milk", "Bread", "Old A", "Old B"]
+    );
+    assert_eq!(disk.tasks[1].context, "Added a note after pasting");
+    assert_eq!(disk.archive[0].task.text, "Eggs");
+    f.app.switch_subtask_panel(Some((f.list, bread)));
+    assert_eq!(f.app.new_subtask, "Unsubmitted checklist item");
     cleanup(f);
 }
 
@@ -255,8 +270,14 @@ fn checklist_paste_appends_subtasks_in_order_and_keeps_the_draft() {
     paste(&mut f, "Last\n");
     assert_eq!(f.app.new_subtask, "Last ");
     assert_eq!(saved(&f).tasks[0].subtasks.len(), 4);
+    let edited = f.app.lists[0].data.tasks[0].subtasks[1].id;
+    let completion = crate::app::keyboard::FocusItem::Subtask(f.list, parent, edited).id();
+    focus(&mut f, completion);
+    frame(&mut f, chord(Key::Space, Modifiers::NONE));
     f.app.undo_last();
-    assert_eq!(children(&saved(&f).tasks), ["Existing"]);
+    let disk = saved(&f);
+    assert_eq!(children(&disk.tasks), ["Existing", "A"]);
+    assert!(disk.tasks[0].subtasks[1].completed);
     assert_eq!(f.app.new_subtask, "Last ", "Undo preserves a typed draft");
     cleanup(f);
 }

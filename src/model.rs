@@ -189,7 +189,7 @@ impl TodoList {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 /// A top-level task and its optional checklist.
 pub struct Task {
     pub id: Uuid,
@@ -272,7 +272,7 @@ impl Task {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 /// One checklist item attached to a task.
 pub struct Subtask {
     pub id: Uuid,

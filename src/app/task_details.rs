@@ -7,12 +7,12 @@ use super::{
     text_input_shortcuts,
     theme::Palette,
 };
-use crate::model::{ArchivedTask, Task, now_unix_seconds};
+use crate::model::{ArchivedTask, Subtask, Task, now_unix_seconds};
 use eframe::egui::{
     self, Align, Button, Color32, CornerRadius, Frame, Id, Label, Layout, Margin, Rect, Sense,
     Stroke, TextEdit, UiBuilder, Vec2,
 };
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 #[path = "task_operations.rs"]
@@ -82,9 +82,33 @@ enum UndoItem {
     },
     Pasted {
         list: Uuid,
-        parent: Option<Uuid>,
-        ids: HashSet<Uuid>,
+        batch: PastedBatch,
     },
+}
+
+/// Original pasted contents used to distinguish a paste from later edits.
+enum PastedBatch {
+    Tasks(HashMap<Uuid, Task>),
+    Subtasks {
+        parent: Uuid,
+        items: HashMap<Uuid, Subtask>,
+    },
+}
+
+impl PastedBatch {
+    fn parent(&self) -> Option<Uuid> {
+        match self {
+            Self::Tasks(_) => None,
+            Self::Subtasks { parent, .. } => Some(*parent),
+        }
+    }
+
+    fn len(&self) -> usize {
+        match self {
+            Self::Tasks(items) => items.len(),
+            Self::Subtasks { items, .. } => items.len(),
+        }
+    }
 }
 
 /// Returns the identity of the title control that expands one History row.

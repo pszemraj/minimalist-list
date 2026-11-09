@@ -654,7 +654,7 @@ impl MinimalistApp {
             self.status = Some(error.clone());
             return Err(error);
         }
-        self.record_paste_undo(list_id, None, tasks.iter().map(|task| task.id));
+        self.record_task_paste_undo(list_id, &tasks);
         self.newest_task = newest.map(|id| (id, Instant::now()));
         self.settings.last_capture_list_id = Some(list_id);
         self.save_settings();
