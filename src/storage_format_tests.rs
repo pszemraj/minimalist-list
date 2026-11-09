@@ -161,7 +161,11 @@ fn future_duplicates_prevent_deletion_using_filename_or_embedded_identity() {
         } else {
             list.key
         };
-        let bytes = unsupported_bytes(embedded_id, 999);
+        let mut bytes = unsupported_bytes(embedded_id, 999);
+        assert_eq!(bytes.pop(), Some(b'}'));
+        bytes.extend_from_slice(
+            br#", "opaque": {"$serde_json::private::Number": "ordinary text"}}"#,
+        );
         fs::write(&duplicate, &bytes).unwrap();
 
         let error = delete_list(&root, &list).unwrap_err();
@@ -191,6 +195,36 @@ fn a_future_files_filename_identity_takes_precedence_over_its_embedded_id() {
 }
 
 #[test]
+fn metadata_with_a_reserved_number_key_is_left_untouched() {
+    let root = root();
+    let supported = create_list(&root, "Supported", Accent::Mint).unwrap();
+    let reserved = create_list(&root, "Reserved key", Accent::Sky).unwrap();
+    let original = fs::read_to_string(&reserved.path).unwrap();
+    let prefix = original.trim_end().strip_suffix('}').unwrap().trim_end();
+    for key in [
+        "$serde_json::private::Number",
+        r"\u0024serde_json::private::Number",
+        r"$serde_json::private::\u004eumber",
+    ] {
+        let file = format!(r#"{prefix}, "extension": [{{"{key}": "123"}}]}}"#);
+        fs::write(&reserved.path, &file).unwrap();
+        let loaded = load_workspace(&root).unwrap();
+        assert_eq!(loaded.lists.len(), 1);
+        assert_eq!(loaded.lists[0].key, supported.key);
+        assert!(
+            loaded.warnings.iter().any(|warning| {
+                warning.contains("reserved JSON key")
+                    && warning.contains(&reserved.path.display().to_string())
+            }),
+            "{:?}",
+            loaded.warnings
+        );
+        assert_eq!(fs::read_to_string(&reserved.path).unwrap(), file);
+    }
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn version_one_defaults_and_unknown_fields_survive_saved_edits() {
     let root = root();
     fs::create_dir_all(root.join("lists")).unwrap();
@@ -203,6 +237,7 @@ fn version_one_defaults_and_unknown_fields_survive_saved_edits() {
         "created_at_unix": 100,
         "accent": "Mint",
         "future_list": {"nested": ["large integer", "precise decimal", "large exponent"]},
+        "future_label": "$serde_json::private::Number",
         "tasks": [{
             "id": "22222222-2222-4222-8222-222222222222",
             "text": "Old task without notes or children",
@@ -254,6 +289,7 @@ fn version_one_defaults_and_unknown_fields_survive_saved_edits() {
     assert_eq!(saved["title"], "Edited list");
     assert_eq!(saved["tasks"][0]["completed"], true);
     assert_eq!(saved["future_list"], original["future_list"]);
+    assert_eq!(saved["future_label"], original["future_label"]);
     assert_eq!(
         saved["tasks"][0]["future_task"],
         original["tasks"][0]["future_task"]

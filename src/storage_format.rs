@@ -1,13 +1,20 @@
 //! Shared-list format compatibility and identity parsing independent of task contents.
 
 use crate::model::FORMAT_VERSION;
-use serde::Deserialize;
-use std::{fs, path::Path};
+use serde::{Deserialize, de::IgnoredAny};
+use std::{collections::BTreeMap, fs, path::Path};
 use uuid::Uuid;
+
+const NUMBER_MARKER: &str = "$serde_json::private::Number";
 
 #[derive(Deserialize)]
 struct ListFormat {
     format_version: u32,
+}
+
+#[derive(Deserialize)]
+struct EmbeddedIdentity {
+    id: Uuid,
 }
 
 /// Rejects formats whose structure or behavior this application does not support.
@@ -27,7 +34,7 @@ pub(super) fn check_version(version: u32) -> Result<(), String> {
     }
 }
 
-/// Checks the format header before attempting to interpret version-specific contents.
+/// Checks the format header and rejects metadata that would be rewritten ambiguously.
 ///
 /// # Arguments
 /// - `bytes` - Complete JSON file contents.
@@ -37,12 +44,43 @@ pub(super) fn check_version(version: u32) -> Result<(), String> {
 /// `Ok(())` when the header declares a supported format.
 ///
 /// # Errors
-/// Returns a path-specific error when the header is malformed or unsupported.
+/// Returns a path-specific error when the format or metadata cannot round-trip safely.
 pub(super) fn check_list_format(bytes: &[u8], path: &Path) -> Result<(), String> {
     let header: ListFormat = serde_json::from_slice(bytes)
         .map_err(|error| format!("ignored {}: {error}", path.display()))?;
     check_version(header.format_version)
-        .map_err(|error| format!("ignored {}: {error}", path.display()))
+        .map_err(|error| format!("ignored {}: {error}", path.display()))?;
+    if contains_number_marker(bytes)
+        .map_err(|error| format!("ignored {}: {error}", path.display()))?
+    {
+        return Err(format!(
+            "ignored {}: reserved JSON key {NUMBER_MARKER} cannot be saved safely",
+            path.display()
+        ));
+    }
+    Ok(())
+}
+
+fn contains_number_marker(bytes: &[u8]) -> serde_json::Result<bool> {
+    // A literal or escaped dollar is required for the key.
+    if !bytes.contains(&b'$') && !bytes.windows(6).any(|bytes| bytes == b"\\u0024") {
+        return Ok(false);
+    }
+    // The header read already checked JSON structure. Decode each string so a
+    // marker in a key is distinguished from one in a value or escaped text.
+    let mut remaining = bytes;
+    while let Some(quote) = remaining.iter().position(|&byte| byte == b'"') {
+        let mut strings =
+            serde_json::Deserializer::from_slice(&remaining[quote..]).into_iter::<String>();
+        let Some(string) = strings.next().transpose()? else {
+            break;
+        };
+        remaining = &remaining[quote + strings.byte_offset()..];
+        if string == NUMBER_MARKER && remaining.trim_ascii_start().starts_with(b":") {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// Checks the current file's format and identity before a cached list can rename or remove it.
@@ -98,12 +136,22 @@ pub(super) fn read_identity(path: &Path) -> Result<Uuid, String> {
 }
 
 fn identity_from_bytes(bytes: &[u8], path: &Path) -> Result<Uuid, String> {
-    let fields: serde_json::Map<String, serde_json::Value> =
-        serde_json::from_slice(bytes).map_err(|error| error.to_string())?;
-    filename_identity(path)
-        .map(|(id, _)| id)
-        .or_else(|| fields.get("id")?.as_str()?.parse().ok())
-        .ok_or_else(|| format!("{} has no list identity", path.display()))
+    if !bytes.trim_ascii_start().starts_with(b"{") {
+        return Err(format!("{} has no list identity", path.display()));
+    }
+    if let Some((id, _)) = filename_identity(path) {
+        serde_json::from_slice::<BTreeMap<String, IgnoredAny>>(bytes)
+            .map_err(|error| error.to_string())?;
+        return Ok(id);
+    }
+    serde_json::from_slice::<EmbeddedIdentity>(bytes)
+        .map(|identity| identity.id)
+        .map_err(|error| {
+            format!(
+                "could not read list identity in {}: {error}",
+                path.display()
+            )
+        })
 }
 
 #[cfg(test)]
