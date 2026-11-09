@@ -308,49 +308,57 @@ fn enter() -> Vec<egui::Event> {
 
 #[test]
 fn failed_quick_add_keeps_text_and_retry_saves_exactly_one_task() {
-    let (ctx, mut app) = super::super::tests::test_app();
-    let list = app.lists[0].key;
-    app.open_quick_capture(Some(list));
-    app.quick_capture.as_mut().unwrap().text = "Capture survives unavailable folder".into();
-    overlay_frame(&ctx, &mut app, vec![]);
-    std::fs::rename(app.workspace.join("lists"), app.workspace.join("offline")).unwrap();
-    std::fs::write(app.workspace.join("lists"), "unavailable").unwrap();
-    overlay_frame(&ctx, &mut app, enter());
-    let state = app.quick_capture.as_ref().unwrap();
-    assert_eq!(state.text, "Capture survives unavailable folder");
-    assert!(state.failure.is_some());
-    assert!(app.lists[0].data.tasks.is_empty());
-    for _ in 0..3 {
+    for obstructed in [false, true] {
+        let (ctx, mut app) = super::super::tests::test_app();
+        let list = app.lists[0].key;
+        let title = "Capture survives unavailable folder";
+        let lists = app.workspace.join("lists");
+        let offline = app.workspace.join("offline");
+        app.open_quick_capture(Some(list));
+        app.quick_capture.as_mut().unwrap().text = title.into();
         overlay_frame(&ctx, &mut app, vec![]);
+        std::fs::rename(&lists, &offline).unwrap();
+        if obstructed {
+            std::fs::write(&lists, "unavailable").unwrap();
+        }
+        overlay_frame(&ctx, &mut app, enter());
+        let state = app.quick_capture.as_ref().unwrap();
+        assert_eq!(state.text, title);
+        assert!(state.failure.is_some());
+        assert!(app.lists[0].data.tasks.is_empty());
+        for _ in 0..3 {
+            overlay_frame(&ctx, &mut app, vec![]);
+        }
+        let text = overlay_frame(&ctx, &mut app, vec![]);
+        assert!(
+            text.iter()
+                .any(|text| text.starts_with("Waiting for the folder.")),
+            "visible text: {text:?}"
+        );
+        assert!(
+            text.iter().any(|text| text == "Retry save"),
+            "visible text: {text:?}"
+        );
+        assert!(!text.iter().any(|text| text == "Keep local copy and reload"));
+        if obstructed {
+            std::fs::remove_file(&lists).unwrap();
+        }
+        std::fs::rename(&offline, &lists).unwrap();
+        overlay_frame(&ctx, &mut app, enter());
+        assert!(app.quick_capture.is_none());
+        let saved = crate::storage::load_workspace(&app.workspace).unwrap();
+        assert_eq!(saved.lists[0].data.tasks.len(), 1);
+        assert_eq!(saved.lists[0].data.tasks[0].text, title);
+        assert!(app.status.is_none());
+        assert_eq!(
+            app.persistence
+                .notice
+                .as_ref()
+                .map(|(message, _)| message.as_str()),
+            Some("Added to Tasks")
+        );
+        std::fs::remove_dir_all(app.workspace).unwrap();
     }
-    let text = overlay_frame(&ctx, &mut app, vec![]);
-    assert!(
-        text.iter().any(|text| text.starts_with("Not saved.")),
-        "visible text: {text:?}"
-    );
-    assert!(
-        text.iter().any(|text| text == "Retry save"),
-        "visible text: {text:?}"
-    );
-    std::fs::remove_file(app.workspace.join("lists")).unwrap();
-    std::fs::rename(app.workspace.join("offline"), app.workspace.join("lists")).unwrap();
-    overlay_frame(&ctx, &mut app, enter());
-    assert!(app.quick_capture.is_none());
-    let saved = crate::storage::load_workspace(&app.workspace).unwrap();
-    assert_eq!(saved.lists[0].data.tasks.len(), 1);
-    assert_eq!(
-        saved.lists[0].data.tasks[0].text,
-        "Capture survives unavailable folder"
-    );
-    assert!(app.status.is_none());
-    assert_eq!(
-        app.persistence
-            .notice
-            .as_ref()
-            .map(|(message, _)| message.as_str()),
-        Some("Added to Tasks")
-    );
-    std::fs::remove_dir_all(app.workspace).unwrap();
 }
 
 #[test]

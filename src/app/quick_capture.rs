@@ -206,13 +206,14 @@ impl MinimalistApp {
                         state.request_focus = false;
                     }
 
-                    if state
-                        .selected_list_id
-                        .is_some_and(|id| self.has_save_conflict(id))
+                    if !self.persistence.waiting_for_list_folder
+                        && state
+                            .selected_list_id
+                            .is_some_and(|id| self.has_save_conflict(id))
                     {
                         ui.horizontal_wrapped(|ui| {
                             recover = ui.button("Keep local copy and reload").clicked();
-                            discard = ui.button("Discard my change and reload").clicked();
+                            discard = ui.button("Discard all unsaved changes").clicked();
                         });
                     }
                     ui.add_space(8.0);
@@ -262,7 +263,9 @@ impl MinimalistApp {
                         );
                     }
                     if let Some(error) = &state.failure {
-                        let message = if state.pending_batch.is_empty() {
+                        let message = if self.persistence.waiting_for_list_folder {
+                            "Waiting for the folder. Your draft is kept.".to_owned()
+                        } else if state.pending_batch.is_empty() {
                             "Not saved. Your draft is kept.".to_owned()
                         } else {
                             format!(
@@ -274,9 +277,10 @@ impl MinimalistApp {
                             .on_hover_text(error);
                     }
                     ui.add_space(8.0);
-                    let conflicted = state
-                        .selected_list_id
-                        .is_some_and(|id| self.has_save_conflict(id));
+                    let conflicted = !self.persistence.waiting_for_list_folder
+                        && state
+                            .selected_list_id
+                            .is_some_and(|id| self.has_save_conflict(id));
                     ui.horizontal(|ui| {
                         ui.label(self.rich(
                             if conflicted {

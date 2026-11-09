@@ -16,6 +16,8 @@ use uuid::Uuid;
 pub(super) struct PersistenceState {
     pub(super) dirty_lists: HashSet<Uuid>,
     conflicted_candidates: HashMap<Uuid, StoredList>,
+    /// Whether the folder itself could be read on the most recent save or retry check.
+    pub(super) waiting_for_list_folder: bool,
     pub(super) pending_filenames: HashSet<Uuid>,
     pub(super) workspace_failure: Option<String>,
     baseline: Settings,
@@ -43,6 +45,7 @@ impl PersistenceState {
         Self {
             dirty_lists: HashSet::new(),
             conflicted_candidates: HashMap::new(),
+            waiting_for_list_folder: false,
             pending_filenames: HashSet::new(),
             workspace_failure,
             baseline,
@@ -121,11 +124,10 @@ impl MinimalistApp {
                 None => message,
             });
         }
-        let saved = storage::save_list(list);
-        if saved.is_err() {
+        storage::save_list(list).map_err(|error| {
             log::warn!("List save failed; the local changes need recovery");
-        }
-        saved
+            self.record_save_conflict(list).unwrap_or(error)
+        })
     }
 
     /// Saves one list and retains failed content for explicit retry.
@@ -148,7 +150,6 @@ impl MinimalistApp {
             }
             Err(error) => {
                 self.persistence.dirty_lists.insert(id);
-                self.record_save_conflict(&list);
                 let error = format!("Changes are unsaved: {error}");
                 self.persistence.last_retry_error = Some(error.clone());
                 self.status = Some(error);
@@ -246,10 +247,7 @@ impl MinimalistApp {
         candidate: StoredList,
         manual: Vec<Uuid>,
     ) -> Result<(), String> {
-        if let Err(error) = self.write_list(&candidate) {
-            self.record_save_conflict(&candidate);
-            return Err(error);
-        }
+        self.write_list(&candidate)?;
         self.manual_task_order.insert(candidate.key, manual);
         self.lists[index] = candidate;
         self.apply_task_sorts();
@@ -269,6 +267,7 @@ impl MinimalistApp {
     /// Panics if the caller supplies an invalid loaded-list index.
     pub(super) fn complete_list_save(&mut self, index: usize) -> bool {
         let id = self.lists[index].key;
+        self.persistence.waiting_for_list_folder = false;
         self.persistence.dirty_lists.remove(&id);
         self.persistence.conflicted_candidates.remove(&id);
         if self.persistence.pending_filenames.contains(&id) {
@@ -415,9 +414,11 @@ impl MinimalistApp {
             .find(|list| self.has_save_conflict(list.key))
             .or_else(|| dirty_lists.next())
             .map(|list| (list.key, list.data.title.clone()));
-        let conflicted = pending_list
-            .as_ref()
-            .is_some_and(|(id, _)| self.has_save_conflict(*id));
+        let waiting = pending_list.is_some() && self.persistence.waiting_for_list_folder;
+        let conflicted = !waiting
+            && pending_list
+                .as_ref()
+                .is_some_and(|(id, _)| self.has_save_conflict(*id));
         let notice = self
             .persistence
             .notice
@@ -440,11 +441,12 @@ impl MinimalistApp {
                 self.status
                     .as_ref()
                     .filter(|status| {
-                        !conflicted || Some(*status) != self.persistence.last_retry_error.as_ref()
+                        !(conflicted || waiting)
+                            || Some(*status) != self.persistence.last_retry_error.as_ref()
                     })
                     .cloned()
             })
-            .or_else(|| (dirty && !conflicted).then(|| "Changes are unsaved.".into()));
+            .or_else(|| (dirty && !(conflicted || waiting)).then(|| "Changes are unsaved.".into()));
         Frame::NONE
             .fill(if success_only {
                 palette.surface
@@ -458,10 +460,14 @@ impl MinimalistApp {
                     ui.add(egui::Label::new(self.rich(title, 13.0, palette.text)).truncate())
                         .on_hover_text(title);
                 }
-                if conflicted {
+                if conflicted || waiting {
                     ui.add(
                         egui::Label::new(self.rich(
-                            "This list changed on disk or could not be read. Your changes are unsaved.",
+                            if waiting {
+                                "Waiting for the folder. Your changes are unsaved."
+                            } else {
+                                "This list changed on disk or could not be read. Your changes are unsaved."
+                            },
                             13.0,
                             palette.text,
                         ))
@@ -484,7 +490,8 @@ impl MinimalistApp {
                 }
                 if !success_only {
                     ui.horizontal_wrapped(|ui| {
-                        let retryable = self.persistence.settings_dirty
+                        let retryable = waiting
+                            || self.persistence.settings_dirty
                             || self
                                 .persistence
                                 .dirty_lists
@@ -498,7 +505,7 @@ impl MinimalistApp {
                             if conflicted && ui.button("Keep local copy and reload").clicked() {
                                 self.keep_local_copy_and_reload(id);
                             }
-                            if ui.button("Discard my change and reload").clicked() {
+                            if ui.button("Discard all unsaved changes").clicked() {
                                 self.discard_local_change_and_reload(id);
                             }
                         }

@@ -216,18 +216,26 @@ impl MinimalistApp {
                     }
                 });
             if let Some(error) = &editor.failure {
+                let waiting = self.persistence.waiting_for_list_folder;
                 egui::ScrollArea::vertical()
                     .id_salt("task-context-error")
                     .max_height(40.0)
                     .show(ui, |ui| {
-                        ui.add(egui::Label::new(self.rich(error, 13.0, palette.danger)).wrap());
+                        let message = if waiting {
+                            "Waiting for the folder."
+                        } else {
+                            error
+                        };
+                        ui.add(egui::Label::new(self.rich(message, 13.0, palette.danger)).wrap())
+                            .on_hover_text(error);
                     });
             }
-            let conflicted = self.has_save_conflict(editor.list);
+            let conflicted =
+                !self.persistence.waiting_for_list_folder && self.has_save_conflict(editor.list);
             if conflicted && !editor.archived {
                 ui.horizontal_wrapped(|ui| {
                     recover = ui.button("Keep local copy and reload").clicked();
-                    discard = ui.button("Discard my change and reload").clicked();
+                    discard = ui.button("Discard all unsaved changes").clicked();
                 });
             }
             ui.horizontal(|ui| {

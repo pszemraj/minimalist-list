@@ -50,7 +50,7 @@ fn import_duplicate(root: &Path, path: &Path) -> Result<StoredList, String> {
     let Some(bytes) = original.as_deref() else {
         return Err("the original file contents are unavailable".into());
     };
-    keep_original(root, name, bytes)
+    backup_conflicted_bytes(root, name, bytes)
         .map_err(|error| format!("could not save a local backup: {error}"))?;
     let copy = create_independent_copy(root, &source, "recovered copy")?;
     let removed = list_changed_on_disk(&source).and_then(|changed| {
@@ -71,8 +71,29 @@ fn import_duplicate(root: &Path, path: &Path) -> Result<StoredList, String> {
     Ok(copy)
 }
 
-/// Saves the observed contents under the original filename before changing the workspace.
-fn keep_original(root: &Path, name: &OsStr, bytes: &[u8]) -> std::io::Result<()> {
+/// Saves unsaved list contents under the original filename before discarding them.
+///
+/// # Arguments
+/// - `root` - The workspace whose local backups receive the list.
+/// - `source` - The unsaved list and its original filename.
+///
+/// # Returns
+/// Success once the backup is flushed to disk.
+///
+/// # Errors
+/// Returns an error if the filename is missing or the contents cannot be encoded or saved.
+pub fn backup_discarded_list(root: &Path, source: &StoredList) -> Result<(), String> {
+    let name = source.path.file_name().ok_or_else(|| {
+        "Could not back up unsaved changes: the original filename is missing.".to_owned()
+    })?;
+    let bytes = serde_json::to_vec_pretty(&source.data)
+        .map_err(|error| format!("Could not encode unsaved changes for backup: {error}"))?;
+    backup_conflicted_bytes(root, name, &bytes)
+        .map_err(|error| format!("Could not back up unsaved changes: {error}"))
+}
+
+/// Saves list contents under their original filename in a unique local backup directory.
+fn backup_conflicted_bytes(root: &Path, name: &OsStr, bytes: &[u8]) -> std::io::Result<()> {
     let conflicts = backups_dir(root).join("conflicted");
     fs::create_dir_all(&conflicts)?;
     let directory = conflicts.join(Uuid::new_v4().to_string());

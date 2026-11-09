@@ -32,7 +32,7 @@ mod format;
 
 #[path = "storage_conflict_recovery.rs"]
 mod conflict_recovery;
-pub use conflict_recovery::{create_local_copy, recover_duplicate};
+pub use conflict_recovery::{backup_discarded_list, create_local_copy, recover_duplicate};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]

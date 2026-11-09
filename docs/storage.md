@@ -93,11 +93,11 @@ A conflicting copy can contain changes missing from your lists. Choose **Recover
 
 ### Save recovery
 
-Before quitting or switching workspaces, the app saves inline edits, list title changes, open context drafts, and accepted archive/delete actions. Hiding also saves open editors and list names. A failed write keeps the window open and the changes in memory until you resolve the write. If folder access failed, restore it and choose **Retry save**.
+Before quitting or switching workspaces, the app saves inline edits, list title changes, open context drafts, and accepted archive/delete actions. Hiding also saves open editors and list names. A failed write keeps the window open and the changes in memory until you resolve the write. If the app is waiting for the folder, restore access and choose **Retry save**.
 
 A failed [Quick add](usage.md#quick-add) keeps its typed draft, any pasted batch, and destination, even when Find hides it. **Retry save** saves a failed batch on its own and leaves any separately typed text in the entry. A failed context save keeps its editor open with the draft.
 
-When Quick add is the only local change to a list, it retries once against the latest file. For a conflict that needs attention, **Keep local copy and reload** saves a separate **(local copy)** list with new list, task, and child IDs. The copy includes inline edits, editable context, active or suspended Quick add drafts, and an unfinished list-name change for that list. **Discard my change and reload** drops unsaved changes for the list and adopts the file on disk when available. You can also discard a failed list write when the file on disk is readable and unchanged.
+When Quick add is the only local change to a list, it retries once against the latest file. For a conflict that needs attention, **Keep local copy and reload** saves a separate **(local copy)** list with new list, task, and child IDs. **Discard all unsaved changes** keeps the unsaved list in local backups and reloads the file on disk when available. Both actions preserve inline edits, editable context, active or suspended Quick add drafts, and an unfinished list-name change for that list. Discard is available for failed list writes, including when the workspace folder is unavailable. If the backup fails, your changes stay in memory.
 
 Moving a task writes the destination before removing the source and attempts to roll back both lists if either write fails; the two list files are not a single atomic transaction.
 
@@ -120,7 +120,9 @@ Before a save replaces a list file, its previous contents are copied to `snapsho
 
 **Delete list** moves the list file to `deleted/` under a timestamped filename built from its title and UUID. For a list opened through a symbolic link, the app saves a regular copy of its target and removes the link from the workspace. The app retains each deleted backup until you remove it.
 
-To restore a snapshot, save any pending edits and quit the instance using the workspace. Replace the current list file's contents with the snapshot and keep the current filename, including its UUID. Reopen the app to load the restored list.
+The `conflicted/` folder holds the original files for imported conflicting copies and the unsaved lists saved by **Discard all unsaved changes**.
+
+To restore a snapshot or a discarded list, save any pending edits and quit the instance using the workspace. Replace the current list file's contents with the backup and keep the current filename, including its UUID. If the list file is gone, copy the discarded list back into `lists/`. Reopen the app to load the restored list.
 
 To restore a deleted list, copy its file from `deleted/` back into the workspace's `lists/` folder. The list returns with its original identity at the next scan. You can remove the leading `<unix seconds>-` from the filename.
 

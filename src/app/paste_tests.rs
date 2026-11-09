@@ -488,7 +488,7 @@ fn quick_add_can_retry_when_the_original_file_returns_unchanged() {
         fs::rename(&missing, &offline).unwrap();
         paste(&mut f, "One\nTwo");
         assert!(f.app.quick_capture.as_ref().unwrap().failure.is_some());
-        assert!(f.app.has_save_conflict(f.list));
+        assert_eq!(f.app.has_save_conflict(f.list), !directory_missing);
 
         fs::rename(&offline, &missing).unwrap();
         f.app.next_scan = std::time::Instant::now();

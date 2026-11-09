@@ -8,32 +8,39 @@ use crate::{
 use uuid::Uuid;
 
 impl MinimalistApp {
-    /// Remembers edits when the original changed, disappeared, or cannot be read.
+    /// Remembers conflicts in an accessible folder and leaves offline saves retryable.
     ///
     /// # Arguments
     /// - `candidate` - Local contents that were not written.
-    pub(in crate::app) fn record_save_conflict(&mut self, candidate: &StoredList) {
-        let conflict = match storage::list_changed_on_disk(candidate) {
-            Ok(changed) => changed,
-            // Accepted mutations need a discard action even while the folder is
-            // unavailable. Modal drafts already have Cancel and can retry.
-            Err(_) => {
-                self.persistence.dirty_lists.contains(&candidate.key)
-                    || candidate
-                        .path
-                        .parent()
-                        .is_some_and(|dir| std::fs::read_dir(dir).is_ok())
-            }
-        };
-        if conflict {
+    ///
+    /// # Returns
+    /// The folder error if the folder itself is unavailable.
+    pub(super) fn record_save_conflict(&mut self, candidate: &StoredList) -> Option<String> {
+        let folder = self.workspace.join("lists");
+        let unavailable = std::fs::read_dir(&folder).err();
+        self.persistence.waiting_for_list_folder = unavailable.is_some();
+        if !self.persistence.waiting_for_list_folder
+            && storage::list_changed_on_disk(candidate) != Ok(false)
+        {
             self.persistence
                 .conflicted_candidates
                 .insert(candidate.key, candidate.clone());
         }
+        unavailable.map(|error| format!("could not read {}: {error}", folder.display()))
     }
 
     /// Makes pending edits retryable when their original disk contents return.
     pub(in crate::app) fn refresh_save_conflicts(&mut self) {
+        if self.persistence.waiting_for_list_folder
+            || !self.persistence.dirty_lists.is_empty()
+            || !self.persistence.conflicted_candidates.is_empty()
+        {
+            self.persistence.waiting_for_list_folder =
+                std::fs::read_dir(self.workspace.join("lists")).is_err();
+        }
+        if self.persistence.waiting_for_list_folder {
+            return;
+        }
         self.persistence
             .conflicted_candidates
             .retain(|_, candidate| storage::list_changed_on_disk(candidate) != Ok(false));
@@ -50,6 +57,7 @@ impl MinimalistApp {
     /// Forgets conflict snapshots after opening a workspace.
     pub(in crate::app) fn clear_save_conflicts(&mut self) {
         self.persistence.conflicted_candidates.clear();
+        self.persistence.waiting_for_list_folder = false;
     }
 
     /// Forgets a canceled conflict and makes the next scan reload its cached list.
@@ -108,12 +116,33 @@ impl MinimalistApp {
     /// # Panics
     /// Panics if an internally resolved loaded-list index is invalid.
     pub(in crate::app) fn keep_local_copy_and_reload(&mut self, list: Uuid) -> bool {
-        let Some(mut candidate) = self.persistence.conflicted_candidates.get(&list).cloned() else {
+        if !self.has_save_conflict(list) {
+            return false;
+        }
+        let Some(candidate) = self.unsaved_list_candidate(list) else {
             return false;
         };
-        if let Some(index) = self.list_index(list) {
-            candidate.data = self.lists[index].data.clone();
-        }
+        let (copy, original) = match storage::create_local_copy(&self.workspace, &candidate) {
+            Ok(saved) => saved,
+            Err(error) => {
+                self.status = Some(error);
+                return false;
+            }
+        };
+        self.lists.push(copy);
+        self.finish_conflict_reload(list, original);
+        self.acknowledge("Local changes kept in a separate list.".into());
+        log::info!("Save conflict resolved by keeping a local copy");
+        true
+    }
+
+    /// Collects accepted edits and open drafts that a reload would replace.
+    fn unsaved_list_candidate(&self, list: Uuid) -> Option<StoredList> {
+        let mut candidate = self
+            .list_index(list)
+            .map(|index| &self.lists[index])
+            .or_else(|| self.persistence.conflicted_candidates.get(&list))?
+            .clone();
         if let Some((editing_list, task_id)) = self.editing
             && editing_list == list
             && let Some(task) = candidate
@@ -173,26 +202,22 @@ impl MinimalistApp {
             candidate.data.title = self.rename_input.trim().to_owned();
         }
         self.prepare_list_for_save(&mut candidate);
-        let (copy, original) = match storage::create_local_copy(&self.workspace, &candidate) {
-            Ok(saved) => saved,
-            Err(error) => {
-                self.status = Some(error);
-                return false;
-            }
-        };
-        self.lists.push(copy);
-        self.finish_conflict_reload(list, original);
-        self.acknowledge("Local changes kept in a separate list.".into());
-        log::info!("Save conflict resolved by keeping a local copy");
-        true
+        Some(candidate)
     }
 
-    /// Discards the rejected edit and displays the current on-disk version, if present.
+    /// Backs up unsaved edits locally, then displays the current on-disk version, if present.
     ///
     /// # Returns
-    /// Whether pending list changes were discarded.
+    /// Whether pending list changes were backed up and discarded.
     pub(in crate::app) fn discard_local_change_and_reload(&mut self, list: Uuid) -> bool {
         if !self.has_save_conflict(list) && !self.persistence.dirty_lists.contains(&list) {
+            return false;
+        }
+        let Some(candidate) = self.unsaved_list_candidate(list) else {
+            return false;
+        };
+        if let Err(error) = storage::backup_discarded_list(&self.workspace, &candidate) {
+            self.status = Some(error);
             return false;
         }
         let original = match storage::load_existing_workspace(&self.workspace) {
@@ -203,9 +228,9 @@ impl MinimalistApp {
             }
         };
         let message = if original.is_some() {
-            "Local changes discarded. List reloaded."
+            "Unsaved changes kept in local backups. List reloaded."
         } else {
-            "Local changes discarded. The list is unavailable on disk."
+            "Unsaved changes kept in local backups. The list is unavailable on disk."
         };
         self.finish_conflict_reload(list, original);
         self.acknowledge(message.into());
