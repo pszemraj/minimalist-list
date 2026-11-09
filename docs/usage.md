@@ -19,8 +19,6 @@ Open **List options** from a list header or card to rename, recolor, or remove t
 - **Clear History** appears when the list has archived tasks. Review the count, then choose **Confirm clear History** or **Cancel**. Recover cleared entries from a [local snapshot](storage.md#local-backups).
 - **Delete list** shows the list name and counts for active and archived tasks. Choose **Confirm delete list** or **Cancel deletion**. At least one list must remain. See [local backups](storage.md#local-backups) to recover a deleted list and [duplicate list files](storage.md#duplicate-list-files) if deletion is blocked.
 
-Each confirmation requires a separate press. Holding Enter or Space cannot confirm it.
-
 In **Manual** order, drag overview tiles to rearrange them. **Sort lists** temporarily shows title, newest, or oldest order. Return to **Manual** to recover the arrangement.
 
 <img src="../assets/lists.png" alt="Four example lists with accent colors, task previews, and completion counts" width="360">
@@ -79,7 +77,7 @@ Drag a task vertically to reorder it. Drag right past the threshold to complete 
 
 `Ctrl+Shift+Backspace` or **Archive N completed** moves the displayed count of completed tasks into restorable History. The shortcut works from an empty task or subtask entry; nonempty fields and inline editors keep editing text. With no completed tasks, it leaves the list file untouched.
 
-Deleting a task, child, or History entry, moving a task, or pasting a batch shows **Undo**. Select it or press `Ctrl+Z` outside a text editor. You can also undo a batch from its empty task or checklist entry. Undo restores a deleted item with its contents, completion, and original position, including the archive time for a History entry. It returns a moved task to its original position in its source list and removes only the items created by a paste batch.
+Deleting a task, child, or History entry, moving a task, or pasting a batch shows **Undo**. Select it or press `Ctrl+Z` outside a text editor. You can also undo a batch from its empty task or checklist entry. Undo restores deleted items and moved tasks to their original positions and removes only the items created by a paste batch. Restored History entries keep their archive time.
 
 Undo applies to the latest deletion, move, or batch paste until dismissal, a workspace switch, or restart. If a moved task or either list is gone, or the original list already holds the task, Undo explains why and stays available.
 
@@ -91,7 +89,7 @@ A moved task keeps its identity, completion, context, checklist, and unfinished 
 
 Select **Show history** and activate an archived title to inspect its children without changing their state. Each archived task shows a muted "Archived 3 days ago" line under its title. **Restore** returns the parent as incomplete, with child completion unchanged. It appears at the bottom in Manual order; other sort modes determine its visible position.
 
-Right-click an archived task and choose **Delete permanently**, or press forward Delete (`Fn+Delete` on Mac keyboards) while its title or **Restore** is focused, to remove just that task; holding the key removes one task per press. The notice offers **Undo**, and focus moves to the neighbouring archived task. To empty a whole History, use **Clear History** in [List options](#manage-lists).
+Right-click an archived task and choose **Delete permanently**, or press forward Delete (`Fn+Delete` on Mac keyboards) while its title or **Restore** is focused, to remove just that task. The notice offers **Undo**, and focus moves to the neighboring archived task. To empty a whole History, use **Clear History** in [List options](#manage-lists).
 
 Down from the last task reaches **Show history**, or Down from task entry when no tasks remain. Down, Right, or Enter on the History control opens it and focuses the first Restore action. Up/Down selects archived tasks; Enter or Space restores the focused task and focuses its active row. Up from the first archived task returns to the History control. Left or Escape closes History and returns to that control. Escape closes the focused History region first when a checklist is also open.
 
@@ -109,7 +107,7 @@ Opening Find from task context preserves the notes draft. Escape returns to that
 
 Tab and Shift+Tab reach individual controls, including list-card settings, task completion, subtasks, delete actions, History restoration, and Settings. Focused controls are outlined and scroll into view. Left and Right retain their usual text-editing and slider-adjustment behavior.
 
-Enter and Space activate controls once per press, including across focus changes and overlay dismissal; Delete on task rows follows the same rule. Typing spaces and holding editing, navigation, or reordering keys retain their normal repeat behavior.
+Enter and Space activate controls once per press, including across focus changes, overlay dismissal, and list confirmations. Forward Delete on active and archived task rows follows the same rule. Typing spaces and holding editing, navigation, or reordering keys retain their normal repeat behavior.
 
 Escape dismisses one layer per press: an open dropdown, the shortcut reference, Quick add or Find, Settings, an inline edit, list creation, subtasks, revealed task actions, or History. Holding it does not dismiss further layers. It leaves Lists and the task-list screen open. Closing an overlay restores its opening control; opening a search result focuses the matching task, subtask, or History restore action.
 
@@ -137,15 +135,15 @@ Choose folders and launch-time overrides through [workspace settings](storage.md
 
 The [installers](../README.md#install-and-run) add a sign-in entry with `--start-hidden`. An ordinary launch opens the window, as does a hidden launch without a usable tray. See [workspace overrides](storage.md#workspace-location) to select a folder at launch.
 
-`Ctrl+W` closes the window like its close button, including while an overlay is open. With a usable tray, closing hides the window in the tray (the menu bar on macOS). Minimizing does the same on Windows and Linux. On desktops such as GNOME that disable minimize for windows hidden from the taskbar, use close or `Ctrl+W`.
+`Ctrl+W` closes the window like its close button, including while an overlay is open. With a usable tray, closing hides the window in the tray (the menu bar on macOS). Minimizing does the same on Windows and Linux. On GNOME, use close or `Ctrl+W` if minimize is disabled. Without a usable tray, closing exits after pending changes save.
 
-From the tray icon's menu, choose **Show Minimalist List** to restore the window, **Quick add** to open it with the capture field focused, or **Quit** to exit. Activating the icon also restores the window on desktops that support it. On GNOME with AppIndicator, middle-click or double-click the icon to open the window directly. [Workspace scans](storage.md#file-sync-behavior) continue while hidden. See [save recovery](storage.md#save-recovery) for pending edits.
+From the tray icon's menu, choose **Show Minimalist List** to restore the window, **Quick add** to open it with the capture field focused, or **Quit** to exit. Activating the icon also restores the window on desktops that support it. On GNOME with AppIndicator, a single left click opens the menu. Middle-click or double-click the icon to open the window directly. [Workspace scans](storage.md#file-sync-behavior) continue while hidden. See [save recovery](storage.md#save-recovery) for pending edits.
 
 Launching again with the same workspace and local settings asks the existing window to come forward. On native Wayland, use the compositor's app switcher to bring the window forward. A duplicate `--start-hidden` launch leaves its visibility alone. Different workspaces can run separately.
 
 With a usable tray, Windows keeps the app out of the taskbar even while its window is open. X11 requests the same behavior through the desktop's skip-taskbar hint; window managers may ignore it. If the tray is unavailable or disappears, Windows and X11 restore the taskbar entry. Native Wayland leaves taskbar placement to the compositor.
 
-Linux uses X11 or XWayland for tray hiding and restoration. The app confirms that its own icon is registered before it hides the window. On X11, a tray that appears later becomes usable without restarting the app. An inconclusive check keeps an already-hidden window in place briefly and leaves a visible window accessible. If the icon remains unavailable while hidden, the window returns. On GNOME, that fallback waits for the session to become active again, including when the displays wake at a lock screen.
+Linux uses X11 or XWayland for tray hiding and restoration. The app confirms that its own icon is registered before it hides the window. On X11, a tray that appears later becomes usable without restarting the app. An inconclusive check keeps an already-hidden window in place briefly and leaves a visible window accessible. If the icon remains unavailable while hidden, the window returns. On GNOME, that fallback waits for the session to become active again, including when the displays wake at a lock screen. Use [diagnostic logs](#diagnostic-logs) to trace tray loss.
 
 On X11, cursor theme and size follow the desktop's XSettings. The advertised cursor size already includes the desktop scale and is used directly. Explicit `XCURSOR_THEME` and `XCURSOR_SIZE` overrides take precedence. Restart the app after changing these desktop settings; native Wayland uses its existing cursor backend.
 
@@ -163,18 +161,24 @@ On Linux, built-in global shortcuts use X11.
 
 ## Diagnostic logs
 
-Quit the running instance first, then start the executable with `--log` for lifecycle events or `--debug` for tray and window decisions, native-library warnings, and Rust panic backtraces. From a checkout:
+Quit the running instance first, then start the executable with `--log` for lifecycle events or `--debug` for tray and window decisions, native-library warnings, and Rust panic backtraces. From a checkout, run `cargo run --locked -- --debug`.
 
-```bash
-cargo run --locked -- --debug
-```
+To launch the installed copy from a terminal, use the executable path for your platform:
 
-Add `--start-hidden` to reproduce a tray startup. Logging is opt-in for each process. Starting with either flag while the workspace is already open only logs the launch handoff.
+| Platform | Debug launch |
+| --- | --- |
+| Linux | `"${XDG_DATA_HOME:-$HOME/.local/share}/minimalist-list/bin/minimalist-list" --debug` |
+| macOS | `"$HOME/Applications/Minimalist List.app/Contents/MacOS/minimalist-list" --debug` |
+| Windows (PowerShell) | `& "$env:LOCALAPPDATA\minimalist-list\bin\minimalist-list.exe" --debug` |
+
+Add `--start-hidden` to reproduce a tray startup. Logging is opt-in for each process. Starting with either flag while the workspace is already open logs only the handoff to the existing process.
 
 | Platform | Log directory |
 | --- | --- |
-| Linux | `$XDG_STATE_HOME/minimalist-list/logs/`, or `~/.local/state/minimalist-list/logs/` |
+| Linux | `$XDG_STATE_HOME/minimalist-list/logs/` if `XDG_STATE_HOME` is absolute, otherwise `~/.local/state/minimalist-list/logs/` |
 | macOS | `~/Library/Logs/minimalist-list/` |
-| Windows | `%LOCALAPPDATA%\minimalist-list\logs\` |
+| Windows | `%LOCALAPPDATA%\minimalist-list\logs\`, with `AppData\Local\minimalist-list\logs\` under the home directory as a fallback |
 
-Each file is named `YYYY-MM-DD.log` in UTC. Entries include the process ID so you can distinguish launches and follow a running process across dates. Logs stay outside the shared workspace. The app omits task text and notes. Native diagnostics can include system paths. A forced termination or desktop crash can leave the log without a shutdown entry. On Linux, `journalctl --user _COMM=minimalist-list` can show output captured by the desktop.
+Each file is named `YYYY-MM-DD.log` in UTC. Use the process ID in each entry to follow one launch across dates. For a disappearing window, look for `Window hidden to tray` or `Native event loop exited normally` to distinguish hiding from a normal exit. A forced termination or desktop crash can leave the log without a shutdown entry.
+
+Logs use the per-user directory above. The app omits task text and notes, but native diagnostics can include system paths. On Linux, `journalctl --user _COMM=minimalist-list` can show output captured by the desktop.

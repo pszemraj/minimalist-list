@@ -6,19 +6,19 @@ Select a folder through **Settings -> Workspace -> Choose folder**, or enter a p
 
 **Workspace -> Open workspace folder** opens the active folder in Finder, Explorer, or the system file manager. Selecting a populated `lists` folder opens its parent workspace unless the selected folder is already a workspace of its own.
 
-Paths beginning with `~/` are expanded. Relative paths are resolved from the process working directory and stored as absolute runtime paths. Without a saved selection, the app uses its [platform default](#default-directories).
+Paths beginning with `~/` are expanded. Relative paths are resolved from the process working directory and stored as absolute runtime paths.
 
 The Settings field accepts paths with spaces, including paths surrounded by matching single or double quotes. On macOS and Linux it also accepts shell escapes for spaces and punctuation, as produced by dropping a folder into a terminal, such as `~/Dropbox\ \(Personal\)/minimalist-task-lists`. Folder-picker results, saved paths, and launch overrides preserve surrounding spaces. Workspace paths must be valid UTF-8.
 
 For multiple computers, select the same shared subfolder once on each computer. Each installation remembers its own local path, even when the sync root is different. Dropbox and other file-sync services work with these ordinary files; no provider integration is needed.
 
-From the checkout, use `--data-dir` to select a workspace for one launch:
+Use `--data-dir` to select a workspace for one launch:
 
 ```bash
 cargo run --locked -- --data-dir "$HOME/Sync/minimalist-list"
 ```
 
-`MINIMALIST_LIST_WORKSPACE` provides the same launch-only behavior through the environment:
+Or set `MINIMALIST_LIST_WORKSPACE` for that launch:
 
 ```bash
 MINIMALIST_LIST_WORKSPACE="$HOME/Sync/minimalist-list" cargo run --locked
@@ -83,7 +83,7 @@ A list save writes and flushes a temporary sibling file before replacing the des
 
 On startup and workspace loading, the app removes recognized unlocked temporary files older than a day.
 
-The app checks disk every five seconds and reloads externally changed list files at the next scan. Scans wait for task or child editing, dragging, and task context dialogs to finish. Lists with unsaved changes stay in memory while other lists reload. A sync service controls when a file arrives on another computer.
+The app checks for external changes every five seconds. Reloading waits for inline edits, drags, and ordinary task context editing. If a context save fails or a conflict needs attention, other lists can reload while the affected list and draft stay in memory. If reloading a file fails, the app warns and keeps its last loaded contents if available. A sync service controls when a file arrives on another computer.
 
 ### Duplicate list files
 
@@ -93,17 +93,17 @@ A conflicting copy can contain changes missing from your lists. Choose **Recover
 
 ### Save recovery
 
-Before quitting or switching workspaces, the app saves inline edits, list title changes, open context drafts, and accepted archive/delete actions. Hiding also saves open editors and list names. A failed write retains changes in memory and keeps the window and workspace available. Restore folder access and choose **Retry save**.
+Before quitting or switching workspaces, the app saves inline edits, list title changes, open context drafts, and accepted archive/delete actions. Hiding also saves open editors and list names. A failed write keeps the window open and the changes in memory until you resolve the write. If folder access failed, restore it and choose **Retry save**.
 
-A failed [Quick add](usage.md#quick-add) keeps its typed draft, any pasted batch, and destination, even when Find hides it. **Retry save** saves a failed batch on its own and leaves any separately typed text in the entry. Task context keeps its editor open with the draft. External-edit conflicts offer local-copy recovery. Resolve or cancel the failed edit before quitting or switching workspaces.
+A failed [Quick add](usage.md#quick-add) keeps its typed draft, any pasted batch, and destination, even when Find hides it. **Retry save** saves a failed batch on its own and leaves any separately typed text in the entry. A failed context save keeps its editor open with the draft.
 
-When Quick add is the only local change to a list, it retries once against the latest file. If a conflict still needs attention, **Keep local copy and reload** saves the local contents as a separate **(local copy)** list with new list, task, and child IDs. The copy includes inline edits, editable context, active or suspended Quick add drafts, and an unfinished list-name change for that list. **Discard my change and reload** drops the unsaved changes for that list and adopts the file on disk when available. You can also discard a failed list write when the file on disk is still readable and unchanged. Resolve pending writes before quitting or switching workspaces.
+When Quick add is the only local change to a list, it retries once against the latest file. For a conflict that needs attention, **Keep local copy and reload** saves a separate **(local copy)** list with new list, task, and child IDs. The copy includes inline edits, editable context, active or suspended Quick add drafts, and an unfinished list-name change for that list. **Discard my change and reload** drops unsaved changes for the list and adopts the file on disk when available. You can also discard a failed list write when the file on disk is readable and unchanged.
 
 Moving a task writes the destination before removing the source and attempts to roll back both lists if either write fails; the two list files are not a single atomic transaction.
 
 ## Local backups
 
-Saves, Clear History, and list deletion keep earlier list files in `backups/` beside the [local settings file](#default-directories), outside the workspace. Syncing the workspace does not transfer these local backups between computers.
+Saves, Clear History, and list deletion keep earlier list files in `backups/` beside the [local settings file](#default-directories). On macOS, the default workspace contains `settings.json` and `backups/` alongside `lists/`. If you choose a separate Dropbox workspace, its backups stay with the local settings.
 
 Each workspace has a subfolder named by a 16-digit hexadecimal key derived from its path. **Settings -> Workspace -> Open backups folder** opens the active workspace's subfolder, creating it if needed.
 
@@ -126,7 +126,7 @@ To restore a deleted list, copy its file from `deleted/` back into the workspace
 
 ## JSON format
 
-List files are pretty-printed and hand-editable. `format_version` is currently `1`.
+List files are pretty-printed and hand-editable.
 
 | Object | Fields |
 | --- | --- |

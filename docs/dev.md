@@ -15,7 +15,7 @@ src/app.rs                  Application state, navigation, syncing, and eframe w
 src/app/drafts.rs           Session drafts scoped to workspace, list, and task
 src/app/duplicate_recovery.rs Conflicting-copy recovery banner and action
 src/app/persistence.rs      List saves, Quick add replay, preference writes, and retry status
-src/app/save_conflict.rs    Local copies and reloads after an external edit
+src/app/save_conflict.rs     Local copies and reloads after an external edit
 src/app/keyboard.rs         Keyboard commands and transient focus restoration
 src/app/keyboard_events.rs  Ordered editor input before screen-changing shortcuts
 src/app/keyboard_focus.rs   Focus requests, anchors, sibling repair, and the focus outline
@@ -38,11 +38,12 @@ src/app/theme.rs            Fonts, palettes, and shared rendering helpers
 src/app/window.rs           Tray hiding, restoration, and shutdown
 src/model.rs                Serializable list and task model
 src/storage.rs              Paths, preference merging, and list loading
-src/storage_format.rs       Shared-list format checks and version-independent identities
+src/storage_format.rs      Shared-list format checks and version-independent identities
 src/storage_io.rs           Guarded list saves, atomic replacement, and temporary-file cleanup
 src/storage_backup.rs       Workspace keys, local list snapshots, and recoverable list deletion
 src/storage_conflict_recovery.rs Independent list copies and conflicted-file backups
 src/tray.rs                 Native tray icon and menu actions
+src/tray/linux.rs           StatusNotifier registration, reachability, and session state
 ```
 
 Neighboring `*_tests.rs` files cover storage, interaction, recovery, launch, and layout regressions. Reuse `app::tests::{frame_input, run_app_frame, chord}` for application frames. Use `run_frame` for isolated widgets. Keep clocks, dimensions, DPI, and motion updates in scenario helpers.
@@ -97,17 +98,17 @@ cargo run --locked --features eframe/inspection -- --data-dir target/gui-check/w
 
 Attach the GUI inspector to port 5741. Use a distinct port for each instance and a separate `XDG_CONFIG_HOME` when testing two instances against one workspace. See [startup and system tray](usage.md#startup-and-system-tray) for repeated launches and [default directories](storage.md#default-directories) for settings paths.
 
-The README and usage screenshots are native Linux captures with sample lists, default typography, and 85% background opacity. Use an isolated profile with both global shortcuts disabled. Keep raw captures under `target/`; copy visually checked documentation images into `assets/`. Capture the application directly rather than recreating its controls or adding a platform-specific window frame.
+The README and usage screenshots use sample lists and default appearance settings on Linux. Capture the application directly in the isolated profile above. Keep raw captures under `target/` and copy visually checked documentation images into `assets/`.
 
 ### Running alongside an installed copy
 
-The fresh test profile above disables both global shortcuts (reveal and Quick add) so they cannot capture the installed app's bindings. Disable both in existing test profiles too. For an explicit global-shortcut check, use different chords or quit the regular instance first. Keep environment overrides local to the test launch rather than exporting them into a shell used for ordinary builds or installation.
+Disable both global shortcuts in reused test profiles too. For a global-shortcut check, use different chords or quit the regular instance first. Keep environment overrides local to the test launch.
 
 For macOS automation, reuse one development bundle and identifier, separate from the installed app, and launch each by its full path. Rebuilding or reinstalling does not launch the installed copy or stop an older process. Both windows can have the same title, so verify the executable path and selected test workspace before interacting.
 
 Spotlight can index generated `.app` bundles under the ignored `target/` directory, including copies inside installer fixtures. After testing, archive any bundles needed for reuse and remove their extracted `.app` directories. Restore the same development name, identifier, and path for the next check. A separate settings directory protects task data but does not prevent Spotlight from launching the test copy.
 
-Finish every GUI check, including a user-assisted keyboard check, by quitting the test instance and confirming that its process has exited. With a usable tray, closing only hides the window; it continues to own its shortcuts and instance claim. Disable any test shortcuts, clean up generated bundles, and open the installed copy explicitly when returning to everyday use.
+Finish each GUI check by [exiting the test instance](usage.md#startup-and-system-tray) and confirming its process exited. Clean up generated bundles and open the installed copy explicitly when returning to everyday use.
 
 ### Interaction checks
 
@@ -129,5 +130,5 @@ Check paths, shortcuts, accessibility, and transparency on each native platform;
 | [Save recovery](storage.md#save-recovery) | Test an obstructed list directory, filename collision, and external replacement during editing. Exercise Retry, local-copy recovery, suspended Quick add, and Move failures at both writes. Include unfinished context and list names. Inspect both conflict versions and their independent IDs; check Close, Quit, workspace switching, and restart. Deleting a dirty list clears its retry state; successful retries preserve unrelated warnings. |
 | [Workspace recovery](storage.md#workspace-location) | Make the selected folder unavailable while the default folder contains test tasks. Startup must show recovery without loading those tasks. Restore the folder and wait for a scan; confirm the previous list and sort modes. Try a manual retry with a launch-only override, then choose another folder and check the saved selection. |
 | [Diagnostic logs](usage.md#diagnostic-logs) | Launch with each flag and exercise hidden startup, reveal, repeated launch, and Quit. Check the levels and process IDs in the daily files. On Linux, set `XDG_STATE_HOME` beneath `target/` for these runs. |
-| [Local backups](storage.md#local-backups) | Save a list twice within an hour and again after editing; inspect `snapshots/` in the isolated profile and confirm the workspace gains no backup files. Delete a list, find it in `deleted/`, and copy it back into `lists/`. Use Open backups folder and its keyboard row. |
+| [Local backups](storage.md#local-backups) | Save a list twice within an hour and verify that the second save reuses the recent snapshot. Inspect `snapshots/` beside the isolated settings and confirm backup files stay out of `lists/`. Delete a list, find it in `deleted/`, and copy it back into `lists/`. Use Open backups folder and its keyboard row. |
 | [Local preferences](storage.md#default-directories) | Recover malformed settings, including one malformed value among valid ones, and inspect the preserved backup, then restart. Test file read errors. Check unchanged settings retain their timestamp; adjust a slider through several values, pause, then quit during another adjustment and inspect the final saved value. Save unrelated preferences from two workspaces sharing one isolated profile; both changes must survive. |
