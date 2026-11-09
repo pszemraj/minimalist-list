@@ -292,7 +292,8 @@ impl MinimalistApp {
     /// Applies native requests after widgets have consumed the current editor input.
     pub(super) fn finish_window_actions_after_input(&mut self, ctx: &egui::Context) {
         self.finish_native_shutdown_after_input(ctx);
-        if let Some(was_hidden) = self.global_quick_add_requested.take()
+        if self.keyboard.deferred_events.is_empty()
+            && let Some(was_hidden) = self.global_quick_add_requested.take()
             && !self.quitting
         {
             self.open_global_quick_add(ctx, was_hidden);
@@ -594,7 +595,7 @@ mod tests {
     }
 
     #[test]
-    fn tray_quick_add_leaves_queued_paste_with_the_inline_editor() {
+    fn tray_quick_add_leaves_deferred_input_with_the_inline_editor() {
         use crate::app::{
             keyboard::FocusItem,
             tests::{chord, focus_widget, frame_input, keyboard_frame, run_frame, settle_keyboard},
@@ -619,7 +620,11 @@ mod tests {
         let input = frame_input(
             egui::vec2(430.0, 500.0),
             ctx.input(|input| input.time) + 0.3,
-            vec![egui::Event::Paste("One\nTwo".into())],
+            vec![
+                egui::Event::Paste("One\nTwo".into()),
+                egui::Event::Copy,
+                egui::Event::Text("Three".into()),
+            ],
         );
         run_frame(&ctx, input, |ui| {
             // Native eframe runs logic and then UI with the same input batch.
@@ -631,7 +636,7 @@ mod tests {
         let saved = crate::storage::load_workspace(&app.workspace).unwrap();
         let tasks = &saved.lists[0].data.tasks;
         assert_eq!(tasks.len(), 1);
-        assert_eq!(tasks[0].text, "OriginalOne Two");
+        assert_eq!(tasks[0].text, "OriginalOne TwoThree");
         assert!(app.quick_capture.as_ref().unwrap().text.is_empty());
         assert_eq!(
             ctx.memory(|memory| memory.focused()),
