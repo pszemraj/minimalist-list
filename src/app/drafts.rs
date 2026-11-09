@@ -1,9 +1,6 @@
 //! Session-only drafts scoped to their originating workspace and object.
 
-use super::{
-    MinimalistApp, Screen,
-    overlays::{FindState, QuickCaptureState},
-};
+use super::{MinimalistApp, Screen, overlays::FindState, quick_capture::QuickCaptureState};
 use std::{collections::HashMap, path::PathBuf};
 use uuid::Uuid;
 

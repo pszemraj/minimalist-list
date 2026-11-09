@@ -43,7 +43,7 @@ Press `Ctrl+N` or select the header's `add` action. Quick add defaults to the op
 
 Switching between Quick add and Find preserves their drafts. A nonempty capture keeps its destination until you change it or that list disappears. If the list disappears, choose another to save. An empty draft chooses a destination again when reopened. Use Escape or **Cancel** to discard a draft. Clicking outside leaves it open. See [save recovery](storage.md#save-recovery) if a capture fails.
 
-You can also open Quick add from the [tray](#startup-and-system-tray) or with its [global shortcut](#global-shortcuts). If it reveals a hidden window, completing or canceling the capture returns the window to the tray while the tray is available.
+You can also open Quick add from the [tray](#startup-and-system-tray) or with its [global shortcut](#global-shortcuts). If it reveals a hidden window, completing or canceling the capture returns the window to the tray while the tray is available. Opening Find or explicitly showing the window keeps it visible.
 
 <img src="../assets/quick-add.png" alt="Quick add on Linux with a draft task and Today selected as the destination" width="360">
 

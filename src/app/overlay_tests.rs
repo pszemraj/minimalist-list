@@ -274,25 +274,6 @@ fn archived_context_is_searched_and_children_ignore_parent_context() {
     assert!(hits.is_empty());
 }
 
-#[test]
-fn capture_destination_prefers_context_then_last_successful_valid_list() {
-    let first = stored_list("First");
-    let second = stored_list("Second");
-    let first_id = first.key;
-    let second_id = second.key;
-    let missing = Uuid::new_v4();
-    let lists = vec![first, second];
-
-    assert_eq!(
-        capture_destination(&lists, Some(second_id), Some(first_id), None),
-        Some(first_id)
-    );
-    assert_eq!(
-        capture_destination(&lists, Some(missing), Some(second_id), Some(first_id)),
-        Some(second_id)
-    );
-}
-
 fn overlay_frame(
     ctx: &egui::Context,
     app: &mut MinimalistApp,
@@ -516,50 +497,6 @@ fn quick_add_backdrop_preserves_drafts_until_explicit_cancellation() {
         }
         assert!(app.quick_capture.is_none());
         assert!(app.lists[0].data.tasks.is_empty());
-        std::fs::remove_dir_all(app.workspace).unwrap();
-    }
-}
-
-#[test]
-fn global_capture_remembers_hidden_origin_and_can_finish_without_a_tray() {
-    for (hidden, submit) in [(false, true), (true, true), (true, false)] {
-        let (ctx, mut app) = super::super::tests::test_app();
-        app.window_hidden = hidden;
-        let _ = ctx.run_logic(&Default::default(), |ctx| app.request_global_quick_add(ctx));
-        crate::app::tests::settle_keyboard(&ctx, &mut app);
-        let state = app.quick_capture.as_mut().unwrap();
-        assert_eq!(state.return_to_tray, hidden);
-        state.text = "Captured from another app".into();
-        let events = if submit {
-            enter()
-        } else {
-            crate::app::tests::chord(Key::Escape, egui::Modifiers::NONE)
-        };
-        overlay_frame(&ctx, &mut app, events);
-        assert!(app.quick_capture.is_none());
-        assert!(!app.window_hidden, "no tray is available");
-        assert!(!app.quitting);
-        assert_eq!(app.lists[0].data.tasks.len(), usize::from(submit));
-        std::fs::remove_dir_all(app.workspace).unwrap();
-    }
-}
-
-#[test]
-fn explicit_show_clears_return_to_tray_for_open_and_suspended_capture() {
-    for suspended in [false, true] {
-        let (ctx, mut app) = super::super::tests::test_app();
-        app.open_global_quick_add(&ctx, true);
-        app.quick_capture.as_mut().unwrap().text = "Retained capture".into();
-        if suspended {
-            app.open_find();
-        }
-
-        app.keep_window_after_capture();
-
-        app.open_global_quick_add(&ctx, false);
-        let capture = app.quick_capture.as_ref().unwrap();
-        assert!(!capture.return_to_tray);
-        assert_eq!(capture.text, "Retained capture");
         std::fs::remove_dir_all(app.workspace).unwrap();
     }
 }
@@ -817,7 +754,7 @@ fn deleting_a_capture_destination_requires_an_explicit_replacement_for_its_draft
     );
     assert!(app.lists[0].data.tasks.is_empty());
     app.quick_capture.as_mut().unwrap().selected_list_id = Some(second_id);
-    app.quick_capture.as_mut().unwrap().request_focus = true;
+    app.open_quick_add_here(&ctx);
     overlay_frame(&ctx, &mut app, vec![]);
     overlay_frame(&ctx, &mut app, enter());
     assert!(

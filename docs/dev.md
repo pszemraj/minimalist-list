@@ -21,10 +21,11 @@ src/app/keyboard_events.rs  Ordered editor input before screen-changing shortcut
 src/app/keyboard_focus.rs   Focus requests, anchors, sibling repair, and the focus outline
 src/app/keyboard_levels.rs  Directional list, checklist, History, and form navigation
 src/app/list.rs             Task entry, rows, editing, gestures, and ordering
-src/app/overlays.rs         Quick add, Find, and keyboard reference
+src/app/overlays.rs         Find, keyboard reference, and overlay dispatch
 src/app/overview.rs         List cards and list creation
 src/app/overview_order.rs   Manual tile order and native drag event handling
 src/app/paste.rs            Multi-line paste into task, checklist, and Quick add entry
+src/app/quick_capture.rs    Quick add drafts, window behavior, and submission
 src/app/sorting.rs          Task view sorting and preserved manual storage order
 src/app/context.rs          Task context editor and complete-task clipboard copy
 src/app/desktop.rs          Global shortcut settings and workspace-folder opening

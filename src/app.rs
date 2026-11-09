@@ -14,6 +14,7 @@ mod paste;
 mod persistence;
 #[cfg(test)]
 mod persistence_tests;
+mod quick_capture;
 mod settings;
 mod sorting;
 mod task_details;
@@ -22,7 +23,7 @@ mod theme;
 mod window;
 
 use self::keyboard::KeyboardState;
-use self::overlays::{FindState, QuickCaptureState, ShortcutsState, Spotlight};
+use self::overlays::{FindState, ShortcutsState, Spotlight};
 use self::theme::Palette;
 use crate::model::Accent;
 use crate::storage::{self, Settings, StoredList, WorkspaceFingerprint};
@@ -124,7 +125,7 @@ pub struct MinimalistApp {
     newest_task: Option<(Uuid, Instant)>,
     clear_animation: Option<(Uuid, Instant)>,
     delete_animation: Option<(Uuid, Uuid, Instant)>,
-    quick_capture: Option<QuickCaptureState>,
+    quick_capture: Option<quick_capture::QuickCaptureState>,
     find: Option<FindState>,
     shortcuts: Option<ShortcutsState>,
     spotlight: Option<Spotlight>,
@@ -152,7 +153,7 @@ pub struct MinimalistApp {
     persistence: persistence::PersistenceState,
     drafts: drafts::Drafts,
     details: task_details::TaskDetailsState,
-    capture_draft: Option<QuickCaptureState>,
+    capture_draft: Option<quick_capture::QuickCaptureState>,
     find_draft: Option<FindState>,
 }
 
