@@ -558,7 +558,6 @@ impl MinimalistApp {
     /// Panics if the caller supplies an invalid loaded-list index.
     fn finish_undo(&mut self, list: Uuid, index: usize, focus: FocusItem) {
         self.save_list_index(index);
-        self.apply_task_sorts();
         if matches!(self.screen, Screen::List(active) if active == list) {
             self.keyboard.pending = Some(focus.id());
         }
