@@ -32,10 +32,15 @@ fn full_copy_includes_parent_context_and_each_child_completion() {
         .map(Subtask::new)
         .to_vec();
     task.subtasks[1].completed = true;
+    let open_text = task.full_text();
     assert_eq!(
-        task.full_text(),
+        open_text,
         "[ ] Parent title\n\nSupporting details\nhttps://example.com/reference\n\n- [ ] First child\n- [x] Second child\nwith detail"
     );
+    assert_eq!(task.status(), TaskStatus::InProgress);
+    task.toggle_started();
+    assert_eq!(task.status(), TaskStatus::NotStarted);
+    assert_eq!(task.full_text(), open_text);
     task.toggle();
     assert!(task.full_text().starts_with("[x] Parent title"));
 }

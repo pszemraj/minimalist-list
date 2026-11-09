@@ -9,6 +9,7 @@ fn wrap_preview_waits_two_seconds_and_includes_saved_context() {
     for mode in [TitleOverflow::Wrap, TitleOverflow::Scroll] {
         let (ctx, mut app) = test_app();
         let mut task = Task::new("Task title for metadata preview");
+        task.toggle_started();
         task.context = "Saved notes for the delayed preview".into();
         let id = task.id;
         app.lists[0].data.tasks.push(task);
@@ -27,7 +28,7 @@ fn wrap_preview_waits_two_seconds_and_includes_saved_context() {
         assert!(!early.shapes.iter().any(|shape| matches!(&shape.shape, egui::epaint::Shape::Text(text) if text.galley.text().contains("Created"))));
         app_frame(&ctx, &mut app, vec![], 3.3);
         let late = app_frame(&ctx, &mut app, vec![], 3.4);
-        let metadata = late.shapes.iter().any(|shape| matches!(&shape.shape, egui::epaint::Shape::Text(text) if text.galley.text().contains("Created")));
+        let metadata = late.shapes.iter().any(|shape| matches!(&shape.shape, egui::epaint::Shape::Text(text) if text.galley.text().contains("In progress · 0/0 subtasks")));
         assert_eq!(metadata, mode == TitleOverflow::Wrap);
         let notes = late.shapes.iter().any(|shape| matches!(&shape.shape, egui::epaint::Shape::Text(text) if text.galley.text().contains("Saved notes for the delayed preview")));
         assert_eq!(notes, mode == TitleOverflow::Wrap);

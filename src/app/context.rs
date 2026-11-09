@@ -1,7 +1,7 @@
 //! Hidden task context, complete-task clipboard actions, and wrapped-row previews.
 
-use super::{MinimalistApp, keyboard::FocusItem, theme::Palette};
-use crate::model::{Task, TitleOverflow};
+use super::{MinimalistApp, keyboard::FocusItem, list::RowAction, theme::Palette};
+use crate::model::{Task, TaskStatus, TitleOverflow};
 use eframe::egui::{self, Id, Sense, Stroke, Vec2};
 use uuid::Uuid;
 
@@ -337,9 +337,11 @@ impl MinimalistApp {
         response.context_menu(|ui| {
             self.details.menu_task = Some((list, task, archived));
             self.details.menu_popup = Some(egui::Popup::default_response_id(response));
-            let has_context = self
-                .task_snapshot(list, task, archived)
+            let snapshot = self.task_snapshot(list, task, archived);
+            let has_context = snapshot
+                .as_ref()
                 .is_some_and(|task| !task.context.is_empty());
+            let in_progress = snapshot.is_some_and(|task| task.status() == TaskStatus::InProgress);
             let label = if archived {
                 "View context…"
             } else if has_context {
@@ -353,6 +355,15 @@ impl MinimalistApp {
             }
             if ui.button("Copy complete task").clicked() {
                 self.copy_task(ui.ctx(), list, task, archived);
+                ui.close();
+            }
+            let status_label = if in_progress {
+                "Mark not started"
+            } else {
+                "Mark in progress"
+            };
+            if !archived && ui.button(status_label).clicked() {
+                self.apply_row_action(RowAction::ToggleStarted(list, task));
                 ui.close();
             }
             if !archived && ui.button("Move to list…").clicked() {
@@ -554,10 +565,10 @@ impl MinimalistApp {
                             ui.label(self.rich(
                                 format!(
                                     "{} · {done}/{total} subtasks",
-                                    if task.completed {
-                                        "Completed"
-                                    } else {
-                                        "Active"
+                                    match task.status() {
+                                        TaskStatus::NotStarted => "Not started",
+                                        TaskStatus::InProgress => "In progress",
+                                        TaskStatus::Done => "Done",
                                     }
                                 ),
                                 12.0,

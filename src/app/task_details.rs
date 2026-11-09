@@ -5,7 +5,7 @@ use super::{
     context::relative_age,
     keyboard::{FocusItem, mark_own_focus_frame},
     text_input_shortcuts,
-    theme::Palette,
+    theme::{CompletionState, Palette},
 };
 use crate::model::{ArchivedTask, Subtask, Task, now_unix_seconds};
 use eframe::egui::{
@@ -210,7 +210,7 @@ impl MinimalistApp {
                 let response = self.completion_control(
                     ui,
                     response,
-                    subtask.completed,
+                    CompletionState::Subtask(subtask.completed),
                     f32::from(subtask.completed),
                     palette,
                     &subtask.text,

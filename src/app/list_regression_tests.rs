@@ -5,7 +5,7 @@ use crate::app::{
     Screen,
     tests::{chord, test_app},
 };
-use crate::model::{Accent, Task};
+use crate::model::{Accent, Task, TaskSort, TaskStatus};
 use crate::storage;
 use egui::{Event, Key, Modifiers};
 
@@ -48,6 +48,168 @@ fn click(ctx: &egui::Context, app: &mut MinimalistApp, pos: Pos2, split: bool) {
         );
     }
     idle(ctx, app);
+}
+
+#[test]
+fn completion_uses_the_click_modifiers_and_keeps_shift_space_on_the_row() {
+    let (ctx, mut app) = test_app();
+    let list = app.lists[0].key;
+    let task = Task::new("Task");
+    let row = FocusItem::Task(list, task.id).id();
+    app.lists[0].data.tasks.push(task);
+    idle(&ctx, &mut app);
+    let rect = ctx.read_response(row).unwrap().rect;
+    let pos = Pos2::new(rect.left() + 22.0, rect.center().y);
+    frame(
+        &ctx,
+        &mut app,
+        std::iter::once(Event::PointerMoved(pos))
+            .chain(
+                [true, false]
+                    .into_iter()
+                    .map(|pressed| Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: Modifiers::SHIFT,
+                    }),
+            )
+            .chain([Event::ModifiersChanged(Modifiers::NONE)])
+            .collect(),
+    );
+    let status = |app: &MinimalistApp| {
+        storage::load_workspace(&app.workspace).unwrap().lists[0]
+            .data
+            .tasks[0]
+            .status()
+    };
+    assert_eq!(status(&app), TaskStatus::InProgress);
+    app.focus_now(&ctx, row);
+    idle(&ctx, &mut app);
+    key(&ctx, &mut app, Key::Tab, Modifiers::NONE);
+    idle(&ctx, &mut app);
+    assert_eq!(
+        ctx.read_response(ctx.memory(|m| m.focused()).unwrap())
+            .unwrap()
+            .rect
+            .center(),
+        pos
+    );
+    key(&ctx, &mut app, Key::Space, Modifiers::SHIFT);
+    assert_eq!(status(&app), TaskStatus::InProgress);
+    key(&ctx, &mut app, Key::Enter, Modifiers::SHIFT);
+    assert_eq!(status(&app), TaskStatus::Done);
+    key(&ctx, &mut app, Key::Space, Modifiers::NONE);
+    assert_eq!(status(&app), TaskStatus::InProgress);
+    app.focus_now(&ctx, row);
+    key(&ctx, &mut app, Key::Space, Modifiers::SHIFT);
+    assert_eq!(status(&app), TaskStatus::NotStarted);
+    std::fs::remove_dir_all(&app.workspace).unwrap();
+}
+
+#[test]
+fn task_circles_expose_their_status_and_shift_click_action_to_accessibility() {
+    let (ctx, mut app) = test_app();
+    ctx.enable_accesskit();
+    let mut tasks = ["Open", "Doing", "Done"].map(Task::new);
+    tasks[1].toggle_started();
+    tasks[2].toggle();
+    app.lists[0].data.tasks = tasks.into();
+    let input = crate::app::tests::frame_input(Vec2::new(520.0, 600.0), 1.0, Vec::new());
+    let output = crate::app::tests::run_app_frame(&ctx, &mut app, input);
+    let tree = output.platform_output.accesskit_update.unwrap();
+    for label in [
+        "Complete: Open (not started). Shift+click to mark in progress",
+        "Complete: Doing (in progress). Shift+click to mark not started",
+        "Reopen: Done (done). Shift+click to reopen in progress",
+    ] {
+        assert!(
+            tree.nodes.iter().any(|(_, node)| {
+                node.role() == egui::accesskit::Role::CheckBox && node.label() == Some(label)
+            }),
+            "missing checkbox {label}"
+        );
+    }
+    std::fs::remove_dir_all(&app.workspace).unwrap();
+}
+
+#[test]
+fn status_regrouping_scrolls_the_focused_row_and_circle_into_view() {
+    let (ctx, mut app) = test_app();
+    let list = app.lists[0].key;
+    app.lists[0].data.tasks = (0..40).map(|i| Task::new(format!("Task {i}"))).collect();
+    let task = app.lists[0].data.tasks[39].id;
+    let row = FocusItem::Task(list, task).id();
+    app.save_list_index(0);
+    app.sort_tasks(list, TaskSort::ByStatus);
+    idle(&ctx, &mut app);
+    key(&ctx, &mut app, Key::ArrowDown, Modifiers::NONE);
+    key(&ctx, &mut app, Key::End, Modifiers::NONE);
+    idle(&ctx, &mut app);
+    assert!(ctx.read_response(row).unwrap().interact_rect.is_positive());
+    key(&ctx, &mut app, Key::Space, Modifiers::SHIFT);
+    idle(&ctx, &mut app);
+    assert_eq!(app.lists[0].data.tasks[0].id, task);
+    assert_eq!(ctx.memory(|memory| memory.focused()), Some(row));
+    assert!(ctx.read_response(row).unwrap().interact_rect.is_positive());
+
+    key(&ctx, &mut app, Key::Tab, Modifiers::NONE);
+    idle(&ctx, &mut app);
+    let circle = ctx.memory(|memory| memory.focused()).unwrap();
+    assert_ne!(circle, row);
+    for expected in [TaskStatus::Done, TaskStatus::InProgress] {
+        key(&ctx, &mut app, Key::Space, Modifiers::NONE);
+        idle(&ctx, &mut app);
+        let saved = storage::load_workspace(&app.workspace).unwrap();
+        assert_eq!(saved.lists[0].data.tasks[39].status(), expected);
+        assert_eq!(ctx.memory(|memory| memory.focused()), Some(circle));
+        assert!(
+            ctx.read_response(circle)
+                .unwrap()
+                .interact_rect
+                .is_positive()
+        );
+    }
+    std::fs::remove_dir_all(&app.workspace).unwrap();
+}
+
+#[test]
+fn shift_space_during_a_drag_changes_status_without_reordering_the_file() {
+    let (ctx, mut app) = test_app();
+    let list = app.lists[0].key;
+    app.lists[0].data.tasks = ["First", "Second", "Third"].map(Task::new).to_vec();
+    app.save_list_index(0);
+    app.sort_tasks(list, TaskSort::ByStatus);
+    idle(&ctx, &mut app);
+    let ids: Vec<_> = app.lists[0].data.tasks.iter().map(|task| task.id).collect();
+    let row = |i: usize| {
+        ctx.read_response(FocusItem::Task(list, ids[i]).id())
+            .unwrap()
+            .rect
+    };
+    let start = row(0).left_center() + Vec2::new(40.0, 0.0);
+    let end = Pos2::new(start.x, row(2).center().y);
+    let pointer = |pos, pressed| Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::SHIFT,
+    };
+    frame(
+        &ctx,
+        &mut app,
+        vec![Event::PointerMoved(start), pointer(start, true)],
+    );
+    frame(&ctx, &mut app, vec![Event::PointerMoved(end)]);
+    assert_eq!(app.drag.as_ref().map(|drag| drag.target), Some(2));
+    key(&ctx, &mut app, Key::Space, Modifiers::SHIFT);
+    assert!(app.drag.is_none());
+    frame(&ctx, &mut app, vec![pointer(end, false)]);
+    let saved = storage::load_workspace(&app.workspace).unwrap();
+    let tasks = &saved.lists[0].data.tasks;
+    assert_eq!(tasks.iter().map(|task| task.id).collect::<Vec<_>>(), ids);
+    assert_eq!(tasks[0].status(), TaskStatus::InProgress);
+    std::fs::remove_dir_all(&app.workspace).unwrap();
 }
 
 #[test]
@@ -370,6 +532,7 @@ fn navigation_and_archiving_during_a_real_drag_leave_saved_tasks_usable() {
                 Key::Backspace,
                 Modifiers::COMMAND | Modifiers::SHIFT,
             );
+            assert!(app.drag.is_none());
             app.clear_animation.as_mut().unwrap().1 =
                 Instant::now() - std::time::Duration::from_secs(1);
         } else {

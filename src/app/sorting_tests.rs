@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::{
-    app::{keyboard::FocusItem, tests::test_app},
+    app::{keyboard::FocusItem, list::RowAction, tests::test_app},
     model::Subtask,
     storage,
 };
@@ -50,7 +50,7 @@ fn every_view_preserves_manual_files_and_restores_complete_tasks() {
         (TaskSort::Newest, [2, 0, 3, 1]),
         (TaskSort::Oldest, [1, 3, 0, 2]),
         (TaskSort::Title, [1, 3, 0, 2]),
-        (TaskSort::IncompleteFirst, [1, 2, 0, 3]),
+        (TaskSort::ByStatus, [1, 2, 0, 3]),
     ] {
         let (_, mut app, list, manual) = fixture();
         let bytes = std::fs::read(&app.lists[0].path).unwrap();
@@ -106,7 +106,7 @@ fn edited_titles_and_completion_resort_the_view_without_rewriting_manual_order()
     app.save_list_index(0);
     assert_eq!(ids(&app).last(), Some(&manual[1]));
     assert_eq!(disk_ids(&app), manual);
-    app.sort_tasks(list, TaskSort::IncompleteFirst);
+    app.sort_tasks(list, TaskSort::ByStatus);
     let index = app.lists[0]
         .data
         .tasks
@@ -365,5 +365,87 @@ fn removing_a_list_preference_keeps_other_workspaces_and_lists() {
     assert_eq!(app.settings.task_sort[&other_key], TaskSort::Oldest);
     assert_eq!(app.settings.list_order[&workspace], vec![list]);
     assert_eq!(app.settings.list_order[&elsewhere], vec![removed]);
+    std::fs::remove_dir_all(app.workspace).unwrap();
+}
+
+#[test]
+fn by_status_groups_started_tasks_and_reorders_only_within_a_group() {
+    let (_, mut app, list, manual) = fixture();
+    app.sort_tasks(list, TaskSort::ByStatus);
+    app.apply_row_action(RowAction::ToggleStarted(list, manual[2]));
+    assert_eq!(ids(&app), [manual[1], manual[2], manual[0], manual[3]]);
+
+    app.apply_row_action(RowAction::Reorder(list, manual[2], 0));
+    assert_eq!(ids(&app), [manual[2], manual[1], manual[0], manual[3]]);
+    assert_eq!(disk_ids(&app), [manual[0], manual[2], manual[1], manual[3]]);
+
+    // Targets outside the group stop at its edge; a done task cannot join it.
+    app.apply_row_action(RowAction::Reorder(list, manual[2], 3));
+    assert_eq!(ids(&app), [manual[1], manual[2], manual[0], manual[3]]);
+    assert_eq!(disk_ids(&app), manual);
+    app.apply_row_action(RowAction::Reorder(list, manual[0], 0));
+    assert_eq!(ids(&app), [manual[1], manual[2], manual[0], manual[3]]);
+
+    let saved: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&app.lists[0].path).unwrap()).unwrap();
+    let started: Vec<_> = saved["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|task| task.get("started").cloned())
+        .collect();
+    assert_eq!(started, [None, None, Some(true.into()), None]);
+    std::fs::remove_dir_all(app.workspace).unwrap();
+}
+
+#[test]
+fn other_views_still_refuse_reordering() {
+    let (_, mut app, list, manual) = fixture();
+    app.sort_tasks(list, TaskSort::Title);
+    let sorted = ids(&app);
+    app.apply_row_action(RowAction::Reorder(list, sorted[3], 0));
+    assert_eq!(ids(&app), sorted);
+    assert_eq!(disk_ids(&app), manual);
+    std::fs::remove_dir_all(app.workspace).unwrap();
+}
+
+#[test]
+fn by_status_moves_only_as_far_as_the_crossed_neighbor_in_manual_order() {
+    let (_, mut app) = test_app();
+    let list = app.lists[0].key;
+    app.lists[0].data.tasks = (0..5)
+        .map(|i| {
+            let mut task = Task::new(format!("Task {i}"));
+            if i % 2 == 0 {
+                task.toggle_started();
+            }
+            task
+        })
+        .collect();
+    app.save_list_index(0);
+    let manual = disk_ids(&app);
+    app.sort_tasks(list, TaskSort::ByStatus);
+
+    app.reorder_task(list, manual[0], 1);
+    assert_eq!(
+        ids(&app),
+        [manual[2], manual[0], manual[4], manual[1], manual[3]]
+    );
+    assert_eq!(
+        disk_ids(&app),
+        [manual[1], manual[2], manual[0], manual[3], manual[4]]
+    );
+    let bytes = std::fs::read(&app.lists[0].path).unwrap();
+    app.reorder_task(list, manual[2], 0);
+    assert_eq!(std::fs::read(&app.lists[0].path).unwrap(), bytes);
+
+    // An unavailable Manual order cannot be reconstructed from grouped rows.
+    app.manual_task_order.remove(&list);
+    app.reorder_task(list, manual[0], 2);
+    assert_eq!(
+        ids(&app),
+        [manual[2], manual[0], manual[4], manual[1], manual[3]]
+    );
+    assert_eq!(std::fs::read(&app.lists[0].path).unwrap(), bytes);
     std::fs::remove_dir_all(app.workspace).unwrap();
 }

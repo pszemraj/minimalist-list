@@ -87,14 +87,13 @@ impl MinimalistApp {
     /// Panics if an internally resolved list index is invalid.
     pub(super) fn toggle_subtask(&mut self, list: Uuid, task: Uuid, child: Uuid) {
         if let Some(index) = self.list_index(list)
-            && let Some(subtask) = self.lists[index]
+            && self.lists[index]
                 .data
                 .tasks
                 .iter_mut()
                 .find(|item| item.id == task)
-                .and_then(|parent| parent.subtasks.iter_mut().find(|item| item.id == child))
+                .is_some_and(|parent| parent.toggle_subtask(child))
         {
-            subtask.completed = !subtask.completed;
             self.save_list_index(index);
         }
     }
@@ -199,9 +198,8 @@ impl MinimalistApp {
                 .tasks
                 .iter_mut()
                 .find(|item| item.id == task)
-            && let Some(position) = parent.subtasks.iter().position(|item| item.id == child)
+            && let Some((position, subtask)) = parent.remove_subtask(child)
         {
-            let subtask = parent.subtasks.remove(position);
             self.details.undo = Some(UndoItem::Subtask {
                 list,
                 task,
@@ -222,6 +220,7 @@ impl MinimalistApp {
                 .iter()
                 .any(|item| item.key == list && item.data.completed_count() > 0)
         {
+            self.drag = None;
             self.revealed = None;
             self.clear_animation = Some((list, Instant::now()));
         }
@@ -806,3 +805,7 @@ fn clipped(text: &str, limit: usize) -> String {
 #[cfg(test)]
 #[path = "task_operations_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "task_status_tests.rs"]
+mod status_tests;

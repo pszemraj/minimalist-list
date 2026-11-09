@@ -50,7 +50,7 @@ fn task_and_child_undo_restore_identity_content_completion_and_position() {
     middle.toggle();
     middle.subtasks = ["First", "Middle", "Last"].map(Subtask::new).to_vec();
     middle.subtasks[1].completed = true;
-    let original = serde_json::to_value(&middle).unwrap();
+    let mut original = serde_json::to_value(&middle).unwrap();
     let id = middle.id;
     let child = middle.subtasks[1].id;
     app.lists[0].data.tasks = vec![Task::new("Before"), middle, Task::new("After")];
@@ -64,6 +64,8 @@ fn task_and_child_undo_restore_identity_content_completion_and_position() {
     app.delete_subtask(list, id, child);
     assert_eq!(saved(&app, 0).tasks[1].subtasks.len(), 2);
     app.undo_last();
+    // Deleting the last checked child records the inferred start.
+    original["started"] = true.into();
     assert_eq!(
         serde_json::to_value(&saved(&app, 0).tasks[1]).unwrap(),
         original
@@ -647,7 +649,8 @@ fn child_undo_after_parent_archival_restores_content_without_restoring_parent() 
     task.toggle();
     task.subtasks = ["Before", "Deleted", "After"].map(Subtask::new).to_vec();
     task.subtasks[1].completed = true;
-    let original = serde_json::to_value(&task).unwrap();
+    let mut original = serde_json::to_value(&task).unwrap();
+    original["started"] = true.into();
     let task_id = task.id;
     let child = task.subtasks[1].id;
     app.lists[0].data.tasks.push(task);

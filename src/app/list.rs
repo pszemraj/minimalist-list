@@ -4,10 +4,10 @@ use super::{
     DragState, INSERT_ANIMATION_SECONDS, MinimalistApp, SWIPE_ACTIONS, SWIPE_COMPLETE,
     keyboard::{FocusItem, mark_own_focus_frame, take_key},
     paste::new_tasks,
+    sorting::reorder_range,
     text_input_shortcuts,
-    theme::Palette,
+    theme::{CompletionState, Palette},
 };
-use crate::model::TaskSort;
 use eframe::egui;
 use egui::{
     Align, Align2, Button, Color32, CornerRadius, CursorIcon, Frame, Id, Margin, Pos2, Rect,
@@ -58,7 +58,8 @@ impl MinimalistApp {
             self.go_to_overview();
             return;
         };
-        let manual_sort = self.task_sort_mode(list_id) == TaskSort::Manual;
+        let sort = self.task_sort_mode(list_id);
+        let reorderable = sort.allows_reorder();
         let title = self.lists[index].data.title.clone();
         self.header(ui, palette, &title, Some(list_id));
         ui.add_space(8.0);
@@ -240,11 +241,18 @@ impl MinimalistApp {
                 }
                 // The fixed entry lives outside this scroller. Restoring its
                 // focus must not move the list's remembered scroll position.
-                if ui.ctx().memory(|memory| memory.focused()) != Some(create_response.id) {
+                let focused = ui.ctx().memory(|memory| memory.focused());
+                if let Some(id) = self.keyboard.scroll_after_sort.take()
+                    && focused == Some(id)
+                    && let Some(response) = ui.ctx().read_response(id)
+                {
+                    response.scroll_to_me(None);
+                }
+                if focused != Some(create_response.id) {
                     self.keyboard_focus_ui(ui, palette);
                 }
                 if let Some(drag) = self.drag.as_ref()
-                    && manual_sort
+                    && reorderable
                     && drag.delta.y.abs() >= drag.delta.x.abs() * 1.25
                     && let Some(pointer) = ui.input(|input| {
                         input
@@ -277,11 +285,13 @@ impl MinimalistApp {
             });
 
         if let Some(drag) = &mut self.drag {
-            drag.target = if manual_sort {
-                reorder_target(&row_centers, drag.source_center + drag.delta.y)
-            } else {
-                drag.source
-            };
+            drag.target = reorder_range(sort, &self.lists[index].data.tasks, drag.source).map_or(
+                drag.source,
+                |range| {
+                    reorder_target(&row_centers, drag.source_center + drag.delta.y)
+                        .clamp(*range.start(), *range.end())
+                },
+            );
             drag.height = row_heights[drag.source];
         }
         // A pointer click can blur one editor and activate another row in the
@@ -362,6 +372,11 @@ impl MinimalistApp {
         let response = parent_ui.interact(rect, FocusItem::Task(list_id, task_id).id(), sense);
         let needs_contents = parent_ui.is_rect_visible(rect)
             || self.drag.is_some()
+            || self.keyboard.anchor.is_some_and(|(id, item)| {
+                item == FocusItem::Task(list_id, task_id)
+                    && id != response.id
+                    && parent_ui.ctx().memory(|memory| memory.has_focus(id))
+            })
             || self.editing == Some((list_id, task_id))
             || self.subtasks_for == Some((list_id, task_id))
             || !task.subtasks.is_empty()
@@ -374,7 +389,7 @@ impl MinimalistApp {
         }
         let task = task.clone();
         let task = &task;
-        let manual_sort = self.task_sort_mode(list_id) == TaskSort::Manual;
+        let reorderable = self.task_sort_mode(list_id).allows_reorder();
         let entry_progress = self.task_entry_progress(task.id);
         response.widget_info(|| {
             egui::WidgetInfo::labeled(
@@ -458,7 +473,7 @@ impl MinimalistApp {
         } else {
             animated_x
         };
-        let offset_y = if drag_active && !horizontal && manual_sort {
+        let offset_y = if drag_active && !horizontal && reorderable {
             remembered_drag.as_ref().map_or(drag_delta.y, |drag| {
                 drag.source_center + drag_delta.y - rect.center().y
             })
@@ -468,7 +483,7 @@ impl MinimalistApp {
         let target_reorder_shift = self
             .drag
             .as_ref()
-            .filter(|drag| manual_sort && drag.list_id == list_id && drag.task_id != task.id)
+            .filter(|drag| reorderable && drag.list_id == list_id && drag.task_id != task.id)
             .map_or(0.0, |drag| {
                 if drag.source < drag.target
                     && task_index > drag.source
@@ -609,14 +624,37 @@ impl MinimalistApp {
             let completion = self.completion_control(
                 ui,
                 completion,
-                task.completed,
+                CompletionState::Task(task.status()),
                 completion_progress,
                 paint_palette,
                 &task.text,
             );
             self.track_focus(&completion, FocusItem::Task(list_id, task.id));
-            if completion.clicked() {
-                return Some(RowAction::Toggle(list_id, task.id));
+            let pointer_click = completion.clicked_by(egui::PointerButton::Primary);
+            // egui also activates a focused button for Shift+Space. That chord
+            // belongs to the task row, while Shift+Enter keeps its usual action.
+            let row_shortcut = completion.has_focus()
+                && take_key(ui.ctx(), egui::Key::Space, egui::Modifiers::SHIFT);
+            if pointer_click || (completion.clicked() && !row_shortcut) {
+                let shift_click = pointer_click
+                    && ui.input(|input| {
+                        input.events.iter().rev().find_map(|event| match event {
+                            egui::Event::PointerButton {
+                                pos,
+                                button: egui::PointerButton::Primary,
+                                pressed: false,
+                                modifiers,
+                            } if Some(*pos) == completion.interact_pointer_pos() => {
+                                Some(modifiers.shift)
+                            }
+                            _ => None,
+                        }) == Some(true)
+                    });
+                return Some(if shift_click {
+                    RowAction::ToggleStarted(list_id, task.id)
+                } else {
+                    RowAction::Toggle(list_id, task.id)
+                });
             }
         }
 
@@ -820,6 +858,18 @@ impl MinimalistApp {
                     self.save_list_index(index);
                 }
             }
+            RowAction::ToggleStarted(list_id, task_id) => {
+                if let Some(index) = self.list_index(list_id)
+                    && let Some(task) = self.lists[index]
+                        .data
+                        .tasks
+                        .iter_mut()
+                        .find(|task| task.id == task_id)
+                {
+                    task.toggle_started();
+                    self.save_list_index(index);
+                }
+            }
             RowAction::Delete(list_id, task_id) => self.begin_delete_task(list_id, task_id),
             RowAction::BeginEdit(list_id, task_id, text) => {
                 if self.editing == Some((list_id, task_id)) {
@@ -836,20 +886,7 @@ impl MinimalistApp {
                 self.commit_task_edit(list_id, task_id, &text);
             }
             RowAction::Reorder(list_id, task_id, target) => {
-                if self.task_sort_mode(list_id) != TaskSort::Manual {
-                    return;
-                }
-                if let Some(index) = self.list_index(list_id) {
-                    let tasks = &mut self.lists[index].data.tasks;
-                    if let Some(source) = tasks.iter().position(|task| task.id == task_id) {
-                        let target = target.min(tasks.len() - 1);
-                        if source != target {
-                            let task = tasks.remove(source);
-                            tasks.insert(target, task);
-                            self.save_list_index(index);
-                        }
-                    }
-                }
+                self.reorder_task(list_id, task_id, target);
             }
             RowAction::Subtasks(list_id, task_id) => {
                 self.toggle_task_subtasks(list_id, task_id);
@@ -914,6 +951,7 @@ impl MinimalistApp {
 pub(super) enum RowAction {
     FinishDrag,
     Toggle(Uuid, Uuid),
+    ToggleStarted(Uuid, Uuid),
     Delete(Uuid, Uuid),
     BeginEdit(Uuid, Uuid, String),
     CommitEdit(Uuid, Uuid, String),

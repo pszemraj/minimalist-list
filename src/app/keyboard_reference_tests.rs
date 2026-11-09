@@ -27,7 +27,7 @@ fn shortcut_reference_displays_configured_and_disabled_global_shortcuts() {
                 *action.configured_mut(&mut app.settings) = configured.into();
                 // The Quick add row follows Show window and can start below a narrow viewport.
                 let scrolls = if action == GlobalAction::QuickAdd {
-                    3
+                    2
                 } else {
                     0
                 };
