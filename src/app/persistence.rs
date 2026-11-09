@@ -365,13 +365,18 @@ impl MinimalistApp {
             || !self.persistence.pending_filenames.is_empty()
             || self.persistence.settings_dirty;
         let failed_workspace = self.persistence.workspace_failure.clone();
-        let conflict = self
+        let mut dirty_lists = self
             .lists
             .iter()
-            .find(|list| {
-                self.persistence.dirty_lists.contains(&list.key) && self.has_save_conflict(list.key)
-            })
+            .filter(|list| self.persistence.dirty_lists.contains(&list.key));
+        let pending_list = dirty_lists
+            .clone()
+            .find(|list| self.has_save_conflict(list.key))
+            .or_else(|| dirty_lists.next())
             .map(|list| (list.key, list.data.title.clone()));
+        let conflicted = pending_list
+            .as_ref()
+            .is_some_and(|(id, _)| self.has_save_conflict(*id));
         let notice = self
             .persistence
             .notice
@@ -394,12 +399,11 @@ impl MinimalistApp {
                 self.status
                     .as_ref()
                     .filter(|status| {
-                        conflict.is_none()
-                            || Some(*status) != self.persistence.last_retry_error.as_ref()
+                        !conflicted || Some(*status) != self.persistence.last_retry_error.as_ref()
                     })
                     .cloned()
             })
-            .or_else(|| (dirty && conflict.is_none()).then(|| "Changes are unsaved.".into()));
+            .or_else(|| (dirty && !conflicted).then(|| "Changes are unsaved.".into()));
         Frame::NONE
             .fill(if success_only {
                 palette.surface
@@ -409,9 +413,11 @@ impl MinimalistApp {
             .corner_radius(CornerRadius::same(10))
             .inner_margin(Margin::same(8))
             .show(ui, |ui| {
-                if let Some((_, title)) = &conflict {
+                if let Some((_, title)) = &pending_list {
                     ui.add(egui::Label::new(self.rich(title, 13.0, palette.text)).truncate())
                         .on_hover_text(title);
+                }
+                if conflicted {
                     ui.add(
                         egui::Label::new(self.rich(
                             "This list changed on disk or could not be read. Your changes are unsaved.",
@@ -447,8 +453,8 @@ impl MinimalistApp {
                         if retryable && ui.button("Retry save").clicked() {
                             self.retry_dirty_lists();
                         }
-                        if let Some((id, _)) = conflict {
-                            if ui.button("Keep local copy and reload").clicked() {
+                        if let Some((id, _)) = pending_list {
+                            if conflicted && ui.button("Keep local copy and reload").clicked() {
                                 self.keep_local_copy_and_reload(id);
                             }
                             if ui.button("Discard my change and reload").clicked() {

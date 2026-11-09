@@ -190,9 +190,9 @@ impl MinimalistApp {
     /// Discards the rejected edit and displays the current on-disk version, if present.
     ///
     /// # Returns
-    /// Whether a retained conflict was discarded.
+    /// Whether pending list changes were discarded.
     pub(in crate::app) fn discard_local_change_and_reload(&mut self, list: Uuid) -> bool {
-        if !self.has_save_conflict(list) {
+        if !self.has_save_conflict(list) && !self.persistence.dirty_lists.contains(&list) {
             return false;
         }
         let original = match storage::load_existing_workspace(&self.workspace) {
@@ -209,7 +209,7 @@ impl MinimalistApp {
         };
         self.finish_conflict_reload(list, original);
         self.acknowledge(message.into());
-        log::info!("Save conflict resolved by discarding the rejected edit");
+        log::info!("Unsaved list changes discarded");
         true
     }
 

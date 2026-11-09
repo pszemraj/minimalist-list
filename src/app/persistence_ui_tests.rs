@@ -141,6 +141,44 @@ fn unresolved_list_keeps_local_edits_while_other_lists_reload_and_can_be_discard
 }
 
 #[test]
+fn a_rejected_write_can_be_discarded_while_the_disk_copy_is_unchanged() {
+    use crate::app::tests::label_center;
+
+    let (ctx, mut app) = test_app();
+    let list = app.lists[0].key;
+    let path = app.lists[0].path.clone();
+    let disk = fs::read(&path).unwrap();
+    // A failed atomic write can leave the loaded bytes readable and unchanged.
+    app.lists[0].data.tasks.push(Task::new("Rejected write"));
+    app.persistence.dirty_lists.insert(list);
+    assert!(!app.has_save_conflict(list));
+    let palette = app.palette();
+    let output = run_frame(&ctx, Default::default(), |ui| app.status_ui(ui, palette));
+    label_center(&output, "Retry save");
+    let pos = label_center(&output, "Discard my change and reload");
+    for pressed in [true, false] {
+        let input = egui::RawInput {
+            events: vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+            ..Default::default()
+        };
+        run_frame(&ctx, input, |ui| app.status_ui(ui, palette));
+    }
+    assert!(!app.persistence.dirty_lists.contains(&list));
+    assert!(app.lists[0].data.tasks.is_empty());
+    assert_eq!(fs::read(&path).unwrap(), disk);
+    assert!(app.finish_pending_changes());
+    fs::remove_dir_all(app.workspace).unwrap();
+}
+
+#[test]
 fn a_pending_save_can_be_discarded_when_the_lists_folder_stays_unavailable() {
     for obstructed in [false, true] {
         let (_, mut app) = test_app();
