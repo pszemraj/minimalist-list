@@ -6,7 +6,8 @@ data_home=${XDG_DATA_HOME:-$HOME/.local/share}
 config_home=${XDG_CONFIG_HOME:-$HOME/.config}
 install_root="$data_home/minimalist-list"
 
-cargo install --locked --path "$repository" --root "$install_root" --force
+# Ask Cargo to recheck the compiler because a wrapper failure can be cached.
+CARGO_CACHE_RUSTC_INFO=0 cargo install --locked --path "$repository" --root "$install_root" --force
 
 mkdir -p "$data_home/applications" "$data_home/icons/hicolor/scalable/apps" \
   "$config_home/autostart"
