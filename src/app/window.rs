@@ -150,15 +150,7 @@ impl MinimalistApp {
         if !availability.can_hide() {
             return false;
         }
-        if !self.save_task_context() {
-            self.show_window(ctx);
-            return true;
-        }
-        self.finish_inline_edit();
-        if let Some(id) = self.settings_list_id {
-            self.rename_list(id);
-        }
-        if !self.retry_dirty_lists() {
+        if !self.finish_open_editors() || !self.retry_dirty_lists() {
             self.show_window(ctx);
             return true;
         }
@@ -342,17 +334,10 @@ impl MinimalistApp {
     /// # Returns
     /// Whether every accepted capture, list, and preference change is saved.
     pub(super) fn finish_pending_changes(&mut self) -> bool {
-        if self.reopen_failed_quick_capture() {
-            return false;
-        }
-        if !self.save_task_context() {
+        if self.reopen_failed_quick_capture() || !self.finish_open_editors() {
             return false;
         }
         self.drag = None;
-        self.finish_inline_edit();
-        if let Some(id) = self.settings_list_id {
-            self.rename_list(id);
-        }
         if let Some((list_id, task_id, _)) = self.delete_animation.take() {
             self.remove_task(list_id, task_id);
         }
@@ -360,6 +345,21 @@ impl MinimalistApp {
             self.archive_completed(list_id);
         }
         self.retry_dirty_lists()
+    }
+
+    /// Saves notes and commits inline edits and the current list name.
+    ///
+    /// # Returns
+    /// False if the notes editor still needs attention.
+    fn finish_open_editors(&mut self) -> bool {
+        if !self.save_task_context() {
+            return false;
+        }
+        self.finish_inline_edit();
+        if let Some(id) = self.settings_list_id {
+            self.rename_list(id);
+        }
+        true
     }
 }
 
