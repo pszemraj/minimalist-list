@@ -47,7 +47,7 @@ pub struct Tray {
     #[cfg(target_os = "linux")]
     host: zbus::blocking::Proxy<'static>,
     #[cfg(target_os = "linux")]
-    host_missing_since: Cell<Option<Instant>>,
+    host_loss: Cell<LinuxHostLoss>,
 }
 
 impl Tray {
@@ -127,7 +127,7 @@ impl Tray {
             #[cfg(target_os = "linux")]
             host,
             #[cfg(target_os = "linux")]
-            host_missing_since: Cell::new(None),
+            host_loss: Cell::new(LinuxHostLoss::Clear),
         })
     }
 
@@ -153,13 +153,31 @@ impl Tray {
                 .get_property::<bool>("IsStatusNotifierHostRegistered");
             let closed = self.host.connection().is_closed();
             let availability = linux_availability(&result, closed);
-            if availability == Availability::Unavailable && self.host_missing_since.get().is_none()
-            {
-                log::debug!(
-                    "Linux tray watcher unavailable; waiting for confirmation (connection closed: {closed}, reply: {result:?})"
-                );
+            let displays_asleep = availability == Availability::Unavailable
+                && !closed
+                && gnome_displays_asleep(self.host.connection());
+            let previous = self.host_loss.get();
+            let confirmed = confirm_linux_availability(
+                availability,
+                displays_asleep,
+                &self.host_loss,
+                Instant::now(),
+            );
+            let current = self.host_loss.get();
+            if current != previous {
+                match current {
+                    LinuxHostLoss::Clear => {
+                        log::debug!("Linux tray loss check cleared ({availability:?})")
+                    }
+                    LinuxHostLoss::DisplaysAsleep => log::debug!(
+                        "Linux tray loss deferred while displays are asleep (reply: {result:?})"
+                    ),
+                    LinuxHostLoss::Since(_) => log::debug!(
+                        "Linux tray watcher unavailable; waiting for confirmation (connection closed: {closed}, reply: {result:?})"
+                    ),
+                }
             }
-            confirm_linux_availability(availability, &self.host_missing_since, Instant::now())
+            confirmed
         }
         #[cfg(target_os = "windows")]
         {
@@ -215,21 +233,51 @@ fn linux_availability(result: &Result<bool, zbus::Error>, connection_closed: boo
 const HOST_LOSS_GRACE: Duration = Duration::from_secs(5);
 
 #[cfg(target_os = "linux")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LinuxHostLoss {
+    Clear,
+    DisplaysAsleep,
+    Since(Instant),
+}
+
+/// Reads GNOME's display power state without changing it.
+///
+/// Unknown state and desktops without this interface keep the normal tray fallback.
+#[cfg(target_os = "linux")]
+fn gnome_displays_asleep(bus: &zbus::blocking::Connection) -> bool {
+    const DISPLAY_CONFIG: &str = "org.gnome.Mutter.DisplayConfig";
+    bus.call_method(
+        Some(DISPLAY_CONFIG),
+        "/org/gnome/Mutter/DisplayConfig",
+        Some("org.freedesktop.DBus.Properties"),
+        "Get",
+        &(DISPLAY_CONFIG, "PowerSaveMode"),
+    )
+    .and_then(|reply| reply.body().deserialize::<zbus::zvariant::OwnedValue>())
+    .ok()
+    .and_then(|value| i32::try_from(value).ok())
+    .is_some_and(|mode| matches!(mode, 1..=3))
+}
+
+#[cfg(target_os = "linux")]
 fn confirm_linux_availability(
     availability: Availability,
-    missing_since: &Cell<Option<Instant>>,
+    displays_asleep: bool,
+    loss: &Cell<LinuxHostLoss>,
     now: Instant,
 ) -> Availability {
     if availability != Availability::Unavailable {
-        if missing_since.take().is_some() {
-            log::debug!("Linux tray loss check cleared ({availability:?})");
-        }
+        loss.set(LinuxHostLoss::Clear);
         return availability;
     }
+    if displays_asleep {
+        loss.set(LinuxHostLoss::DisplaysAsleep);
+        return Availability::Unknown;
+    }
     // GNOME can briefly release the watcher name while changing session modes.
-    // Only act on absence that is still confirmed after the watcher can return.
-    let Some(first_missing) = missing_since.get() else {
-        missing_since.set(Some(now));
+    // After the displays wake, give the watcher a fresh chance to return.
+    let LinuxHostLoss::Since(first_missing) = loss.get() else {
+        loss.set(LinuxHostLoss::Since(now));
         return Availability::Unknown;
     };
     if now.duration_since(first_missing) < HOST_LOSS_GRACE {
@@ -386,13 +434,16 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn linux_tray_loss_requires_absence_on_separated_checks() {
-        use super::{Availability::*, Cell, HOST_LOSS_GRACE, Instant, confirm_linux_availability};
+        use super::{
+            Availability::*, Cell, HOST_LOSS_GRACE, Instant, LinuxHostLoss,
+            confirm_linux_availability,
+        };
 
         for intervening in [Available, Unknown] {
             let start = Instant::now();
-            let missing_since = Cell::new(None);
+            let loss = Cell::new(LinuxHostLoss::Clear);
             let check =
-                |reply, elapsed| confirm_linux_availability(reply, &missing_since, start + elapsed);
+                |reply, elapsed| confirm_linux_availability(reply, false, &loss, start + elapsed);
             assert_eq!(check(Unavailable, HOST_LOSS_GRACE / 2), Unknown);
             assert_eq!(check(Unavailable, HOST_LOSS_GRACE * 3 / 4), Unknown);
             assert_eq!(check(intervening, HOST_LOSS_GRACE), intervening);
@@ -401,6 +452,31 @@ mod tests {
             assert_eq!(check(Available, HOST_LOSS_GRACE * 4), Available);
             assert_eq!(check(Unavailable, HOST_LOSS_GRACE * 5), Unknown);
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_tray_loss_waits_for_display_wake_before_confirming_absence() {
+        use super::{
+            Availability::*, Cell, HOST_LOSS_GRACE, Instant, LinuxHostLoss,
+            confirm_linux_availability,
+        };
+
+        let start = Instant::now();
+        let loss = Cell::new(LinuxHostLoss::Clear);
+        let check = |displays_asleep, intervals| {
+            confirm_linux_availability(
+                Unavailable,
+                displays_asleep,
+                &loss,
+                start + HOST_LOSS_GRACE * intervals,
+            )
+        };
+        assert_eq!(check(false, 0), Unknown);
+        assert_eq!(check(true, 2), Unknown);
+        assert_eq!(check(true, 12), Unknown);
+        assert_eq!(check(false, 13), Unknown);
+        assert_eq!(check(false, 14), Unavailable);
     }
 
     #[test]
