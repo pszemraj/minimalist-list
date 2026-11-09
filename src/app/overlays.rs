@@ -1,4 +1,4 @@
-//! Quick-capture, cross-list search, and keyboard-reference overlays.
+//! Cross-list search, keyboard reference, and overlay dispatch.
 
 use super::{
     MinimalistApp,
@@ -6,25 +6,18 @@ use super::{
     text_input_shortcuts,
     theme::Palette,
 };
+use crate::hotkey::GlobalAction;
 use crate::model::{Subtask, Task};
 use crate::storage::StoredList;
 use eframe::egui;
-use egui::{Align, Button, ComboBox, CornerRadius, Id, Key, Layout, Modal, ScrollArea, TextEdit};
+use egui::{Align, Button, CornerRadius, Id, Key, Layout, Modal, ScrollArea, TextEdit};
 use std::time::Instant;
 use uuid::Uuid;
 
 /// Remembers the control underneath the keyboard-reference modal.
 pub(super) struct ShortcutsState {
-    return_focus: Option<Id>,
+    pub(super) return_focus: Option<Id>,
     request_focus: bool,
-}
-
-/// Holds the draft and destination selected in the quick-capture overlay.
-pub(super) struct QuickCaptureState {
-    pub(super) text: String,
-    pub(super) selected_list_id: Option<Uuid>,
-    request_focus: bool,
-    pub(super) failure: Option<String>,
 }
 
 /// Holds the current global-search query and keyboard selection.
@@ -74,6 +67,8 @@ struct SearchHit {
     subtask_text: Option<String>,
     state: HitState,
     completed: bool,
+    /// The first notes line holding a term absent from the title.
+    context_snippet: Option<String>,
 }
 
 impl SearchHit {
@@ -90,20 +85,16 @@ impl SearchHit {
 }
 
 impl MinimalistApp {
-    /// Reopens an accepted capture that still needs its explicit save retry.
+    /// Checks for a modal covering the current screen.
     ///
     /// # Returns
-    /// Whether an active or suspended failed capture remains unsaved.
-    pub(super) fn reopen_failed_quick_capture(&mut self) -> bool {
-        let failed = self
-            .quick_capture
-            .as_ref()
-            .or(self.capture_draft.as_ref())
-            .is_some_and(|draft| draft.failure.is_some());
-        if failed {
-            self.open_quick_capture(None);
-        }
-        failed
+    /// Whether a modal is open.
+    pub(super) fn has_modal(&self) -> bool {
+        self.quick_capture.is_some()
+            || self.find.is_some()
+            || self.shortcuts.is_some()
+            || self.details.move_task.is_some()
+            || self.task_context.is_some()
     }
 
     /// Opens the keyboard reference without discarding a capture or search draft.
@@ -123,7 +114,7 @@ impl MinimalistApp {
     }
 
     /// Saves the underlying editor and focus before opening capture or search.
-    fn prepare_capture_or_search(&mut self) {
+    pub(super) fn prepare_capture_or_search(&mut self) {
         self.cancel_overview_drag();
         self.drag = None;
         if self.quick_capture.is_none() && self.find.is_none() {
@@ -133,46 +124,11 @@ impl MinimalistApp {
         self.finish_inline_edit();
     }
 
-    /// Opens quick capture, preferring the hinted list when no saved destination applies.
-    pub(super) fn open_quick_capture(&mut self, hinted_list_id: Option<Uuid>) {
-        self.prepare_capture_or_search();
-        if self.find.is_some() {
-            self.find_draft = self.find.take();
-        }
-        if let Some(state) = &mut self.quick_capture {
-            state.request_focus = true;
-            return;
-        }
-        if let Some(mut draft) = self.capture_draft.take() {
-            draft.request_focus = true;
-            if draft.text.trim().is_empty() {
-                draft.selected_list_id = capture_destination(
-                    &self.lists,
-                    self.settings.last_capture_list_id,
-                    hinted_list_id,
-                    self.settings.last_list_id,
-                );
-            }
-            self.quick_capture = Some(draft);
-            return;
-        }
-        self.quick_capture = Some(QuickCaptureState {
-            text: String::new(),
-            selected_list_id: capture_destination(
-                &self.lists,
-                self.settings.last_capture_list_id,
-                hinted_list_id,
-                self.settings.last_list_id,
-            ),
-            request_focus: true,
-            failure: None,
-        });
-    }
-
     /// Opens global search and requests focus for its query field.
     pub(super) fn open_find(&mut self) {
         self.prepare_capture_or_search();
         if self.quick_capture.is_some() {
+            self.keep_window_after_capture();
             self.capture_draft = self.quick_capture.take();
         }
         if let Some(state) = &mut self.find {
@@ -258,15 +214,12 @@ impl MinimalistApp {
                     if home {
                         ui.scroll_to_cursor(Some(Align::Min));
                     }
-                    for (heading, shortcuts) in shortcut_groups() {
+                    let [show, quick_add] = GlobalAction::ALL
+                        .map(|action| crate::hotkey::label(action.configured(&self.settings)));
+                    for (heading, shortcuts) in shortcut_groups(show, quick_add) {
                         ui.add_space(10.0);
                         ui.label(self.rich(heading, 17.0, palette.accent));
                         for (action, keys) in shortcuts {
-                            let keys = if action == "Show window (global)" {
-                                crate::hotkey::label(&self.settings.global_shortcut)
-                            } else {
-                                keys
-                            };
                             if ui.available_width() < 380.0 {
                                 ui.label(self.rich(action, 14.0, palette.text));
                                 ui.label(self.rich(keys, 13.0, palette.muted));
@@ -292,222 +245,6 @@ impl MinimalistApp {
             ctx.request_discard("Restore focus after closing keyboard shortcuts");
         } else {
             self.shortcuts = Some(state);
-        }
-    }
-
-    fn quick_capture_ui(&mut self, ctx: &egui::Context, palette: Palette) {
-        let Some(mut state) = self.quick_capture.take() else {
-            return;
-        };
-        let choices = self
-            .lists
-            .iter()
-            .map(|list| (list.key, list.data.title.clone()))
-            .collect::<Vec<_>>();
-        if state
-            .selected_list_id
-            .is_none_or(|id| !choices.iter().any(|(candidate, _)| *candidate == id))
-        {
-            state.selected_list_id = if state.text.trim().is_empty() {
-                capture_destination(
-                    &self.lists,
-                    self.settings.last_capture_list_id,
-                    None,
-                    self.settings.last_list_id,
-                )
-            } else {
-                None
-            };
-        }
-
-        let mut submit = false;
-        let mut recover = false;
-        if state.request_focus {
-            ctx.memory_mut(|memory| memory.request_focus(Id::new("quick-capture-text")));
-        }
-        let modal = Modal::new(Id::new("quick-capture-modal")).show(ctx, |ui| {
-            let available = ctx.content_rect().size() - egui::vec2(32.0, 32.0);
-            ui.set_width(410.0_f32.min(available.x));
-            // Modal areas retain their previous size. Allow the form to grow
-            // when validation adds a message instead of inheriting that height.
-            ui.set_max_height(available.y - 16.0);
-            ScrollArea::vertical()
-                .max_height(available.y - 16.0)
-                .show(ui, |ui| {
-                    ui.label(self.rich("Quick add", 22.0, palette.text));
-                    ui.add_space(8.0);
-                    let response = ui.add(
-                        TextEdit::singleline(&mut state.text)
-                            .id(Id::new("quick-capture-text"))
-                            .font(self.content_font_id(19.0))
-                            .hint_text("What needs doing?")
-                            .desired_width(f32::INFINITY),
-                    );
-                    if state.request_focus {
-                        response.request_focus();
-                        state.request_focus = false;
-                    }
-
-                    if state
-                        .selected_list_id
-                        .is_some_and(|id| self.has_save_conflict(id))
-                    {
-                        recover = ui.button("Keep local copy and reload").clicked();
-                    }
-                    ui.add_space(8.0);
-                    ui.horizontal(|ui| {
-                        ui.label(self.rich("List", 13.0, palette.muted));
-                        let selected_title = state
-                            .selected_list_id
-                            .and_then(|id| {
-                                choices
-                                    .iter()
-                                    .find(|(candidate, _)| *candidate == id)
-                                    .map(|(_, title)| title.as_str())
-                            })
-                            .unwrap_or("Choose a list");
-                        ComboBox::from_id_salt("quick-capture-list")
-                            .width(ui.available_width())
-                            .wrap_mode(egui::TextWrapMode::Truncate)
-                            .selected_text(self.rich(selected_title, 14.0, palette.text))
-                            .show_ui(ui, |ui| {
-                                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
-                                for (id, title) in &choices {
-                                    if ui
-                                        .selectable_value(
-                                            &mut state.selected_list_id,
-                                            Some(*id),
-                                            self.rich(title, 14.0, palette.text),
-                                        )
-                                        .clicked()
-                                    {
-                                        take_key(ctx, Key::Enter, egui::Modifiers::NONE);
-                                        take_key(ctx, Key::Space, egui::Modifiers::NONE);
-                                        state.request_focus = true;
-                                        ui.close();
-                                    }
-                                }
-                            });
-                    });
-
-                    if state.selected_list_id.is_none() && !state.text.trim().is_empty() {
-                        ui.add(
-                            egui::Label::new(self.rich(
-                                "Choose a destination list to save this draft.",
-                                13.0,
-                                palette.text,
-                            ))
-                            .wrap(),
-                        );
-                    }
-                    if let Some(error) = &state.failure {
-                        ui.add(
-                            egui::Label::new(self.rich(
-                                "Not saved. Your draft is kept.",
-                                13.0,
-                                palette.text,
-                            ))
-                            .wrap(),
-                        )
-                        .on_hover_text(error);
-                    }
-                    ui.add_space(8.0);
-                    let conflicted = state
-                        .selected_list_id
-                        .is_some_and(|id| self.has_save_conflict(id));
-                    ui.horizontal(|ui| {
-                        ui.label(self.rich(
-                            if conflicted {
-                                "Esc cancels"
-                            } else {
-                                "Enter adds · Esc cancels"
-                            },
-                            12.0,
-                            palette.muted,
-                        ));
-                        if conflicted {
-                            return;
-                        }
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            submit |= ui
-                                .add_enabled(
-                                    state.selected_list_id.is_some()
-                                        && !state.text.trim().is_empty(),
-                                    Button::new(self.rich(
-                                        if state.failure.is_some() {
-                                            "Retry save"
-                                        } else {
-                                            "Add"
-                                        },
-                                        14.0,
-                                        palette.accent,
-                                    ))
-                                    .frame(false),
-                                )
-                                .clicked();
-                        });
-                    });
-                    if !conflicted {
-                        submit |= text_input_shortcuts(ui, &response).0;
-                    }
-                    self.keyboard_focus_ui(ui, palette);
-                });
-        });
-
-        if submit {
-            state.request_focus = true;
-            let text = state.text.trim();
-            if !text.is_empty()
-                && let Some(list_id) = state.selected_list_id
-                && let Some(index) = self.list_index(list_id)
-            {
-                let task = Task::new(text);
-                let mut candidate = self.lists[index].clone();
-                let task_id = task.id;
-                candidate.data.tasks.insert(0, task);
-                let title = candidate.data.title.clone();
-                match self.save_list_candidate(index, candidate) {
-                    Ok(()) => {
-                        self.newest_task = Some((task_id, Instant::now()));
-                        self.settings.last_capture_list_id = Some(list_id);
-                        self.save_settings();
-                        if !self.persistence.settings_dirty
-                            && self.persistence.dirty_lists.is_empty()
-                            && self.persistence.pending_filenames.is_empty()
-                            && state
-                                .failure
-                                .as_ref()
-                                .is_some_and(|error| self.status.as_ref() == Some(error))
-                        {
-                            self.status = None;
-                        }
-                        self.acknowledge(format!("Added to {title}"));
-                        self.restore_overlay_focus();
-                        return;
-                    }
-                    Err(error) => {
-                        self.status = Some(error.clone());
-                        state.failure = Some(error);
-                    }
-                }
-            }
-        }
-
-        if recover {
-            let list = state.selected_list_id;
-            self.quick_capture = Some(state);
-            if let Some(id) = list {
-                self.keep_local_copy_and_reload(id);
-            }
-        } else if !modal.should_close() {
-            self.quick_capture = Some(state);
-        } else {
-            if let Some(list) = state.selected_list_id
-                && !self.persistence.dirty_lists.contains(&list)
-            {
-                self.forget_save_conflict(list);
-            }
-            self.restore_overlay_focus();
         }
     }
 
@@ -579,7 +316,11 @@ impl MinimalistApp {
 
                     ui.add_space(8.0);
                     if state.query.trim().is_empty() {
-                        ui.label(self.rich("Type part of a task or subtask.", 13.0, palette.muted));
+                        ui.label(self.rich(
+                            "Type part of a task, note, or subtask.",
+                            13.0,
+                            palette.muted,
+                        ));
                     } else if hits.is_empty() {
                         ui.label(self.rich("No matches.", 14.0, palette.muted));
                     } else {
@@ -619,8 +360,20 @@ impl MinimalistApp {
                                             ..Default::default()
                                         },
                                     );
+                                    if let Some(snippet) = &hit.context_snippet {
+                                        label.append(
+                                            &format!("\nin notes: {snippet}"),
+                                            0.0,
+                                            egui::TextFormat {
+                                                font_id: self.content_font_id(12.0),
+                                                color: palette.muted,
+                                                ..Default::default()
+                                            },
+                                        );
+                                    }
                                     label.wrap.max_width = (ui.available_width() - 24.0).max(1.0);
-                                    label.wrap.max_rows = 3;
+                                    label.wrap.max_rows =
+                                        3 + usize::from(hit.context_snippet.is_some());
                                     label.wrap.break_anywhere = true;
                                     let height = ui
                                         .fonts_mut(|fonts| fonts.layout_job(label.clone()))
@@ -682,6 +435,9 @@ impl MinimalistApp {
     }
 
     fn activate_search_hit(&mut self, hit: SearchHit) {
+        if !self.save_task_context() {
+            return;
+        }
         self.open_list(hit.list_id);
         self.request_task_focus = false;
         self.keyboard.overlay_return = None;
@@ -712,22 +468,10 @@ impl MinimalistApp {
     }
 }
 
-fn capture_destination(
-    lists: &[StoredList],
-    last_capture: Option<Uuid>,
-    hinted: Option<Uuid>,
-    last_opened: Option<Uuid>,
-) -> Option<Uuid> {
-    [hinted, last_capture, last_opened]
-        .into_iter()
-        .flatten()
-        .find(|id| lists.iter().any(|list| list.key == *id))
-        .or_else(|| lists.first().map(|list| list.key))
-}
-
 fn search_hits(lists: &[StoredList], query: &str) -> Vec<SearchHit> {
-    let query = query.trim().to_lowercase();
-    if query.is_empty() {
+    let query = query.to_lowercase();
+    let terms: Vec<&str> = query.split_whitespace().collect();
+    if terms.is_empty() {
         return Vec::new();
     }
 
@@ -739,23 +483,34 @@ fn search_hits(lists: &[StoredList], query: &str) -> Vec<SearchHit> {
             } else {
                 HitState::Active
             };
-            collect_task_hits(&mut hits, list, task, state, &query);
+            collect_task_hits(&mut hits, list, task, state, &terms);
         }
         for archived in &list.data.archive {
-            collect_task_hits(&mut hits, list, &archived.task, HitState::Archived, &query);
+            collect_task_hits(&mut hits, list, &archived.task, HitState::Archived, &terms);
         }
     }
     hits
 }
 
+/// Adds a hit when every term is in the task's title or notes, plus one per matching child.
 fn collect_task_hits(
     hits: &mut Vec<SearchHit>,
     list: &StoredList,
     task: &Task,
     state: HitState,
-    query: &str,
+    terms: &[&str],
 ) {
-    if task.text.to_lowercase().contains(query) {
+    let title = task.text.to_lowercase();
+    let context = task.context.to_lowercase();
+    if terms
+        .iter()
+        .all(|term| title.contains(term) || context.contains(term))
+    {
+        let context_only: Vec<&str> = terms
+            .iter()
+            .copied()
+            .filter(|term| !title.contains(term))
+            .collect();
         hits.push(SearchHit {
             list_id: list.key,
             task_id: task.id,
@@ -765,13 +520,31 @@ fn collect_task_hits(
             subtask_text: None,
             state,
             completed: task.completed,
+            context_snippet: context_snippet(&task.context, &context_only),
         });
     }
     for subtask in &task.subtasks {
-        if subtask.text.to_lowercase().contains(query) {
+        let text = subtask.text.to_lowercase();
+        if terms.iter().all(|term| text.contains(term)) {
             hits.push(subtask_hit(list, task, subtask, state));
         }
     }
+}
+
+/// Returns the first trimmed notes line containing any term, capped at 120 characters.
+fn context_snippet(context: &str, terms: &[&str]) -> Option<String> {
+    let line = context
+        .lines()
+        .find(|line| {
+            let line = line.to_lowercase();
+            terms.iter().any(|term| line.contains(term))
+        })?
+        .trim();
+    let mut snippet: String = line.chars().take(120).collect();
+    if line.chars().nth(120).is_some() {
+        snippet.push('…');
+    }
+    Some(snippet)
 }
 
 fn subtask_hit(list: &StoredList, task: &Task, subtask: &Subtask, state: HitState) -> SearchHit {
@@ -790,6 +563,7 @@ fn subtask_hit(list: &StoredList, task: &Task, subtask: &Subtask, state: HitStat
             HitState::Active
         },
         completed: subtask.completed,
+        context_snippet: None,
     }
 }
 

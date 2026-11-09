@@ -1,6 +1,7 @@
 //! Preservation of external edits and interrupted or malformed persistence files.
 
 use super::*;
+use crate::model::Task;
 use std::time::Duration;
 
 fn root() -> PathBuf {
@@ -90,6 +91,41 @@ fn unchanged_settings_keep_the_same_file_and_merge_other_instance_values() {
     assert_eq!(merged.font_size, 26.0);
     assert_eq!(fs::read(&path).unwrap(), bytes);
     assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), before);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn repairing_partial_settings_merges_local_edits_with_valid_newer_preferences() {
+    let root = root();
+    let path = root.join("settings.json");
+    let baseline = Settings::default();
+    write_json_atomic(&path, &baseline).unwrap();
+    let malformed = br#"{"font_size":26,"row_padding":"invalid"}"#;
+    fs::write(&path, malformed).unwrap();
+    let desired = Settings {
+        bold_text: true,
+        ..baseline.clone()
+    };
+
+    let merged = save_settings_changes_at(&path, &desired, &baseline).unwrap();
+    assert_eq!(merged.font_size, 26.0);
+    assert_eq!(merged.row_padding, baseline.row_padding);
+    assert!(merged.bold_text);
+    let (reloaded, warning) = load_settings_from(&path);
+    assert!(warning.is_none());
+    assert_eq!(reloaded.font_size, 26.0);
+    assert!(reloaded.bold_text);
+    let backup = fs::read_dir(&root)
+        .unwrap()
+        .flatten()
+        .find(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("settings.invalid-")
+        })
+        .unwrap();
+    assert_eq!(fs::read(backup.path()).unwrap(), malformed);
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -293,5 +329,461 @@ fn metadata_only_first_check_does_not_bypass_the_final_content_check() {
     assert!(result.unwrap_err().contains("external content changed"));
     assert_eq!(fs::read(&local.path).unwrap(), bytes);
     assert_eq!(fs::read_dir(root.join("lists")).unwrap().count(), 1);
+    fs::remove_dir_all(root).unwrap();
+}
+
+fn snapshot_keys(directory: &Path) -> Vec<(u64, u64)> {
+    let mut keys = fs::read_dir(directory)
+        .unwrap()
+        .flatten()
+        .filter(|entry| entry.path().is_file())
+        .filter_map(|entry| {
+            let name = entry.file_name();
+            let stem = name.to_str()?.strip_suffix(".json")?;
+            let (time, sequence) = stem.split_once('-')?;
+            Some((time.parse().ok()?, sequence.parse().ok()?))
+        })
+        .collect::<Vec<_>>();
+    keys.sort_unstable();
+    keys
+}
+
+#[test]
+fn workspace_keys_stay_byte_identical_across_releases() {
+    assert_eq!(
+        workspace_key(Path::new("/Users/test/workspace")),
+        "81ba70295b23e18d"
+    );
+    assert_eq!(
+        workspace_key(Path::new("/tmp/Minimalist List/lists ü")),
+        "42a036088b230b2c"
+    );
+}
+
+#[test]
+fn snapshots_are_written_at_most_hourly_even_when_the_clock_moves_back() {
+    let directory = root();
+    let base = 1_700_000_000;
+    backup::snapshot_into(&directory, b"first", base, false).unwrap();
+    backup::snapshot_into(&directory, b"too soon", base + 3_599, false).unwrap();
+    assert_eq!(snapshot_keys(&directory), [(base, 1)]);
+    assert_eq!(
+        fs::read(directory.join(format!("{base}-1.json"))).unwrap(),
+        b"first"
+    );
+    backup::snapshot_into(&directory, b"second", base + 3_600, false).unwrap();
+    assert_eq!(snapshot_keys(&directory), [(base, 1), (base + 3_600, 2)]);
+    // A newest snapshot dated after the current time cannot suppress backups.
+    backup::snapshot_into(&directory, b"earlier clock", base + 10, false).unwrap();
+    assert_eq!(
+        snapshot_keys(&directory),
+        [(base, 1), (base + 10, 3), (base + 3_600, 2)]
+    );
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn forced_snapshots_bypass_the_hourly_limit_without_replacing_earlier_ones() {
+    let directory = root();
+    let base = 1_700_000_000;
+    backup::snapshot_into(&directory, b"first", base, false).unwrap();
+    backup::snapshot_into(&directory, b"forced", base + 5, true).unwrap();
+    // A second forced snapshot in the same second takes the next free name.
+    backup::snapshot_into(&directory, b"same second", base + 5, true).unwrap();
+    assert_eq!(fs::read_dir(&directory).unwrap().count(), 3);
+    for (name, bytes) in [
+        (format!("{base}-1.json"), "first"),
+        (format!("{}-2.json", base + 5), "forced"),
+        (format!("{}-3.json", base + 5), "same second"),
+    ] {
+        assert_eq!(fs::read_to_string(directory.join(name)).unwrap(), bytes);
+    }
+    for index in 0..105 {
+        backup::snapshot_into(&directory, b"{}", base + 10 + index, true).unwrap();
+    }
+    assert_eq!(fs::read_dir(&directory).unwrap().count(), 100);
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn a_same_second_history_snapshot_survives_the_next_ordinary_saves() {
+    let directory = root();
+    fs::create_dir_all(&directory).unwrap();
+    let now = 1_700_000_000;
+    for (sequence, stamp) in (1..).zip(now - 99..=now) {
+        fs::write(
+            directory.join(format!("{stamp}-{sequence}.json")),
+            b"Older version",
+        )
+        .unwrap();
+    }
+
+    backup::snapshot_into(&directory, b"History before clearing", now, true).unwrap();
+    backup::snapshot_into(&directory, b"History before clearing", now, false).unwrap();
+    backup::snapshot_into(&directory, b"Cleared History", now + 1, false).unwrap();
+
+    assert_eq!(fs::read_dir(&directory).unwrap().count(), 100);
+    assert_eq!(
+        fs::read(directory.join(format!("{now}-101.json"))).unwrap(),
+        b"History before clearing"
+    );
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn history_snapshot_survives_a_clock_rollback_after_clearing() {
+    let directory = root();
+    fs::create_dir_all(&directory).unwrap();
+    let now = 1_700_000_000;
+    for (sequence, stamp) in (1..).zip(now - 99..now) {
+        fs::write(
+            directory.join(format!("{stamp}-{sequence}.json")),
+            b"Older version",
+        )
+        .unwrap();
+    }
+
+    backup::snapshot_into(&directory, b"History before clearing", now, true).unwrap();
+    backup::snapshot_into(&directory, b"Cleared History", now - 10, false).unwrap();
+    backup::snapshot_into(&directory, b"Recent edit", now - 9, false).unwrap();
+
+    assert_eq!(fs::read_dir(&directory).unwrap().count(), 100);
+    assert_eq!(
+        fs::read(directory.join(format!("{now}-100.json"))).unwrap(),
+        b"History before clearing"
+    );
+    assert_eq!(
+        fs::read(directory.join(format!("{}-101.json", now - 10))).unwrap(),
+        b"Cleared History"
+    );
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn snapshot_list_now_copies_the_observed_bytes_right_after_another_snapshot() {
+    let root = root();
+    let list = create_list(&root, "Tasks", Accent::Mint).unwrap();
+    let directory = backups_dir(&root)
+        .join("snapshots")
+        .join(list.key.to_string());
+    snapshot_list(&root, &list).unwrap();
+    snapshot_list(&root, &list).unwrap();
+    assert_eq!(snapshot_keys(&directory).len(), 1);
+    snapshot_list_now(&root, &list).unwrap();
+    let kept = fs::read_dir(&directory)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect::<Vec<_>>();
+    assert_eq!(kept.len(), 2);
+    let observed = list.source_bytes.borrow().clone().unwrap();
+    for path in kept {
+        assert_eq!(fs::read(path).unwrap(), &*observed);
+    }
+    fs::remove_dir_all(backups_dir(&root)).unwrap();
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn snapshots_are_capped_at_one_hundred_and_other_files_are_untouched() {
+    let directory = root();
+    fs::create_dir_all(directory.join("7.json")).unwrap();
+    let foreign = [
+        "notes.txt",
+        "backup.json",
+        "8.json",
+        "12ab.json",
+        "5.json.bak",
+        ".5.json.tmp",
+    ];
+    for name in foreign {
+        fs::write(directory.join(name), name).unwrap();
+    }
+    let base = 1_700_000_000;
+    for index in 0..105 {
+        backup::snapshot_into(&directory, b"{}", base + index * 3_600, false).unwrap();
+    }
+    let kept = snapshot_keys(&directory);
+    assert_eq!(kept.len(), 100);
+    assert_eq!(kept[0], (base + 5 * 3_600, 6));
+    assert_eq!(kept[99], (base + 104 * 3_600, 105));
+    for name in foreign {
+        assert_eq!(fs::read_to_string(directory.join(name)).unwrap(), name);
+    }
+    assert!(directory.join("7.json").is_dir());
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn a_deleted_list_is_kept_in_backups_and_restores_by_copying_it_back() {
+    let root = root();
+    create_list(&root, "Keep", Accent::Mint).unwrap();
+    let doomed = create_list(&root, "Errands", Accent::Sky).unwrap();
+    let backups = backups_dir(&root);
+    let contents = fs::read(&doomed.path).unwrap();
+    delete_list(&root, &doomed).unwrap();
+    assert!(!doomed.path.exists());
+    assert_eq!(load_workspace(&root).unwrap().lists.len(), 1);
+    let deleted = backups.join("deleted");
+    let kept = fs::read_dir(&deleted)
+        .unwrap()
+        .flatten()
+        .collect::<Vec<_>>();
+    assert_eq!(kept.len(), 1);
+    let name = kept[0].file_name().into_string().unwrap();
+    let (stamp, original_name) = name.split_once('-').unwrap();
+    assert!(stamp.parse::<u64>().is_ok());
+    assert_eq!(original_name, doomed.path.file_name().unwrap());
+    assert_eq!(fs::read(kept[0].path()).unwrap(), contents);
+    // The copy loads with its original identity, with or without its timestamp prefix.
+    let lists = root.join("lists");
+    fs::copy(kept[0].path(), lists.join(&name)).unwrap();
+    let loaded = load_workspace(&root).unwrap();
+    let restored = loaded.lists.iter().find(|item| item.key == doomed.key);
+    assert_eq!(restored.unwrap().data.title, "Errands");
+    fs::remove_file(lists.join(&name)).unwrap();
+    fs::copy(kept[0].path(), &doomed.path).unwrap();
+    let loaded = load_workspace(&root).unwrap();
+    let restored = loaded
+        .lists
+        .iter()
+        .find(|item| item.key == doomed.key)
+        .unwrap();
+    assert_eq!(restored.path, doomed.path);
+    // Deleting it again never replaces the earlier copy.
+    delete_list(&root, restored).unwrap();
+    assert_eq!(fs::read_dir(&deleted).unwrap().count(), 2);
+    assert_eq!(fs::read(kept[0].path()).unwrap(), contents);
+    fs::remove_dir_all(backups).unwrap();
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn delete_list_leaves_a_replacement_directory_in_the_workspace() {
+    let root = root();
+    let list = create_list(&root, "Tasks", Accent::Mint).unwrap();
+    fs::remove_file(&list.path).unwrap();
+    fs::create_dir(&list.path).unwrap();
+    let sentinel = list.path.join("other-data");
+    fs::write(&sentinel, "keep this").unwrap();
+
+    let result = delete_list(&root, &list);
+    let contents = fs::read_to_string(sentinel);
+    let backups = backups_dir(&root);
+    if backups.exists() {
+        fs::remove_dir_all(backups).unwrap();
+    }
+    fs::remove_dir_all(root).unwrap();
+
+    assert!(result.is_err(), "deletion accepted a directory");
+    assert_eq!(contents.unwrap(), "keep this");
+}
+
+#[test]
+fn deleted_long_filename_restores_its_identity_and_bytes() {
+    for length in [157, 207] {
+        let root = root();
+        let list = create_list(&root, "Long filename", Accent::Mint).unwrap();
+        let id = Uuid::new_v4();
+        let path = list
+            .path
+            .with_file_name(format!("{}--{id}.json", "x".repeat(length)));
+        fs::rename(&list.path, &path).unwrap();
+        let contents = fs::read(&path).unwrap();
+        let loaded = load_workspace(&root).unwrap().lists.remove(0);
+        assert_eq!(loaded.key, id);
+
+        delete_list(&root, &loaded).unwrap();
+        assert!(!path.exists());
+        let backups = backups_dir(&root);
+        let backup = fs::read_dir(backups.join("deleted"))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        assert_eq!(fs::read(backup.path()).unwrap(), contents);
+        fs::copy(backup.path(), root.join("lists").join(backup.file_name())).unwrap();
+        let mut restored = load_workspace(&root).unwrap().lists.remove(0);
+        assert_eq!(restored.key, id);
+        assert_eq!(restored.data.title, list.data.title);
+        restored.data.tasks.push(Task::new("Edited after restore"));
+        save_list(&restored).unwrap();
+        let saved = load_workspace(&root).unwrap().lists.remove(0);
+        assert_eq!(saved.data.tasks[0].text, "Edited after restore");
+        fs::remove_dir_all(backups).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[test]
+fn a_list_restored_under_an_older_long_backup_name_is_writable() {
+    let root = root();
+    let list = create_list(&root, "Restored", Accent::Mint).unwrap();
+    let restored =
+        list.path
+            .with_file_name(format!("1700000000-{}--{}.json", "x".repeat(157), list.key));
+    fs::rename(&list.path, &restored).unwrap();
+    let mut loaded = load_workspace(&root).unwrap().lists.remove(0);
+    loaded.data.tasks.push(Task::new("Edited after restore"));
+    save_list(&loaded).unwrap();
+    let saved = load_workspace(&root).unwrap().lists.remove(0);
+    assert_eq!(saved.key, list.key);
+    assert_eq!(saved.data.tasks[0].text, "Edited after restore");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn deleted_backup_preserves_the_loaded_identity_of_an_external_name() {
+    let root = root();
+    let keep = create_list(&root, "Keep", Accent::Mint).unwrap();
+    let remove = create_list(&root, "Remove and restore", Accent::Sky).unwrap();
+    let path = remove.path.with_file_name(format!("--{}.json", keep.key));
+    fs::rename(&remove.path, &path).unwrap();
+    let (loaded, _) = read_list(&path).unwrap();
+    assert_eq!(loaded.key, remove.key);
+
+    delete_list(&root, &loaded).unwrap();
+    let backups = backups_dir(&root);
+    let backup = fs::read_dir(backups.join("deleted"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap();
+    fs::copy(backup.path(), root.join("lists").join(backup.file_name())).unwrap();
+    let restored = load_workspace(&root).unwrap();
+    assert!(restored.warnings.is_empty());
+    assert!(restored.lists.iter().any(|list| list.key == remove.key));
+    assert!(restored.lists.iter().any(|list| list.key == keep.key));
+    fs::remove_dir_all(backups).unwrap();
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn deleted_uuid_only_list_restores_with_its_filename_identity() {
+    let root = root();
+    let keep = create_list(&root, "Keep", Accent::Mint).unwrap();
+    let mut list = create_list(&root, "Legacy", Accent::Sky).unwrap();
+    let legacy_path = list.path.with_file_name(format!("{}.json", list.key));
+    fs::rename(&list.path, &legacy_path).unwrap();
+    list.path = legacy_path;
+    list.data.id = keep.key;
+    save_list(&list).unwrap();
+    let contents = fs::read(&list.path).unwrap();
+    let (loaded, _) = read_list(&list.path).unwrap();
+    assert_eq!(loaded.key, list.key);
+    delete_list(&root, &loaded).unwrap();
+
+    let backups = backups_dir(&root);
+    let backup = fs::read_dir(backups.join("deleted"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap();
+    let backup_name = backup.file_name().into_string().unwrap();
+    let (_, descriptive_name) = backup_name.split_once('-').unwrap();
+    assert_eq!(fs::read(backup.path()).unwrap(), contents);
+    assert!(!list.path.exists());
+    for name in [backup_name.as_str(), descriptive_name] {
+        let restored_path = root.join("lists").join(name);
+        fs::copy(backup.path(), &restored_path).unwrap();
+        let snapshot = load_workspace(&root).unwrap();
+        assert!(snapshot.warnings.is_empty(), "{:?}", snapshot.warnings);
+        let restored = snapshot
+            .lists
+            .iter()
+            .find(|entry| entry.path == restored_path)
+            .unwrap();
+        assert_eq!(restored.key, list.key);
+        assert_eq!(restored.data.title, "Legacy");
+        fs::remove_file(restored_path).unwrap();
+    }
+    fs::remove_dir_all(backups).unwrap();
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn deleted_relative_symlink_leaves_a_readable_backup_and_preserves_the_target() {
+    let root = root();
+    create_list(&root, "Keep", Accent::Mint).unwrap();
+    let list = create_list(&root, "Linked", Accent::Sky).unwrap();
+    let target = root.join("linked.json");
+    fs::rename(&list.path, &target).unwrap();
+    std::os::unix::fs::symlink("../linked.json", &list.path).unwrap();
+    let contents = fs::read(&target).unwrap();
+    let (loaded, _) = read_list(&list.path).unwrap();
+    delete_list(&root, &loaded).unwrap();
+
+    let backups = backups_dir(&root);
+    let backup = fs::read_dir(backups.join("deleted"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap();
+    assert!(backup.file_type().unwrap().is_file());
+    assert_eq!(fs::read(backup.path()).unwrap(), contents);
+    assert!(fs::symlink_metadata(&list.path).is_err());
+    assert_eq!(fs::read(&target).unwrap(), contents);
+    fs::copy(backup.path(), root.join("lists").join(backup.file_name())).unwrap();
+    let restored = load_workspace(&root)
+        .unwrap()
+        .lists
+        .into_iter()
+        .find(|entry| entry.key == list.key)
+        .unwrap();
+    assert_eq!(restored.data.title, "Linked");
+    fs::remove_dir_all(backups).unwrap();
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn one_malformed_setting_keeps_every_other_preference() {
+    let root = root();
+    fs::create_dir_all(&root).unwrap();
+    let path = root.join("settings.json");
+    let stored = r#"{"workspace_path":"/kept/workspace","font_size":"huge","bold_text":true,"always_on_top":true,"global_shortcut":"","extra":1}"#;
+    fs::write(&path, stored).unwrap();
+    let (settings, warning) = load_settings_from(&path);
+    assert_eq!(settings.workspace_path, "/kept/workspace");
+    assert_eq!(settings.font_size, Settings::default().font_size);
+    assert!(settings.bold_text && settings.always_on_top);
+    assert!(settings.global_shortcut.is_empty());
+    let warning = warning.unwrap();
+    assert!(warning.contains("could not parse") && warning.contains("font_size"));
+    // The next preference save still preserves the original file before replacing it.
+    let mut desired = settings.clone();
+    desired.row_padding = 9.0;
+    save_settings_changes_at(&path, &desired, &settings).unwrap();
+    let preserved = fs::read_dir(&root)
+        .unwrap()
+        .flatten()
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("settings.invalid-")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(preserved.len(), 1);
+    assert_eq!(fs::read_to_string(preserved[0].path()).unwrap(), stored);
+    let (saved, warning) = load_settings_from(&path);
+    assert!(warning.is_none());
+    assert_eq!(saved.workspace_path, "/kept/workspace");
+    assert_eq!(saved.row_padding, 9.0);
+    assert!(saved.bold_text);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn unparseable_settings_load_defaults_with_a_warning() {
+    let root = root();
+    fs::create_dir_all(&root).unwrap();
+    let path = root.join("settings.json");
+    let defaults = serde_json::to_value(Settings::default()).unwrap();
+    for stored in ["{ broken", "[1, 2]", "null", ""] {
+        fs::write(&path, stored).unwrap();
+        let (settings, warning) = load_settings_from(&path);
+        assert_eq!(serde_json::to_value(settings).unwrap(), defaults);
+        assert!(warning.unwrap().contains("could not parse"));
+    }
     fs::remove_dir_all(root).unwrap();
 }

@@ -60,6 +60,82 @@ pub(super) fn run_app_frame(
     })
 }
 
+/// Advances a keyboard or paste test by one motion-updated frame.
+///
+/// # Arguments
+/// - `ctx` - Context retaining the input state.
+/// - `app` - Application under test.
+/// - `events` - Input delivered together in this frame.
+/// - `width` - Logical viewport width at a fixed height of 500 points.
+///
+/// # Returns
+/// The frame output without texture updates.
+pub(super) fn keyboard_frame(
+    ctx: &egui::Context,
+    app: &mut MinimalistApp,
+    events: Vec<egui::Event>,
+    width: f32,
+) -> egui::FullOutput {
+    let input = frame_input(
+        egui::vec2(width, 500.0),
+        ctx.input(|input| input.time) + 0.3,
+        events,
+    );
+    app.update_motion(ctx);
+    run_app_frame(ctx, app, input)
+}
+
+/// Runs three idle frames at the keyboard and paste tests' standard viewport size.
+///
+/// # Arguments
+/// - `ctx` - Context retaining the input state.
+/// - `app` - Application under test.
+pub(super) fn settle_keyboard(ctx: &egui::Context, app: &mut MinimalistApp) {
+    for _ in 0..3 {
+        keyboard_frame(ctx, app, Vec::new(), 430.0);
+    }
+}
+
+/// Requests a widget's focus and checks that it survives the next frames.
+///
+/// # Arguments
+/// - `ctx` - Context retaining the widget focus.
+/// - `app` - Application under test.
+/// - `id` - Widget expected to gain focus.
+///
+/// # Panics
+/// Panics if a different widget ends up focused or no widget has focus.
+pub(super) fn focus_widget(ctx: &egui::Context, app: &mut MinimalistApp, id: egui::Id) {
+    app.request_task_focus = false;
+    app.keyboard.pending = Some(id);
+    settle_keyboard(ctx, app);
+    assert_eq!(ctx.memory(|memory| memory.focused()), Some(id));
+}
+
+/// Finds the center of the first rendered text shape with the given label.
+///
+/// # Arguments
+/// - `output` - Frame containing the rendered text shapes.
+/// - `label` - Exact text to locate.
+///
+/// # Returns
+/// The label's center in logical points.
+///
+/// # Panics
+/// Panics when the frame does not contain the label.
+pub(super) fn label_center(output: &egui::FullOutput, label: &str) -> egui::Pos2 {
+    output
+        .shapes
+        .iter()
+        .find_map(|shape| match &shape.shape {
+            egui::epaint::Shape::Text(text) if text.galley.text() == label => {
+                Some(text.pos + text.galley.size() * 0.5)
+            }
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no {label} control is visible"))
+}
+
 /// Creates press and release events for a key with the same modifiers.
 ///
 /// # Arguments
@@ -139,6 +215,23 @@ pub(super) fn test_app() -> (egui::Context, MinimalistApp) {
     };
     let app = MinimalistApp::new(&ctx, settings, None, None);
     (ctx, app)
+}
+
+/// Lists the files in a test list's snapshot directory.
+///
+/// # Arguments
+/// - `app` - Application providing the isolated workspace.
+/// - `list` - List identity.
+///
+/// # Returns
+/// Paths in directory order, or an empty vector if the directory cannot be read.
+pub(super) fn snapshot_files(app: &MinimalistApp, list: Uuid) -> Vec<PathBuf> {
+    let directory = storage::backups_dir(&app.workspace)
+        .join("snapshots")
+        .join(list.to_string());
+    std::fs::read_dir(directory)
+        .map(|entries| entries.flatten().map(|entry| entry.path()).collect())
+        .unwrap_or_default()
 }
 
 fn enter_events() -> Vec<egui::Event> {

@@ -1,9 +1,19 @@
 //! Tray hiding, restoration, and explicit application shutdown.
 
-use super::{MinimalistApp, SCAN_INTERVAL};
-use crate::tray::{Action, Tray};
+use super::MinimalistApp;
+#[cfg(any(target_os = "linux", test))]
+use super::SCAN_INTERVAL;
+use crate::tray::{Action, Availability, Tray};
 use eframe::egui::{self, ViewportCommand};
+#[cfg(any(target_os = "linux", target_os = "windows", test))]
 use std::time::Instant;
+
+/// A native close or quit awaiting the current frame's editor input.
+#[derive(Clone, Copy)]
+pub(super) enum NativeShutdown {
+    Close(Availability),
+    Quit,
+}
 
 impl MinimalistApp {
     /// Retains the workspace claim and attaches launch requests to this event loop.
@@ -34,11 +44,15 @@ impl MinimalistApp {
     pub fn setup_tray(&mut self, ctx: &egui::Context, supports_hiding: bool) {
         // A desktop without a usable tray uses ordinary window behavior quietly.
         if !supports_hiding {
+            log::debug!("Tray setup skipped for this desktop");
             return;
         }
-        match Tray::new(ctx, supports_hiding) {
-            Ok(tray) => self.tray = Some(tray),
+        match Tray::new(ctx) {
+            Ok(tray) => {
+                self.tray = Some(tray);
+            }
             Err(error) => {
+                log::warn!("Could not install the native tray: {error}");
                 let message = format!("Tray unavailable: {error}");
                 self.status = Some(match self.status.take() {
                     Some(status) => format!("{status}\n{message}"),
@@ -60,8 +74,8 @@ impl MinimalistApp {
         if Instant::now() < self.next_taskbar_check {
             return;
         }
-        self.next_taskbar_check = Instant::now() + SCAN_INTERVAL;
-        let hidden = self.tray.as_ref().is_some_and(Tray::available);
+        let availability = self.tray_availability();
+        let hidden = availability == Availability::Available;
         if self.taskbar_hidden == Some(hidden) {
             return;
         }
@@ -72,6 +86,7 @@ impl MinimalistApp {
         }
         #[cfg(target_os = "linux")]
         if let Err(error) = crate::linux::set_taskbar_hidden(window, hidden) {
+            self.next_taskbar_check = Instant::now() + SCAN_INTERVAL;
             self.status
                 .get_or_insert_with(|| format!("Could not update taskbar visibility: {error}"));
             return;
@@ -85,10 +100,21 @@ impl MinimalistApp {
     ///
     /// - `ctx` - Native application's egui context.
     pub fn start_hidden(&mut self, ctx: &egui::Context) {
-        let available = self.tray.as_ref().is_some_and(Tray::available);
-        if !self.hide_window(ctx, available) {
-            self.show_window(ctx);
+        #[cfg(target_os = "linux")]
+        if let Some(tray) = &self.tray {
+            tray.wait_for_startup();
         }
+        if !self.hide_window(ctx, self.tray_availability()) {
+            log::info!("Hidden startup unavailable; showing the window");
+            self.restore_window(ctx);
+        }
+    }
+
+    /// Reports an absent tray separately from an inconclusive check of an existing one.
+    fn tray_availability(&self) -> Availability {
+        self.tray
+            .as_ref()
+            .map_or(Availability::Unavailable, Tray::availability)
     }
 
     /// Describes the close control's current behavior.
@@ -97,54 +123,56 @@ impl MinimalistApp {
     ///
     /// The tooltip for hiding to the tray or closing without a tray.
     pub(super) fn close_hint(&self) -> &'static str {
-        if self.tray.is_some() {
+        if self.tray_availability().can_hide() {
             "Hide to tray"
         } else {
             "Close"
         }
     }
 
-    /// Hides the window when a tray is available, otherwise closes it.
+    /// Closes the window or hides it when the tray can reopen it.
     ///
     /// # Arguments
     ///
     /// - `ctx` - Context receiving native window commands.
     pub(super) fn close_window(&mut self, ctx: &egui::Context) {
-        if !self.finish_pending_changes() {
-            self.show_window(ctx);
-            return;
-        }
-        let available = self.tray.as_ref().is_some_and(Tray::available);
-        if !self.hide_window(ctx, available) {
-            ctx.send_viewport_cmd(ViewportCommand::Close);
-        }
+        log::debug!("Close requested through the app");
+        self.finish_native_shutdown(ctx, NativeShutdown::Close(self.tray_availability()));
     }
 
-    fn hide_window(&mut self, ctx: &egui::Context, tray_available: bool) -> bool {
-        if !tray_available {
+    /// Restores Quick add's previous hidden state while the tray is usable.
+    pub(super) fn return_to_tray_after_capture(&mut self, ctx: &egui::Context) {
+        self.hide_window(ctx, self.tray_availability());
+    }
+
+    fn hide_window(&mut self, ctx: &egui::Context, availability: Availability) -> bool {
+        log::debug!("Window hide requested (tray: {availability:?})");
+        if !availability.can_hide() {
             return false;
         }
-        if !self.save_task_context() {
-            self.show_window(ctx);
-            return true;
-        }
-        self.finish_inline_edit();
-        if let Some(id) = self.settings_list_id {
-            self.rename_list(id);
-        }
-        if !self.retry_dirty_lists() {
+        if !self.finish_open_editors() || !self.retry_dirty_lists() {
             self.show_window(ctx);
             return true;
         }
         self.drag = None;
         self.hovered_title = None;
         self.window_hidden = true;
+        log::info!("Window hidden to tray");
         ctx.send_viewport_cmd(ViewportCommand::Visible(false));
         true
     }
 
     /// Reveals and focuses the existing native window.
     pub(super) fn show_window(&mut self, ctx: &egui::Context) {
+        self.restore_window(ctx);
+        ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
+        ctx.send_viewport_cmd(ViewportCommand::Focus);
+    }
+
+    fn restore_window(&mut self, ctx: &egui::Context) {
+        if self.window_hidden {
+            log::info!("Window restored from tray");
+        }
         self.window_hidden = false;
         self.last_pin_state = None;
         // X11 window managers may remove state hints when a window is unmapped.
@@ -155,8 +183,6 @@ impl MinimalistApp {
             self.next_taskbar_check = Instant::now();
         }
         ctx.send_viewport_cmd(ViewportCommand::Visible(true));
-        ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
-        ctx.send_viewport_cmd(ViewportCommand::Focus);
     }
 
     /// Processes native reveal, tray, close, and minimize requests while hidden or visible.
@@ -168,6 +194,7 @@ impl MinimalistApp {
     pub(super) fn handle_window_actions(&mut self, ctx: &egui::Context, minimized: bool) {
         let mut actions: Vec<_> =
             std::iter::from_fn(|| self.tray.as_ref().and_then(Tray::next_action)).collect();
+        actions.extend(self.take_global_shortcut_actions());
         if self
             .instance
             .as_ref()
@@ -183,15 +210,8 @@ impl MinimalistApp {
         {
             actions.push(Action::Show);
         }
-        let close_requested = ctx.input(|input| input.viewport().close_requested());
-        // Show and Quit take precedence; idle visible ticks need no D-Bus probe.
-        let check_host = actions.is_empty()
-            && !self.quitting
-            && (close_requested
-                || (minimized && !self.window_hidden)
-                || (self.window_hidden && Instant::now() >= self.next_scan));
-        let tray_available = check_host && self.tray.as_ref().is_some_and(Tray::available);
-        self.handle_window_events(ctx, minimized, &actions, tray_available);
+        let availability = self.tray_availability();
+        self.handle_window_events(ctx, minimized, &actions, Some(availability));
     }
 
     fn handle_window_events(
@@ -199,65 +219,114 @@ impl MinimalistApp {
         ctx: &egui::Context,
         minimized: bool,
         actions: &[Action],
-        tray_available: bool,
+        availability: Option<Availability>,
     ) {
-        let mut shown = false;
-        for action in actions {
-            match action {
-                Action::Show => {
-                    self.show_window(ctx);
-                    shown = true;
-                }
-                Action::Quit => {
-                    self.quit(ctx);
-                    return;
-                }
-            }
-        }
         if self.quitting {
             return;
         }
+        let pending = self.pending_native_shutdown.take();
+        if actions.contains(&Action::Quit) || matches!(pending, Some(NativeShutdown::Quit)) {
+            self.request_native_shutdown(ctx, NativeShutdown::Quit, minimized);
+            return;
+        }
         let close_requested = ctx.input(|input| input.viewport().close_requested());
-        if shown {
+        let quick_add = actions.contains(&Action::QuickAdd);
+        let show = actions.contains(&Action::Show);
+        if show || quick_add {
+            if quick_add {
+                self.request_global_quick_add(ctx);
+            } else {
+                self.show_window(ctx);
+            }
+            if show {
+                self.keep_window_after_capture();
+            }
             if close_requested {
                 ctx.send_viewport_cmd(ViewportCommand::CancelClose);
             }
             return;
         }
         if close_requested {
-            if !self.finish_pending_changes() {
-                ctx.send_viewport_cmd(ViewportCommand::CancelClose);
-                self.show_window(ctx);
-                return;
-            }
-            if self.hide_window(ctx, tray_available) {
-                ctx.send_viewport_cmd(ViewportCommand::CancelClose);
-            }
+            log::debug!("Native close requested (tray: {availability:?})");
+            let close = NativeShutdown::Close(availability.unwrap_or(Availability::Unavailable));
+            self.request_native_shutdown(ctx, close, minimized);
+        } else if let Some(NativeShutdown::Close(previous)) = pending {
+            let close = NativeShutdown::Close(availability.unwrap_or(previous));
+            self.request_native_shutdown(ctx, close, minimized);
         } else if minimized && !self.window_hidden {
-            self.hide_window(ctx, tray_available);
-        } else if self.window_hidden && Instant::now() >= self.next_scan && !tray_available {
-            self.show_window(ctx);
+            self.hide_window(ctx, availability.unwrap_or(Availability::Unavailable));
+        } else if self.window_hidden && availability == Some(Availability::Unavailable) {
+            log::warn!("Tray became unavailable while hidden; restoring the window");
+            self.restore_window(ctx);
             self.status =
                 Some("The desktop tray is unavailable; the window has been restored.".into());
-            self.next_scan = Instant::now() + SCAN_INTERVAL;
         }
     }
 
-    fn quit(&mut self, ctx: &egui::Context) {
+    fn request_native_shutdown(
+        &mut self,
+        ctx: &egui::Context,
+        shutdown: NativeShutdown,
+        minimized: bool,
+    ) {
+        self.global_quick_add_requested = None;
+        // Eframe runs only logic for a minimized or occluded root viewport.
+        if self.window_hidden
+            || minimized
+            || ctx.input(|input| input.viewport().visible() == Some(false))
+        {
+            self.finish_native_shutdown(ctx, shutdown);
+        } else {
+            self.pending_native_shutdown = Some(shutdown);
+        }
+    }
+
+    /// Applies native requests after widgets have consumed the current editor input.
+    pub(super) fn finish_window_actions_after_input(&mut self, ctx: &egui::Context) {
+        self.finish_native_shutdown_after_input(ctx);
+        if self.keyboard.deferred_events.is_empty()
+            && let Some(was_hidden) = self.global_quick_add_requested.take()
+            && !self.quitting
+        {
+            self.open_global_quick_add(ctx, was_hidden);
+            ctx.request_repaint();
+        }
+    }
+
+    fn finish_native_shutdown_after_input(&mut self, ctx: &egui::Context) {
+        let Some(shutdown) = self.pending_native_shutdown else {
+            return;
+        };
+        if !self.keyboard.deferred_events.is_empty() {
+            cancel_native_close(ctx);
+            return;
+        }
+        self.pending_native_shutdown = None;
+        if !self.quitting {
+            self.finish_native_shutdown(ctx, shutdown);
+        }
+    }
+
+    fn finish_native_shutdown(&mut self, ctx: &egui::Context, shutdown: NativeShutdown) {
         if !self.finish_pending_changes() {
+            log::info!("Close or Quit canceled because changes need attention");
+            cancel_native_close(ctx);
             self.show_window(ctx);
             return;
         }
-        self.quitting = true;
-        ctx.send_viewport_cmd(ViewportCommand::Close);
-    }
-
-    /// Saves an active inline edit before navigating, hiding, or quitting.
-    pub(super) fn finish_inline_edit(&mut self) {
-        self.finish_subtask_edit();
-        if let Some((list_id, task_id)) = self.editing {
-            self.commit_task_edit(list_id, task_id, &self.edit_text.clone());
+        if let NativeShutdown::Close(availability) = shutdown
+            && availability != Availability::Unavailable
+        {
+            self.hide_window(ctx, availability);
+            cancel_native_close(ctx);
+            return;
         }
+        self.quitting = true;
+        if let Some(instance) = &self.instance {
+            instance.stop_reveal_requests();
+        }
+        log::info!("Application exit accepted");
+        ctx.send_viewport_cmd(ViewportCommand::Close);
     }
 
     /// Finishes accepted changes while retaining failed capture drafts before native shutdown.
@@ -265,17 +334,10 @@ impl MinimalistApp {
     /// # Returns
     /// Whether every accepted capture, list, and preference change is saved.
     pub(super) fn finish_pending_changes(&mut self) -> bool {
-        if self.reopen_failed_quick_capture() {
-            return false;
-        }
-        if !self.save_task_context() {
+        if self.reopen_failed_quick_capture() || !self.finish_open_editors() {
             return false;
         }
         self.drag = None;
-        self.finish_inline_edit();
-        if let Some(id) = self.settings_list_id {
-            self.rename_list(id);
-        }
         if let Some((list_id, task_id, _)) = self.delete_animation.take() {
             self.remove_task(list_id, task_id);
         }
@@ -283,6 +345,27 @@ impl MinimalistApp {
             self.archive_completed(list_id);
         }
         self.retry_dirty_lists()
+    }
+
+    /// Saves notes and commits inline edits and the current list name.
+    ///
+    /// # Returns
+    /// False if the notes editor still needs attention.
+    fn finish_open_editors(&mut self) -> bool {
+        if !self.save_task_context() {
+            return false;
+        }
+        self.finish_inline_edit();
+        if let Some(id) = self.settings_list_id {
+            self.rename_list(id);
+        }
+        true
+    }
+}
+
+fn cancel_native_close(ctx: &egui::Context) {
+    if ctx.input(|input| input.viewport().close_requested()) {
+        ctx.send_viewport_cmd(ViewportCommand::CancelClose);
     }
 }
 
@@ -333,26 +416,44 @@ mod tests {
         draw(&mut app, enter());
         assert!(app.quick_capture.is_some() && app.status.is_some());
         app.window_hidden = true;
-        let output = ctx.run_logic(&Default::default(), |ctx| app.quit(ctx));
+        let mut input = egui::RawInput::default();
+        input
+            .viewports
+            .get_mut(&egui::ViewportId::ROOT)
+            .unwrap()
+            .events = vec![egui::ViewportEvent::Close];
+        let output = ctx.run_logic(&input, |ctx| {
+            app.handle_window_events(ctx, false, &[Action::Quit], None);
+        });
         assert!(!app.quitting && !app.window_hidden);
         assert!(app.quick_capture.is_some());
-        assert!(
-            output
-                .viewport_commands
-                .values()
-                .flatten()
-                .all(|command| *command != ViewportCommand::Close)
-        );
+        let commands = &output.viewport_commands[&egui::ViewportId::ROOT];
+        assert!(commands.contains(&ViewportCommand::CancelClose));
+        assert!(!commands.contains(&ViewportCommand::Close));
         std::fs::remove_file(app.workspace.join("lists")).unwrap();
         std::fs::rename(app.workspace.join("offline"), app.workspace.join("lists")).unwrap();
         draw(&mut app, vec![]);
         draw(&mut app, enter());
         assert!(app.quick_capture.is_none());
-        let output = ctx.run_logic(&Default::default(), |ctx| app.quit(ctx));
+        input
+            .viewports
+            .get_mut(&egui::ViewportId::ROOT)
+            .unwrap()
+            .occluded = Some(true);
+        let output = ctx.run_logic(&input, |ctx| {
+            app.handle_window_events(
+                ctx,
+                false,
+                &[Action::QuickAdd, Action::Quit, Action::Show],
+                None,
+            );
+        });
         assert!(app.quitting);
-        assert!(
-            output.viewport_commands[&egui::ViewportId::ROOT].contains(&ViewportCommand::Close)
-        );
+        assert!(app.global_quick_add_requested.is_none());
+        let commands = &output.viewport_commands[&egui::ViewportId::ROOT];
+        assert!(commands.contains(&ViewportCommand::Close));
+        assert!(!commands.contains(&ViewportCommand::CancelClose));
+        assert!(!commands.contains(&ViewportCommand::Focus));
         let saved = crate::storage::load_workspace(&app.workspace).unwrap();
         assert_eq!(saved.lists[0].data.tasks.len(), 1);
         assert_eq!(saved.lists[0].data.tasks[0].text, "Retained tray capture");
@@ -399,6 +500,42 @@ mod tests {
     }
 
     #[test]
+    fn show_and_quick_add_override_native_close_and_minimize_in_either_order() {
+        for actions in [
+            &[Action::QuickAdd][..],
+            &[Action::Show, Action::QuickAdd],
+            &[Action::QuickAdd, Action::Show],
+        ] {
+            let (ctx, mut app) = test_app();
+            app.window_hidden = true;
+            let mut input = egui::RawInput::default();
+            input
+                .viewports
+                .get_mut(&egui::ViewportId::ROOT)
+                .unwrap()
+                .events = vec![egui::ViewportEvent::Close];
+
+            let output = ctx.run_logic(&input, |ctx| {
+                app.handle_window_events(ctx, true, actions, Some(Availability::Available));
+            });
+            assert!(!app.window_hidden);
+            assert_eq!(app.global_quick_add_requested, Some(actions.len() == 1));
+            let commands = &output.viewport_commands[&egui::ViewportId::ROOT];
+            assert!(commands.contains(&ViewportCommand::CancelClose));
+            assert!(commands.contains(&ViewportCommand::Minimized(false)));
+            assert!(!commands.contains(&ViewportCommand::Visible(false)));
+            assert_eq!(
+                commands
+                    .iter()
+                    .filter(|c| **c == ViewportCommand::Focus)
+                    .count(),
+                1
+            );
+            std::fs::remove_dir_all(app.workspace).unwrap();
+        }
+    }
+
+    #[test]
     fn revealing_reapplies_the_saved_window_level_after_mapping() {
         for pinned in [false, true] {
             let (ctx, mut app) = test_app();
@@ -431,6 +568,169 @@ mod tests {
     }
 
     #[test]
+    fn tray_quick_add_reveals_a_hidden_window_and_focuses_the_entry_field() {
+        let (ctx, mut app) = test_app();
+        app.window_hidden = true;
+        let output = ctx.run_logic(&Default::default(), |ctx| {
+            app.handle_window_events(ctx, false, &[Action::QuickAdd], None);
+        });
+        assert!(!app.window_hidden);
+        let commands = &output.viewport_commands[&egui::ViewportId::ROOT];
+        let mapped = commands
+            .iter()
+            .position(|command| *command == ViewportCommand::Visible(true))
+            .unwrap();
+        let focused = commands
+            .iter()
+            .position(|command| *command == ViewportCommand::Focus)
+            .unwrap();
+        assert!(mapped < focused);
+        crate::app::tests::settle_keyboard(&ctx, &mut app);
+        assert!(app.quick_capture.is_some());
+        assert_eq!(
+            ctx.memory(|memory| memory.focused()),
+            Some(egui::Id::new("quick-capture-text"))
+        );
+        std::fs::remove_dir_all(&app.workspace).unwrap();
+    }
+
+    #[test]
+    fn tray_quick_add_leaves_deferred_input_with_the_inline_editor() {
+        use crate::app::{
+            keyboard::FocusItem,
+            tests::{chord, focus_widget, frame_input, keyboard_frame, run_frame, settle_keyboard},
+        };
+
+        let (ctx, mut app) = test_app();
+        let list = app.lists[0].key;
+        let task = Task::new("Original");
+        let task_id = task.id;
+        app.lists[0].data.tasks.push(task);
+        assert!(app.save_list_index(0));
+        focus_widget(&ctx, &mut app, FocusItem::Task(list, task_id).id());
+        keyboard_frame(
+            &ctx,
+            &mut app,
+            chord(egui::Key::Enter, egui::Modifiers::NONE),
+            430.0,
+        );
+        settle_keyboard(&ctx, &mut app);
+        assert_eq!(app.editing, Some((list, task_id)));
+
+        let input = frame_input(
+            egui::vec2(430.0, 500.0),
+            ctx.input(|input| input.time) + 0.3,
+            vec![
+                egui::Event::Paste("One\nTwo".into()),
+                egui::Event::Copy,
+                egui::Event::Text("Three".into()),
+            ],
+        );
+        run_frame(&ctx, input, |ui| {
+            // Native eframe runs logic and then UI with the same input batch.
+            app.handle_window_events(ui.ctx(), false, &[Action::QuickAdd], None);
+            <MinimalistApp as eframe::App>::ui(&mut app, ui, &mut eframe::Frame::_new_kittest());
+        });
+        settle_keyboard(&ctx, &mut app);
+
+        let saved = crate::storage::load_workspace(&app.workspace).unwrap();
+        let tasks = &saved.lists[0].data.tasks;
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].text, "OriginalOne TwoThree");
+        assert!(app.quick_capture.as_ref().unwrap().text.is_empty());
+        assert_eq!(
+            ctx.memory(|memory| memory.focused()),
+            Some(egui::Id::new("quick-capture-text"))
+        );
+        std::fs::remove_dir_all(&app.workspace).unwrap();
+    }
+
+    #[test]
+    fn native_close_and_tray_quit_save_input_from_the_last_visible_frame() {
+        use crate::app::{
+            keyboard::FocusItem,
+            tests::{chord, focus_widget, frame_input, keyboard_frame, run_frame, settle_keyboard},
+        };
+
+        for tray_quit in [false, true] {
+            for deferred in [false, true] {
+                let (ctx, mut app) = test_app();
+                let list = app.lists[0].key;
+                let task = Task::new("Original");
+                let task_id = task.id;
+                app.lists[0].data.tasks.push(task);
+                assert!(app.save_list_index(0));
+                focus_widget(&ctx, &mut app, FocusItem::Task(list, task_id).id());
+                keyboard_frame(
+                    &ctx,
+                    &mut app,
+                    chord(egui::Key::Enter, egui::Modifiers::NONE),
+                    430.0,
+                );
+                settle_keyboard(&ctx, &mut app);
+                assert_eq!(app.editing, Some((list, task_id)));
+
+                let mut events = vec![egui::Event::Paste("One\nTwo".into())];
+                if deferred {
+                    events.extend([egui::Event::Copy, egui::Event::Text("Three".into())]);
+                }
+                let size = egui::vec2(430.0, 500.0);
+                let mut input = frame_input(size, ctx.input(|input| input.time) + 0.3, events);
+                let actions: &[_] = if tray_quit {
+                    &[Action::Quit]
+                } else {
+                    input
+                        .viewports
+                        .get_mut(&egui::ViewportId::ROOT)
+                        .unwrap()
+                        .events
+                        .push(egui::ViewportEvent::Close);
+                    &[]
+                };
+                let output = run_frame(&ctx, input, |ui| {
+                    app.handle_window_events(
+                        ui.ctx(),
+                        false,
+                        actions,
+                        Some(Availability::Unavailable),
+                    );
+                    eframe::App::ui(&mut app, ui, &mut eframe::Frame::_new_kittest());
+                });
+                assert_eq!(app.quitting, !deferred);
+                let commands = &output.viewport_output[&egui::ViewportId::ROOT].commands;
+                assert_eq!(
+                    commands.contains(&ViewportCommand::CancelClose),
+                    deferred && !tray_quit
+                );
+                assert_eq!(commands.contains(&ViewportCommand::Close), !deferred);
+
+                if deferred {
+                    let input = frame_input(size, ctx.input(|input| input.time) + 0.3, vec![]);
+                    let output = run_frame(&ctx, input, |ui| {
+                        app.handle_window_actions(ui.ctx(), false);
+                        eframe::App::ui(&mut app, ui, &mut eframe::Frame::_new_kittest());
+                    });
+                    assert!(app.quitting);
+                    assert!(
+                        output.viewport_output[&egui::ViewportId::ROOT]
+                            .commands
+                            .contains(&ViewportCommand::Close)
+                    );
+                }
+
+                let saved = crate::storage::load_workspace(&app.workspace).unwrap();
+                let expected = if deferred {
+                    "OriginalOne TwoThree"
+                } else {
+                    "OriginalOne Two"
+                };
+                assert_eq!(saved.lists[0].data.tasks[0].text, expected);
+                std::fs::remove_dir_all(app.workspace).unwrap();
+            }
+        }
+    }
+
+    #[test]
     fn window_events_save_hide_restore_and_reload() {
         let (ctx, mut app) = test_app();
         let list_id = app.lists[0].key;
@@ -440,7 +740,7 @@ mod tests {
         app.lists[0].data.tasks = vec![task];
 
         let output = ctx.run_logic(&Default::default(), |ctx| {
-            app.handle_window_events(ctx, true, &[], true);
+            app.handle_window_events(ctx, true, &[], Some(Availability::Available));
         });
         assert!(app.window_hidden);
         assert!(
@@ -473,7 +773,7 @@ mod tests {
             .unwrap()
             .events = vec![egui::ViewportEvent::Close];
         let output = ctx.run_logic(&close_input, |ctx| {
-            app.handle_window_events(ctx, true, &[Action::Show], false);
+            app.handle_window_events(ctx, true, &[Action::Show], None);
         });
         assert!(!app.window_hidden);
         assert_eq!(app.taskbar_hidden, None);
@@ -490,16 +790,16 @@ mod tests {
         assert!(!commands.contains(&ViewportCommand::Visible(false)));
 
         let _ = ctx.run_logic(&Default::default(), |ctx| {
-            app.handle_window_events(ctx, true, &[], true);
+            app.handle_window_events(ctx, true, &[], Some(Availability::Available));
         });
         app.next_scan = Instant::now() + SCAN_INTERVAL;
         let _ = ctx.run_logic(&Default::default(), |ctx| {
-            app.handle_window_events(ctx, false, &[], false);
+            app.handle_window_events(ctx, false, &[], None);
         });
         assert!(app.window_hidden);
         app.next_scan = Instant::now();
         let output = ctx.run_logic(&Default::default(), |ctx| {
-            app.handle_window_events(ctx, false, &[], false);
+            app.handle_window_events(ctx, false, &[], Some(Availability::Unavailable));
         });
         assert!(!app.window_hidden);
         assert!(
@@ -512,6 +812,7 @@ mod tests {
         app.status = None;
         app.setup_tray(&ctx, false);
         assert!(app.status.is_none());
+        assert_eq!(app.tray_availability(), Availability::Unavailable);
         let output = ctx.run_logic(&Default::default(), |ctx| app.start_hidden(ctx));
         assert!(!app.window_hidden);
         assert!(
@@ -519,7 +820,7 @@ mod tests {
                 .contains(&ViewportCommand::Visible(true))
         );
         let output = ctx.run_logic(&Default::default(), |ctx| {
-            app.handle_window_events(ctx, true, &[], false);
+            app.handle_window_events(ctx, true, &[], Some(Availability::Unavailable));
         });
         assert!(!app.window_hidden);
         assert!(
@@ -530,8 +831,10 @@ mod tests {
                 .all(|command| *command != ViewportCommand::Visible(false))
         );
         let output = ctx.run_logic(&close_input, |ctx| {
-            app.handle_window_events(ctx, false, &[], false);
+            app.handle_window_events(ctx, false, &[], Some(Availability::Unavailable));
+            app.finish_native_shutdown_after_input(ctx);
         });
+        assert!(app.quitting);
         assert!(
             output
                 .viewport_commands
@@ -540,6 +843,66 @@ mod tests {
                 .all(|command| *command != ViewportCommand::CancelClose)
         );
         std::fs::remove_dir_all(&app.workspace).unwrap();
+    }
+
+    #[test]
+    fn unchecked_or_inconclusive_tray_checks_do_not_restore_a_hidden_window() {
+        for availability in [
+            None,
+            Some(Availability::Unknown),
+            Some(Availability::Available),
+        ] {
+            let (ctx, mut app) = test_app();
+            app.window_hidden = true;
+            // The deadline may pass after handle_window_actions chooses not to probe.
+            app.next_scan = Instant::now();
+            let output = ctx.run_logic(&Default::default(), |ctx| {
+                app.handle_window_events(ctx, false, &[], availability);
+            });
+            assert!(app.window_hidden);
+            assert!(app.status.is_none());
+            assert!(output.viewport_commands.values().flatten().all(|command| {
+                !matches!(
+                    command,
+                    ViewportCommand::Visible(true) | ViewportCommand::Focus
+                )
+            }));
+            std::fs::remove_dir_all(&app.workspace).unwrap();
+        }
+    }
+
+    #[test]
+    fn an_inconclusive_probe_does_not_hide_or_exit() {
+        for close in [false, true] {
+            let (ctx, mut app) = test_app();
+            let mut input = egui::RawInput::default();
+            if close {
+                input
+                    .viewports
+                    .get_mut(&egui::ViewportId::ROOT)
+                    .unwrap()
+                    .events = vec![egui::ViewportEvent::Close];
+            }
+            // Only an already-created native tray can produce Unknown in the application.
+            let output = ctx.run_logic(&input, |ctx| {
+                app.handle_window_events(ctx, !close, &[], Some(Availability::Unknown));
+                app.finish_native_shutdown_after_input(ctx);
+            });
+            assert!(!app.window_hidden);
+            assert!(!app.quitting);
+            assert!(app.status.is_none());
+            let mut commands = output.viewport_commands.values().flatten();
+            if close {
+                assert!(commands.any(|command| *command == ViewportCommand::CancelClose));
+            }
+            assert!(output.viewport_commands.values().flatten().all(|command| {
+                !matches!(
+                    command,
+                    ViewportCommand::Visible(false) | ViewportCommand::Close
+                )
+            }));
+            std::fs::remove_dir_all(&app.workspace).unwrap();
+        }
     }
 
     #[test]
@@ -559,12 +922,12 @@ mod tests {
             app.window_hidden = true;
             let output = ctx.run_logic(&Default::default(), |ctx| {
                 if tray_quit {
-                    app.quit(ctx);
+                    app.handle_window_events(ctx, false, &[Action::Quit], None);
                 } else {
                     app.close_window(ctx);
                 }
             });
-            assert_eq!(app.quitting, tray_quit);
+            assert!(app.quitting);
             assert!(
                 output.viewport_commands[&egui::ViewportId::ROOT].contains(&ViewportCommand::Close)
             );

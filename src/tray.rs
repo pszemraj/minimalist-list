@@ -1,7 +1,7 @@
 //! Native tray icon, menu events, and Linux tray-host detection.
 
 use eframe::egui;
-use std::sync::mpsc::{self, Receiver};
+use std::sync::mpsc::{self, Receiver, Sender};
 use tray_icon::{
     Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent,
     menu::{Menu, MenuEvent, MenuItem},
@@ -11,15 +11,42 @@ use tray_icon::{
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
     Show,
+    QuickAdd,
     Quit,
+}
+
+#[cfg(target_os = "linux")]
+mod linux;
+#[cfg(target_os = "linux")]
+pub(crate) use linux::linux_host_available;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Result of checking whether an existing native tray can still reopen the window.
+pub(crate) enum Availability {
+    Available,
+    Unavailable,
+    /// The check was inconclusive or an absence is still awaiting confirmation.
+    #[cfg(any(target_os = "linux", test))]
+    Unknown,
+}
+
+impl Availability {
+    /// Requires a confirmed reopen path before hiding a visible window.
+    ///
+    /// # Returns
+    /// Whether the tray can reopen the window.
+    pub(crate) fn can_hide(self) -> bool {
+        self == Self::Available
+    }
 }
 
 /// Keeps the native icon alive and receives its menu actions.
 pub struct Tray {
+    #[cfg(not(target_os = "linux"))]
     _icon: TrayIcon,
     actions: Receiver<Action>,
     #[cfg(target_os = "linux")]
-    host: zbus::blocking::Proxy<'static>,
+    monitor: linux::Monitor,
 }
 
 impl Tray {
@@ -28,7 +55,6 @@ impl Tray {
     /// # Arguments
     ///
     /// - `ctx` - Context to wake when a tray action arrives.
-    /// - `supports_hiding` - Whether the selected window backend supports hide and restore.
     ///
     /// # Returns
     ///
@@ -37,71 +63,29 @@ impl Tray {
     /// # Errors
     ///
     /// Returns an error if native tray support is unavailable.
-    pub fn new(ctx: &egui::Context, supports_hiding: bool) -> Result<Self, String> {
-        if !supports_hiding {
-            return Err("Hiding to the tray requires X11 or XWayland on Linux.".into());
-        }
-        #[cfg(target_os = "linux")]
-        let host = linux_host()?;
-        let menu = Menu::new();
-        let show = MenuItem::new("Show Minimalist List", true, None);
-        let quit = MenuItem::new("Quit", true, None);
-        menu.append_items(&[&show, &quit])
-            .map_err(|error| error.to_string())?;
-        let icon = icon_data();
-        let icon = Icon::from_rgba(icon.rgba, icon.width, icon.height)
-            .map_err(|error| error.to_string())?;
-        let builder = TrayIconBuilder::new()
-            .with_id("minimalist-list")
-            .with_tooltip("Minimalist List")
-            .with_menu(Box::new(menu))
-            .with_menu_on_left_click(false);
-        #[cfg(target_os = "macos")]
-        let builder = builder.with_icon_templated(icon);
-        #[cfg(not(target_os = "macos"))]
-        let builder = builder.with_icon(icon);
-        let icon = builder.build().map_err(|error| error.to_string())?;
-
+    pub fn new(ctx: &egui::Context) -> Result<Self, String> {
         let (sender, actions) = mpsc::channel();
-        let menu_sender = sender.clone();
-        let menu_ctx = ctx.clone();
-        let show_id = show.id().clone();
-        let quit_id = quit.id().clone();
-        MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
-            let action = if event.id == show_id {
-                Action::Show
-            } else if event.id == quit_id {
-                Action::Quit
-            } else {
-                return;
-            };
-            let _ = menu_sender.send(action);
-            menu_ctx.request_repaint();
-        }));
-        let tray_ctx = ctx.clone();
-        let tray_id = icon.id().clone();
-        TrayIconEvent::set_event_handler(Some(move |event| {
-            if matches!(event, TrayIconEvent::Click {
-                id, button: MouseButton::Left, button_state: MouseButtonState::Up, ..
-            } if id == tray_id)
-            {
-                let _ = sender.send(Action::Show);
-                tray_ctx.request_repaint();
-            }
-        }));
+        install_handlers(ctx, sender);
         Ok(Self {
-            _icon: icon,
+            #[cfg(not(target_os = "linux"))]
+            _icon: build_icon()?,
             actions,
             #[cfg(target_os = "linux")]
-            host,
+            monitor: linux::Monitor::start(ctx.clone())?,
         })
+    }
+
+    /// Waits briefly for the first background result before starting hidden.
+    #[cfg(target_os = "linux")]
+    pub(crate) fn wait_for_startup(&self) {
+        self.monitor.wait_for_startup();
     }
 
     /// Returns the next pending native action, if any.
     ///
     /// # Returns
     ///
-    /// A Show or Quit action from the icon or its menu.
+    /// A Show, Quick add, or Quit action from the icon or its menu.
     pub fn next_action(&self) -> Option<Action> {
         self.actions.try_recv().ok()
     }
@@ -110,13 +94,10 @@ impl Tray {
     ///
     /// # Returns
     ///
-    /// Whether the hidden window can be reopened through the tray.
-    pub fn available(&self) -> bool {
+    /// Whether the host is present, absent, or temporarily could not be checked.
+    pub(crate) fn availability(&self) -> Availability {
         #[cfg(target_os = "linux")]
-        return self
-            .host
-            .get_property::<bool>("IsStatusNotifierHostRegistered")
-            .unwrap_or(false);
+        return self.monitor.availability();
         #[cfg(target_os = "windows")]
         {
             #[link(name = "user32")]
@@ -127,54 +108,68 @@ impl Tray {
                 ) -> *mut std::ffi::c_void;
             }
             // A live icon object can outlast Explorer or precede its startup.
-            !unsafe { FindWindowA(c"Shell_TrayWnd".as_ptr(), std::ptr::null()) }.is_null()
+            if unsafe { FindWindowA(c"Shell_TrayWnd".as_ptr(), std::ptr::null()) }.is_null() {
+                Availability::Unavailable
+            } else {
+                Availability::Available
+            }
         }
         #[cfg(not(any(target_os = "linux", target_os = "windows")))]
-        true
+        Availability::Available
     }
 }
 
-/// Reports whether Linux has a registered desktop tray host.
-///
-/// # Returns
-///
-/// Whether the desktop exposes a usable StatusNotifier host.
-#[cfg(target_os = "linux")]
-pub(crate) fn linux_host_available() -> bool {
-    linux_host().is_ok()
+const TRAY_ID: &str = "minimalist-list";
+const MENU_ACTIONS: [(Action, &str, &str); 3] = [
+    (Action::Show, "minimalist-show", "Show Minimalist List"),
+    (Action::QuickAdd, "minimalist-quick-add", "Quick add"),
+    (Action::Quit, "minimalist-quit", "Quit"),
+];
+
+fn install_handlers(ctx: &egui::Context, sender: Sender<Action>) {
+    let menu_sender = sender.clone();
+    let menu_ctx = ctx.clone();
+    MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
+        if let Some((action, _, _)) = MENU_ACTIONS.iter().find(|(_, id, _)| event.id.0 == *id) {
+            let _ = menu_sender.send(*action);
+            menu_ctx.request_repaint();
+        }
+    }));
+    let tray_ctx = ctx.clone();
+    TrayIconEvent::set_event_handler(Some(move |event: TrayIconEvent| {
+        // GNOME reserves single left clicks for its menu and forwards middle clicks.
+        if matches!(event, TrayIconEvent::Click {
+            id, button, button_state: MouseButtonState::Up, ..
+        } if id.as_ref() == TRAY_ID
+            && (button == MouseButton::Left
+                || (cfg!(target_os = "linux") && button == MouseButton::Middle)))
+        {
+            let _ = sender.send(Action::Show);
+            tray_ctx.request_repaint();
+        }
+    }));
 }
 
-#[cfg(target_os = "linux")]
-fn linux_host() -> Result<zbus::blocking::Proxy<'static>, String> {
-    let connection = zbus::blocking::connection::Builder::session()
-        .and_then(|builder| {
-            builder
-                .method_timeout(std::time::Duration::from_secs(1))
-                .build()
-        })
-        .map_err(|error| error.to_string())?;
-    let host: zbus::blocking::Proxy<'static> = zbus::blocking::proxy::Builder::new(&connection)
-        .destination("org.kde.StatusNotifierWatcher")
-        .and_then(|builder| builder.path("/StatusNotifierWatcher"))
-        .and_then(|builder| builder.interface("org.kde.StatusNotifierWatcher"))
-        .and_then(|builder| {
-            builder
-                .cache_properties(zbus::proxy::CacheProperties::No)
-                .build()
-        })
-        .map_err(|error| error.to_string())?;
-    if !host
-        .get_property::<bool>("IsStatusNotifierHostRegistered")
-        .unwrap_or(false)
-    {
-        return Err(
-            "No desktop tray host is available. Close and minimize use their normal behavior."
-                .into(),
-        );
+fn build_icon() -> Result<TrayIcon, String> {
+    let menu = Menu::new();
+    for (_, id, label) in MENU_ACTIONS {
+        menu.append(&MenuItem::with_id(id, label, true, None))
+            .map_err(|error| error.to_string())?;
     }
-    Ok(host)
+    let icon = icon_data();
+    let icon =
+        Icon::from_rgba(icon.rgba, icon.width, icon.height).map_err(|error| error.to_string())?;
+    let builder = TrayIconBuilder::new()
+        .with_id(TRAY_ID)
+        .with_tooltip("Minimalist List")
+        .with_menu(Box::new(menu))
+        .with_menu_on_left_click(false);
+    #[cfg(target_os = "macos")]
+    let builder = builder.with_icon_templated(icon);
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.with_icon(icon);
+    builder.build().map_err(|error| error.to_string())
 }
-
 /// Creates the template-friendly checklist icon used by the native tray.
 ///
 /// # Returns

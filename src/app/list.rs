@@ -3,10 +3,11 @@
 use super::{
     DragState, INSERT_ANIMATION_SECONDS, MinimalistApp, SWIPE_ACTIONS, SWIPE_COMPLETE,
     keyboard::{FocusItem, mark_own_focus_frame, take_key},
+    paste::new_tasks,
     text_input_shortcuts,
     theme::Palette,
 };
-use crate::model::{Task, TaskSort};
+use crate::model::TaskSort;
 use eframe::egui;
 use egui::{
     Align, Align2, Button, Color32, CornerRadius, CursorIcon, Frame, Id, Margin, Pos2, Rect,
@@ -293,19 +294,33 @@ impl MinimalistApp {
     }
 
     fn add_task(&mut self, list_id: Uuid) {
-        let text = self.new_task.trim();
-        if text.is_empty() {
-            return;
-        }
-        if let Some(index) = self.list_index(list_id) {
-            let task = Task::new(text);
-            self.newest_task = Some((task.id, Instant::now()));
-            self.lists[index].data.tasks.insert(0, task);
+        let text = self.new_task.trim().to_owned();
+        if !text.is_empty() && self.add_tasks(list_id, &[text]).is_some() {
             self.new_task.clear();
-            self.save_list_index(index);
-            self.request_task_focus = true;
-            self.keyboard.pending = Some(Id::new(("new-task", list_id)));
         }
+    }
+
+    /// Adds tasks at the top of a list in one save, keeping their given order.
+    ///
+    /// # Arguments
+    /// - `list_id` - Destination list identity.
+    /// - `texts` - Task titles in top-to-bottom order.
+    ///
+    /// # Returns
+    /// `None` if the list or titles are missing; otherwise whether the list reached disk.
+    ///
+    /// # Panics
+    /// Panics if an internally resolved list index is invalid.
+    pub(super) fn add_tasks(&mut self, list_id: Uuid, texts: &[String]) -> Option<bool> {
+        let index = self.list_index(list_id)?;
+        let tasks = new_tasks(texts);
+        self.newest_task = Some((tasks.first()?.id, Instant::now()));
+        self.record_task_paste_undo(list_id, &tasks);
+        self.lists[index].data.tasks.splice(0..0, tasks);
+        let saved = self.save_list_index(index);
+        self.request_task_focus = true;
+        self.keyboard.pending = Some(Id::new(("new-task", list_id)));
+        Some(saved)
     }
 
     fn task_entry_progress(&self, task_id: Uuid) -> f32 {

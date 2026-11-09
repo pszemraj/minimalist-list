@@ -95,6 +95,128 @@ fn subtask_enter_returns_focus_to_its_completion_control() {
 }
 
 #[test]
+fn opening_an_empty_checklist_focuses_its_add_field() {
+    let (ctx, mut app) = test_app();
+    let list = app.lists[0].key;
+    let task = Task::new("Parent");
+    let parent = task.id;
+    app.lists[0].data.tasks.push(task);
+    idle(&ctx, &mut app);
+    let opener = Id::new(("task-checklist", list, parent));
+    let pos = ctx.read_response(opener).unwrap().rect.center();
+    for pressed in [true, false] {
+        frame(
+            &ctx,
+            &mut app,
+            vec![
+                Event::PointerMoved(pos),
+                Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: Modifiers::NONE,
+                },
+            ],
+            430.0,
+        );
+    }
+    idle(&ctx, &mut app);
+    let entry = Id::new(("new-subtask", list, parent));
+    assert_eq!(ctx.memory(|memory| memory.focused()), Some(entry));
+    type_text(&ctx, &mut app, "First child");
+    key(&ctx, &mut app, Key::Enter, Modifiers::NONE);
+    assert_eq!(ctx.memory(|memory| memory.focused()), Some(entry));
+    let saved = storage::load_workspace(&app.workspace).unwrap();
+    assert_eq!(saved.lists[0].data.tasks[0].subtasks[0].text, "First child");
+    cleanup(&app);
+}
+
+#[test]
+fn tab_reaches_child_text_and_enter_opens_its_editor() {
+    let (ctx, mut app) = test_app();
+    let list = app.lists[0].key;
+    let mut task = Task::new("Parent");
+    task.subtasks.push(crate::model::Subtask::new("Original"));
+    let parent = task.id;
+    let child = task.subtasks[0].id;
+    app.lists[0].data.tasks.push(task);
+    app.switch_subtask_panel(Some((list, parent)));
+    focus(&ctx, &mut app, FocusItem::Subtask(list, parent, child).id());
+    key(&ctx, &mut app, Key::Tab, Modifiers::NONE);
+    assert_eq!(
+        ctx.memory(|memory| memory.focused()),
+        Some(Id::new(("edit-subtask-button", list, parent, child)))
+    );
+    key(&ctx, &mut app, Key::Enter, Modifiers::NONE);
+    assert_eq!(
+        ctx.memory(|memory| memory.focused()),
+        Some(Id::new(("edit-subtask", list, parent, child)))
+    );
+    assert!(app.details.editor.is_some());
+    cleanup(&app);
+}
+
+#[test]
+fn right_from_the_checklist_control_enters_its_first_child() {
+    let (ctx, mut app) = test_app();
+    let list = app.lists[0].key;
+    let mut task = Task::new("Parent");
+    task.subtasks.push(crate::model::Subtask::new("Child"));
+    let parent = task.id;
+    let child = task.subtasks[0].id;
+    app.lists[0].data.tasks.push(task);
+    let opener = Id::new(("task-checklist", list, parent));
+    focus(&ctx, &mut app, opener);
+    key(&ctx, &mut app, Key::ArrowRight, Modifiers::NONE);
+    assert_eq!(app.subtasks_for, Some((list, parent)));
+    assert_eq!(
+        ctx.memory(|memory| memory.focused()),
+        Some(FocusItem::Subtask(list, parent, child).id())
+    );
+    cleanup(&app);
+}
+
+#[test]
+fn existing_child_editors_keep_navigation_keys_for_the_text_cursor() {
+    for navigation in [
+        Key::ArrowLeft,
+        Key::ArrowRight,
+        Key::ArrowUp,
+        Key::ArrowDown,
+        Key::Home,
+        Key::End,
+    ] {
+        let (ctx, mut app) = test_app();
+        let list = app.lists[0].key;
+        let mut task = Task::new("Parent");
+        task.subtasks.push(crate::model::Subtask::new("Original"));
+        task.subtasks[0].completed = true;
+        let parent = task.id;
+        let child = task.subtasks[0].id;
+        app.lists[0].data.tasks.push(task);
+        app.switch_subtask_panel(Some((list, parent)));
+        app.begin_subtask_edit(list, parent, child);
+        idle(&ctx, &mut app);
+        let editor = Id::new(("edit-subtask", list, parent, child));
+        key(&ctx, &mut app, navigation, Modifiers::NONE);
+        assert_eq!(
+            ctx.memory(|memory| memory.focused()),
+            Some(editor),
+            "{navigation:?}"
+        );
+        assert_eq!(app.subtasks_for, Some((list, parent)), "{navigation:?}");
+        assert!(app.details.editor.is_some(), "{navigation:?}");
+        type_text(&ctx, &mut app, "!");
+        key(&ctx, &mut app, Key::Enter, Modifiers::NONE);
+        let saved = storage::load_workspace(&app.workspace).unwrap();
+        let saved_child = &saved.lists[0].data.tasks[0].subtasks[0];
+        assert!(saved_child.text.contains('!'));
+        assert!(saved_child.completed);
+        cleanup(&app);
+    }
+}
+
+#[test]
 fn archive_shortcut_leaves_task_and_subtask_text_editors_untouched() {
     for (editor, text) in [
         (0, "Draft"),
@@ -419,5 +541,138 @@ fn scrolled_settings_focus_outline_stays_in_the_visible_region() {
             );
         }
     }
+    cleanup(&app);
+}
+
+fn context_fixture() -> (egui::Context, MinimalistApp, Uuid, Vec<Uuid>) {
+    let (ctx, mut app) = test_app();
+    let list = app.lists[0].key;
+    app.lists[0].data.tasks = ["A", "B", "C"].map(Task::new).to_vec();
+    app.lists[0].data.tasks[1]
+        .subtasks
+        .push(crate::model::Subtask::new("Child"));
+    let tasks = app.lists[0].data.tasks.iter().map(|task| task.id).collect();
+    assert!(app.save_list_index(0));
+    app.request_task_focus = false;
+    idle(&ctx, &mut app);
+    (ctx, app, list, tasks)
+}
+
+fn saved_tasks(app: &MinimalistApp) -> Vec<Task> {
+    storage::load_workspace(&app.workspace).unwrap().lists[0]
+        .data
+        .tasks
+        .clone()
+}
+
+#[test]
+fn task_context_shortcut_opens_the_focused_row_editor_and_saves() {
+    let (ctx, mut app, list, tasks) = context_fixture();
+    let row = FocusItem::Task(list, tasks[1]).id();
+    focus(&ctx, &mut app, row);
+    key(&ctx, &mut app, Key::I, Modifiers::COMMAND);
+    let editor = app.task_context.as_ref().unwrap();
+    assert_eq!(
+        (editor.list, editor.task, editor.archived),
+        (list, tasks[1], false)
+    );
+    assert!(editor.text.is_empty(), "the shortcut inserts no text");
+    assert_eq!(
+        ctx.memory(|memory| memory.focused()),
+        Some(Id::new("task-context-text"))
+    );
+    type_text(&ctx, &mut app, "Booking ref 42");
+    assert!(app.save_task_context());
+    idle(&ctx, &mut app);
+    assert!(app.task_context.is_none());
+    assert_eq!(ctx.memory(|memory| memory.focused()), Some(row));
+    let saved = saved_tasks(&app);
+    assert_eq!(saved[1].context, "Booking ref 42");
+    assert!(saved[0].context.is_empty() && saved[2].context.is_empty());
+    cleanup(&app);
+}
+
+#[test]
+fn task_context_shortcut_from_a_child_control_opens_the_parent_editor() {
+    let (ctx, mut app, list, tasks) = context_fixture();
+    app.switch_subtask_panel(Some((list, tasks[1])));
+    let child = app.lists[0].data.tasks[1].subtasks[0].id;
+    focus(
+        &ctx,
+        &mut app,
+        FocusItem::Subtask(list, tasks[1], child).id(),
+    );
+    key(&ctx, &mut app, Key::I, Modifiers::COMMAND);
+    let editor = app.task_context.as_ref().unwrap();
+    assert_eq!((editor.list, editor.task), (list, tasks[1]));
+    cleanup(&app);
+}
+
+#[test]
+fn task_context_shortcut_saves_typed_title_text_before_opening() {
+    let (ctx, mut app, list, tasks) = context_fixture();
+    app.editing = Some((list, tasks[1]));
+    app.edit_text = "B".into();
+    app.request_edit_focus = true;
+    idle(&ctx, &mut app);
+    assert_eq!(
+        ctx.memory(|memory| memory.focused()),
+        Some(Id::new(("edit-task", list, tasks[1])))
+    );
+    // Typing and the shortcut arrive in one batch; the text must land first.
+    let mut events = vec![Event::Text(" edited".into())];
+    events.extend(chord(Key::I, Modifiers::COMMAND));
+    frame(&ctx, &mut app, events, 430.0);
+    idle(&ctx, &mut app);
+    assert!(app.editing.is_none());
+    let editor = app.task_context.as_ref().unwrap();
+    assert_eq!((editor.list, editor.task), (list, tasks[1]));
+    assert!(editor.text.is_empty());
+    assert_eq!(saved_tasks(&app)[1].text, "B edited");
+    cleanup(&app);
+}
+
+#[test]
+fn task_context_shortcut_opens_history_rows_read_only() {
+    let (ctx, mut app, list, tasks) = context_fixture();
+    app.lists[0].data.tasks[0].context = "Saved notes".into();
+    app.lists[0].data.tasks[0].toggle();
+    app.archive_completed(list);
+    app.history_open = true;
+    idle(&ctx, &mut app);
+    let row = FocusItem::Archived(list, tasks[0]).id();
+    focus(&ctx, &mut app, row);
+    key(&ctx, &mut app, Key::I, Modifiers::COMMAND);
+    let editor = app.task_context.as_ref().unwrap();
+    assert_eq!(
+        (editor.list, editor.task, editor.archived),
+        (list, tasks[0], true)
+    );
+    assert_eq!(editor.text, "Saved notes");
+    type_text(&ctx, &mut app, "ignored");
+    assert_eq!(app.task_context.as_ref().unwrap().text, "Saved notes");
+    key(&ctx, &mut app, Key::Escape, Modifiers::NONE);
+    assert!(app.task_context.is_none());
+    assert_eq!(ctx.memory(|memory| memory.focused()), Some(row));
+    assert_eq!(
+        storage::load_workspace(&app.workspace).unwrap().lists[0]
+            .data
+            .archive[0]
+            .task
+            .context,
+        "Saved notes"
+    );
+    cleanup(&app);
+}
+
+#[test]
+fn task_context_shortcut_does_nothing_from_task_entry() {
+    let (ctx, mut app, list, _) = context_fixture();
+    let entry = Id::new(("new-task", list));
+    focus(&ctx, &mut app, entry);
+    key(&ctx, &mut app, Key::I, Modifiers::COMMAND);
+    assert!(app.task_context.is_none());
+    assert!(app.new_task.is_empty());
+    assert_eq!(ctx.memory(|memory| memory.focused()), Some(entry));
     cleanup(&app);
 }

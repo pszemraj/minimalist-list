@@ -1,7 +1,10 @@
 //! Save results, retryable in-memory edits, and visible persistence status.
 
 use super::{MinimalistApp, theme::Palette};
-use crate::storage::{self, Settings, StoredList};
+use crate::{
+    model::Task,
+    storage::{self, Settings, StoredList},
+};
 use eframe::egui::{self, Button, Color32, CornerRadius, Frame, Margin};
 use std::{
     collections::{HashMap, HashSet},
@@ -13,13 +16,16 @@ use uuid::Uuid;
 pub(super) struct PersistenceState {
     pub(super) dirty_lists: HashSet<Uuid>,
     conflicted_candidates: HashMap<Uuid, StoredList>,
+    /// Whether the folder itself could be read on the most recent save or retry check.
+    pub(super) waiting_for_list_folder: bool,
     pub(super) pending_filenames: HashSet<Uuid>,
     pub(super) workspace_failure: Option<String>,
     baseline: Settings,
     last_retry_error: Option<String>,
     pub(super) settings_dirty: bool,
     settings_save_after: Option<Instant>,
-    pub(super) notice: Option<(String, Instant)>,
+    pub(super) notice: Option<(String, Option<Instant>)>,
+    backup_warned: bool,
 }
 
 #[cfg(test)]
@@ -39,6 +45,7 @@ impl PersistenceState {
         Self {
             dirty_lists: HashSet::new(),
             conflicted_candidates: HashMap::new(),
+            waiting_for_list_folder: false,
             pending_filenames: HashSet::new(),
             workspace_failure,
             baseline,
@@ -46,6 +53,7 @@ impl PersistenceState {
             settings_dirty: false,
             settings_save_after: None,
             notice: None,
+            backup_warned: false,
         }
     }
 }
@@ -53,7 +61,12 @@ impl PersistenceState {
 impl MinimalistApp {
     /// Shows a short acknowledgement after a successful task operation.
     pub(super) fn acknowledge(&mut self, message: String) {
-        self.persistence.notice = Some((message, Instant::now()));
+        self.persistence.notice = Some((message, Some(Instant::now())));
+    }
+
+    /// Keeps a recovered-list comparison visible until dismissed or replaced.
+    pub(super) fn acknowledge_recovery(&mut self, message: String) {
+        self.persistence.notice = Some((message, None));
     }
 
     /// Coalesces continuous appearance edits into one preference write after a pause.
@@ -93,11 +106,33 @@ impl MinimalistApp {
                 self.persistence.settings_dirty = false;
             }
             Err(error) => {
+                log::warn!("Could not save local preferences");
                 self.persistence.settings_dirty = true;
                 self.persistence.last_retry_error = Some(error.clone());
                 self.status = Some(error);
             }
         }
+    }
+
+    /// Writes a list after keeping its previous file contents in local backups.
+    ///
+    /// A backup failure warns once per session and never blocks the save.
+    fn write_list(&mut self, list: &StoredList) -> Result<(), String> {
+        if let Err(error) = storage::snapshot_list(&self.workspace, list)
+            && !self.persistence.backup_warned
+        {
+            log::warn!("Could not write a local list snapshot");
+            self.persistence.backup_warned = true;
+            let message = format!("Local backup unavailable: {error}");
+            self.status = Some(match self.status.take() {
+                Some(status) => format!("{status}\n{message}"),
+                None => message,
+            });
+        }
+        storage::save_list(list).map_err(|error| {
+            log::warn!("List save failed; the local changes need recovery");
+            self.record_save_conflict(list).unwrap_or(error)
+        })
     }
 
     /// Saves one list and retains failed content for explicit retry.
@@ -110,7 +145,7 @@ impl MinimalistApp {
     pub(super) fn save_list_index(&mut self, index: usize) -> bool {
         let list = self.list_for_save(index);
         let id = list.key;
-        let saved = match storage::save_list(&list) {
+        let saved = match self.write_list(&list) {
             Ok(()) => {
                 self.lists[index].stamp.set(list.stamp.get());
                 self.lists[index]
@@ -119,7 +154,6 @@ impl MinimalistApp {
                 self.complete_list_save(index)
             }
             Err(error) => {
-                self.record_save_conflict(&list);
                 self.persistence.dirty_lists.insert(id);
                 let error = format!("Changes are unsaved: {error}");
                 self.persistence.last_retry_error = Some(error.clone());
@@ -150,11 +184,76 @@ impl MinimalistApp {
         index: usize,
         mut candidate: StoredList,
     ) -> Result<(), String> {
-        self.prepare_list_for_save(&mut candidate);
-        if let Err(error) = storage::save_list(&candidate) {
-            self.record_save_conflict(&candidate);
+        let manual = self.prepare_list_for_save(&mut candidate);
+        self.save_prepared_candidate(index, candidate, manual)
+    }
+
+    /// Writes captured tasks, replaying a standalone addition on the current file.
+    ///
+    /// # Arguments
+    /// - `index` - Index of the loaded destination list.
+    /// - `tasks` - New tasks, with stable IDs reused for either write.
+    ///
+    /// # Returns
+    /// Success after all captured tasks reach the destination file.
+    ///
+    /// # Errors
+    /// Returns a failed write or reload error, leaving the capture available for recovery.
+    ///
+    /// # Panics
+    /// Panics if the destination index does not identify a loaded list.
+    pub(super) fn write_capture_tasks(
+        &mut self,
+        index: usize,
+        tasks: &[Task],
+    ) -> Result<(), String> {
+        let mut candidate = self.lists[index].clone();
+        let list = candidate.key;
+        let can_replay = !self.has_save_conflict(list)
+            && !self.persistence.dirty_lists.contains(&list)
+            && !self.persistence.pending_filenames.contains(&list)
+            && self.editing.is_none_or(|(id, _)| id != list)
+            && self
+                .details
+                .editor
+                .as_ref()
+                .is_none_or(|editor| editor.list != list)
+            && self
+                .task_context
+                .as_ref()
+                .is_none_or(|editor| editor.list != list || editor.archived)
+            && (self.settings_list_id != Some(list)
+                || self.rename_input.trim() == self.rename_baseline.trim())
+            && self.delete_animation.is_none_or(|(id, _, _)| id != list)
+            && self.clear_animation.is_none_or(|(id, _)| id != list);
+        candidate.data.tasks.splice(0..0, tasks.iter().cloned());
+        let Err(error) = self.save_list_candidate(index, candidate) else {
+            return Ok(());
+        };
+        if !can_replay || !self.has_save_conflict(list) {
             return Err(error);
         }
+        let Some(mut fresh) = storage::load_existing_workspace(&self.workspace)?
+            .lists
+            .into_iter()
+            .find(|item| item.key == list)
+        else {
+            return Err(error);
+        };
+        fresh.data.tasks.splice(0..0, tasks.iter().cloned());
+        // Replay uses the file's current Manual order, independent of the cached view.
+        let manual = fresh.data.tasks.iter().map(|task| task.id).collect();
+        self.save_prepared_candidate(index, fresh, manual)
+    }
+
+    fn save_prepared_candidate(
+        &mut self,
+        index: usize,
+        candidate: StoredList,
+        manual: Vec<Uuid>,
+    ) -> Result<(), String> {
+        self.write_list(&candidate)?;
+        self.manual_task_order.insert(candidate.key, manual);
         self.lists[index] = candidate;
         self.apply_task_sorts();
         self.complete_list_save(index);
@@ -173,6 +272,7 @@ impl MinimalistApp {
     /// Panics if the caller supplies an invalid loaded-list index.
     pub(super) fn complete_list_save(&mut self, index: usize) -> bool {
         let id = self.lists[index].key;
+        self.persistence.waiting_for_list_folder = false;
         self.persistence.dirty_lists.remove(&id);
         self.persistence.conflicted_candidates.remove(&id);
         if self.persistence.pending_filenames.contains(&id) {
@@ -206,6 +306,7 @@ impl MinimalistApp {
     /// # Returns
     /// Whether all retained writes succeeded.
     pub(super) fn retry_dirty_lists(&mut self) -> bool {
+        self.refresh_save_conflicts();
         let live: HashSet<_> = self.lists.iter().map(|list| list.key).collect();
         self.persistence.dirty_lists.retain(|id| live.contains(id));
         self.persistence
@@ -227,6 +328,14 @@ impl MinimalistApp {
         if self.persistence.settings_dirty || self.persistence.settings_save_after.is_some() {
             self.save_settings();
         }
+        self.clear_resolved_save_error()
+    }
+
+    /// Clears the matching retry warning once no saves are pending.
+    ///
+    /// # Returns
+    /// Whether there are no pending list or preference writes.
+    pub(super) fn clear_resolved_save_error(&mut self) -> bool {
         let saved = self.persistence.dirty_lists.is_empty()
             && self.persistence.pending_filenames.is_empty()
             && !self.persistence.settings_dirty;
@@ -239,10 +348,50 @@ impl MinimalistApp {
         saved
     }
 
-    fn retry_workspace(&mut self) {
+    /// Returns whether every cached list still has a path in the latest scan.
+    ///
+    /// # Returns
+    /// False while a list retained for an edit is missing or the workspace is empty.
+    pub(super) fn cached_list_paths_present(
+        &self,
+        fingerprint: &storage::WorkspaceFingerprint,
+    ) -> bool {
+        !fingerprint.0.is_empty()
+            && self.lists.iter().all(|list| {
+                list.path
+                    .file_name()
+                    .is_some_and(|name| fingerprint.0.contains_key(name.to_string_lossy().as_ref()))
+            })
+    }
+
+    /// Returns whether dropping a missing list would detach a pending draft from it.
+    ///
+    /// # Returns
+    /// Whether a rename or failed capture still targets the list.
+    pub(super) fn has_pending_list_draft(&self, list: Uuid) -> bool {
+        (self.settings_list_id == Some(list)
+            && !self.rename_input.trim().is_empty()
+            && self.rename_input.trim() != self.rename_baseline.trim())
+            || self
+                .quick_capture
+                .iter()
+                .chain(&self.capture_draft)
+                .any(|draft| draft.failure.is_some() && draft.selected_list_id == Some(list))
+    }
+
+    /// Reopens the selected workspace once its existing files are accessible.
+    pub(in crate::app) fn retry_workspace(&mut self) {
         let Some(selected) = self.persistence.workspace_failure.clone() else {
             return;
         };
+        if !self.lists.is_empty() {
+            self.next_scan = Instant::now();
+            self.scan_external_changes();
+            if self.persistence.workspace_failure.is_none() {
+                self.keyboard.pending = self.default_focus();
+            }
+            return;
+        }
         if !self.retry_dirty_lists() {
             return;
         }
@@ -261,6 +410,20 @@ impl MinimalistApp {
             || !self.persistence.pending_filenames.is_empty()
             || self.persistence.settings_dirty;
         let failed_workspace = self.persistence.workspace_failure.clone();
+        let mut dirty_lists = self
+            .lists
+            .iter()
+            .filter(|list| self.persistence.dirty_lists.contains(&list.key));
+        let pending_list = dirty_lists
+            .clone()
+            .find(|list| self.has_save_conflict(list.key))
+            .or_else(|| dirty_lists.next())
+            .map(|list| (list.key, list.data.title.clone()));
+        let waiting = pending_list.is_some() && self.persistence.waiting_for_list_folder;
+        let conflicted = !waiting
+            && pending_list
+                .as_ref()
+                .is_some_and(|(id, _)| self.has_save_conflict(*id));
         let notice = self
             .persistence
             .notice
@@ -268,12 +431,32 @@ impl MinimalistApp {
             .map(|(message, _)| message.clone());
         let success_only =
             !dirty && failed_workspace.is_none() && self.status.is_none() && notice.is_some();
+        let dismissible = self
+            .persistence
+            .notice
+            .as_ref()
+            .is_some_and(|(_, started)| started.is_none());
         let message = failed_workspace
             .as_ref()
-            .map(|path| format!("Workspace unavailable: {path}. Retry or choose another folder."))
-            .or_else(|| self.status.clone())
-            .or(notice)
-            .unwrap_or_else(|| "Changes are unsaved.".into());
+            .map(|path| {
+                let mut message =
+                    format!("Workspace unavailable: {path}. Retry or choose another folder.");
+                if let Some(status) = &self.status {
+                    message.push('\n');
+                    message.push_str(status);
+                }
+                message
+            })
+            .or_else(|| {
+                self.status
+                    .as_ref()
+                    .filter(|status| {
+                        !(conflicted || waiting)
+                            || Some(*status) != self.persistence.last_retry_error.as_ref()
+                    })
+                    .cloned()
+            })
+            .or_else(|| (dirty && !(conflicted || waiting)).then(|| "Changes are unsaved.".into()));
         Frame::NONE
             .fill(if success_only {
                 palette.surface
@@ -283,19 +466,42 @@ impl MinimalistApp {
             .corner_radius(CornerRadius::same(10))
             .inner_margin(Margin::same(8))
             .show(ui, |ui| {
-                if failed_workspace.is_some() {
-                    ui.add(egui::Label::new(self.rich(message, 13.0, palette.text)).wrap());
-                } else {
-                    egui::ScrollArea::vertical()
-                        .id_salt("status-message")
-                        .max_height(54.0)
-                        .show(ui, |ui| {
-                            ui.add(egui::Label::new(self.rich(message, 13.0, palette.text)).wrap());
-                        });
+                if let Some((_, title)) = &pending_list {
+                    ui.add(egui::Label::new(self.rich(title, 13.0, palette.text)).truncate())
+                        .on_hover_text(title);
                 }
-                if !success_only {
+                if conflicted || waiting {
+                    ui.add(
+                        egui::Label::new(self.rich(
+                            if waiting {
+                                "Waiting for the folder. Your changes are unsaved."
+                            } else {
+                                "This list changed on disk or could not be read. Your changes are unsaved."
+                            },
+                            13.0,
+                            palette.text,
+                        ))
+                        .wrap(),
+                    );
+                }
+                if let Some(message) = message {
+                    let label = egui::Label::new(self.rich(message, 13.0, palette.text)).wrap();
+                    if failed_workspace.is_some() {
+                        ui.add(label);
+                    } else {
+                        egui::ScrollArea::vertical()
+                            .id_salt("status-message")
+                            .max_height((ui.available_height() * 0.25).max(54.0))
+                            .show(ui, |ui| ui.add(label));
+                    }
+                }
+                if let Some(notice) = notice {
+                    ui.add(egui::Label::new(self.rich(notice, 13.0, palette.text)).wrap());
+                }
+                if !success_only || dismissible {
                     ui.horizontal_wrapped(|ui| {
-                        let retryable = self.persistence.settings_dirty
+                        let retryable = waiting
+                            || self.persistence.settings_dirty
                             || self
                                 .persistence
                                 .dirty_lists
@@ -305,16 +511,13 @@ impl MinimalistApp {
                         if retryable && ui.button("Retry save").clicked() {
                             self.retry_dirty_lists();
                         }
-                        let conflict = self
-                            .persistence
-                            .conflicted_candidates
-                            .keys()
-                            .copied()
-                            .find(|id| self.persistence.dirty_lists.contains(id));
-                        if let Some(id) = conflict
-                            && ui.button("Keep local copy and reload").clicked()
-                        {
-                            self.keep_local_copy_and_reload(id);
+                        if let Some((id, _)) = pending_list {
+                            if conflicted && ui.button("Keep local copy and reload").clicked() {
+                                self.keep_local_copy_and_reload(id);
+                            }
+                            if ui.button("Discard all unsaved changes").clicked() {
+                                self.discard_local_change_and_reload(id);
+                            }
                         }
                         if failed_workspace.is_some() && ui.button("Retry workspace").clicked() {
                             self.retry_workspace();
@@ -323,7 +526,11 @@ impl MinimalistApp {
                         {
                             self.open_settings(None);
                         }
-                        if !dirty
+                        if dismissible {
+                            if ui.button("Dismiss summary").clicked() {
+                                self.persistence.notice = None;
+                            }
+                        } else if !dirty
                             && failed_workspace.is_none()
                             && ui.add(Button::new("Dismiss")).clicked()
                         {

@@ -64,6 +64,31 @@ fn normal_exit_releases_claim_and_stale_endpoint_is_replaced() {
 }
 
 #[test]
+fn closing_owner_rejects_reveal_requests_until_it_releases_the_workspace() {
+    let (root, workspace) = fixture();
+    let guard = primary(&workspace, &root);
+    let endpoint = fs::read_to_string(&guard.endpoint).unwrap();
+    let token = endpoint.lines().nth(1).unwrap();
+    let mut stream = TcpStream::connect(guard.address).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(1)))
+        .unwrap();
+
+    guard.stop_reveal_requests();
+    let _ = stream.write_all(format!("SHOW {token}\n").as_bytes());
+    assert!(stream.read_exact(&mut [0; 3]).is_err());
+    assert!(!guard.take_show_request());
+    assert!(matches!(
+        claim(&workspace, &root, true).unwrap(),
+        LaunchOutcome::Existing
+    ));
+
+    drop(guard);
+    drop(primary(&workspace, &root));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn different_workspaces_and_aliases_have_the_expected_owner() {
     let (root, workspace) = fixture();
     let other = root.join("other-workspace");

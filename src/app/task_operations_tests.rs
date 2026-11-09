@@ -3,7 +3,7 @@
 use super::*;
 use crate::{
     app::tests::test_app,
-    model::{Accent, Task, TodoList},
+    model::{Accent, Task, TaskSort, TodoList},
     storage,
 };
 use std::{
@@ -56,19 +56,19 @@ fn task_and_child_undo_restore_identity_content_completion_and_position() {
     app.lists[0].data.tasks = vec![Task::new("Before"), middle, Task::new("After")];
     app.remove_task(list, id);
     assert_eq!(saved(&app, 0).tasks.len(), 2);
-    app.undo_delete();
+    app.undo_last();
     assert_eq!(
         serde_json::to_value(&saved(&app, 0).tasks[1]).unwrap(),
         original
     );
     app.delete_subtask(list, id, child);
     assert_eq!(saved(&app, 0).tasks[1].subtasks.len(), 2);
-    app.undo_delete();
+    app.undo_last();
     assert_eq!(
         serde_json::to_value(&saved(&app, 0).tasks[1]).unwrap(),
         original
     );
-    app.undo_delete();
+    app.undo_last();
     assert_eq!(saved(&app, 0).tasks.len(), 3);
     fs::remove_dir_all(&app.workspace).unwrap();
 }
@@ -85,15 +85,15 @@ fn undo_keeps_a_deleted_task_whose_identity_reappears_elsewhere() {
     app.lists.push(other);
     // A sync reload can bring back an older copy in another list.
     app.lists[1].data.tasks.push(task);
-    app.undo_delete();
+    app.undo_last();
     assert_eq!(
         app.status.as_deref(),
         Some("The deleted task already exists in the workspace.")
     );
-    assert!(app.details.deleted.is_some(), "Undo must remain available");
+    assert!(app.details.undo.is_some(), "Undo must remain available");
     app.lists[1].data.tasks.clear();
-    app.undo_delete();
-    assert!(app.details.deleted.is_none());
+    app.undo_last();
+    assert!(app.details.undo.is_none());
     assert_eq!(
         saved(&app, 0)
             .tasks
@@ -118,16 +118,16 @@ fn undo_keeps_a_deleted_subtask_whose_identity_reappears() {
     app.delete_subtask(list, parent, child);
     // A sync reload can bring back an older copy of the same child.
     app.lists[0].data.tasks[0].subtasks.push(stale);
-    app.undo_delete();
+    app.undo_last();
     assert_eq!(
         app.status.as_deref(),
         Some("The deleted subtask already exists in its task.")
     );
-    assert!(app.details.deleted.is_some(), "Undo must remain available");
+    assert!(app.details.undo.is_some(), "Undo must remain available");
     assert_eq!(app.lists[0].data.tasks[0].subtasks[0].text, "Stale version");
     app.lists[0].data.tasks[0].subtasks.clear();
-    app.undo_delete();
-    assert!(app.details.deleted.is_none());
+    app.undo_last();
+    assert!(app.details.undo.is_none());
     assert_eq!(saved(&app, 0).tasks[0].subtasks[0].text, "Deleted version");
     fs::remove_dir_all(&app.workspace).unwrap();
 }
@@ -184,6 +184,31 @@ fn move_keeps_one_copy_and_preserves_entire_task() {
         original
     );
     assert!(!app.move_task_to_list(source, id, dest_id));
+    fs::remove_dir_all(&app.workspace).unwrap();
+}
+
+#[test]
+fn move_leaves_other_rows_with_the_same_saved_id_in_the_source() {
+    let (ctx, mut app) = test_app();
+    let source = app.lists[0].key;
+    let destination = storage::create_list(&app.workspace, "Destination", Accent::Sky)
+        .unwrap()
+        .key;
+    let first = Task::new("First duplicate");
+    let id = first.id;
+    let mut second = first.clone();
+    second.text = "Second duplicate".into();
+    app.lists[0].data.tasks = vec![Task::new("Before"), first, second, Task::new("After")];
+    storage::save_list(&app.lists[0]).unwrap();
+
+    let mut app = MinimalistApp::new(&ctx, app.settings, None, None);
+    assert!(app.move_task_to_list(source, id, destination));
+    let source = saved(&app, app.list_index(source).unwrap());
+    let destination = saved(&app, app.list_index(destination).unwrap());
+    let titles: Vec<_> = source.tasks.iter().map(|task| task.text.as_str()).collect();
+    assert_eq!(titles, ["Before", "Second duplicate", "After"]);
+    assert_eq!(destination.tasks.len(), 1);
+    assert_eq!(destination.tasks[0].text, "First duplicate");
     fs::remove_dir_all(&app.workspace).unwrap();
 }
 
@@ -336,6 +361,133 @@ fn failed_source_save_rolls_back_the_already_written_destination() {
     fs::remove_dir_all(&app.workspace).unwrap();
 }
 
+/// Adds a saved second list and a saved task in the first, returning both list keys and the task.
+fn move_fixture(app: &mut MinimalistApp) -> (Uuid, Uuid, Uuid) {
+    let source = app.lists[0].key;
+    let destination = storage::create_list(&app.workspace, "Destination", Accent::Mint).unwrap();
+    let destination_id = destination.key;
+    app.lists.push(destination);
+    let task = Task::new("Move across a changed file");
+    let id = task.id;
+    app.lists[0].data.tasks.push(task);
+    assert!(app.save_list_index(0));
+    (source, destination_id, id)
+}
+
+/// Replaces a list file as another instance would and returns the new bytes.
+fn edit_externally(app: &MinimalistApp, list: Uuid, edit: impl FnOnce(&mut TodoList)) -> Vec<u8> {
+    let mut remote = storage::load_workspace(&app.workspace)
+        .unwrap()
+        .lists
+        .into_iter()
+        .find(|stored| stored.key == list)
+        .unwrap();
+    edit(&mut remote.data);
+    storage::save_list(&remote).unwrap();
+    fs::read(&remote.path).unwrap()
+}
+
+fn assert_move_left_nothing_pending(app: &mut MinimalistApp, lists: [Uuid; 2]) {
+    assert!(app.persistence.dirty_lists.is_empty());
+    for list in lists {
+        assert!(!app.has_save_conflict(list));
+    }
+    assert!(app.retry_dirty_lists());
+    assert!(
+        app.status
+            .as_deref()
+            .unwrap()
+            .starts_with("Move did not finish")
+    );
+}
+
+fn titles(tasks: &[Task]) -> Vec<&str> {
+    tasks.iter().map(|task| task.text.as_str()).collect()
+}
+
+#[test]
+fn move_into_an_externally_changed_destination_leaves_both_lists_clean() {
+    let (_ctx, mut app) = test_app();
+    let (source, destination, id) = move_fixture(&mut app);
+    let source_bytes = fs::read(&app.lists[0].path).unwrap();
+    let remote_bytes = edit_externally(&app, destination, |data| {
+        data.tasks.push(Task::new("Added elsewhere"));
+    });
+    assert!(!app.move_task_to_list(source, id, destination));
+    assert_move_left_nothing_pending(&mut app, [source, destination]);
+    assert_eq!(fs::read(&app.lists[0].path).unwrap(), source_bytes);
+    assert_eq!(fs::read(&app.lists[1].path).unwrap(), remote_bytes);
+    assert_eq!(app.lists[0].data.tasks[0].id, id);
+    assert!(app.lists[1].data.tasks.is_empty());
+    app.next_scan = Instant::now();
+    app.scan_external_changes();
+    let reloaded = &app.lists[app.list_index(destination).unwrap()];
+    assert_eq!(titles(&reloaded.data.tasks), ["Added elsewhere"]);
+    fs::remove_dir_all(&app.workspace).unwrap();
+}
+
+#[test]
+fn move_out_of_an_externally_changed_source_removes_the_destination_copy() {
+    let (_ctx, mut app) = test_app();
+    let (source, destination, id) = move_fixture(&mut app);
+    let remote_bytes = edit_externally(&app, source, |data| {
+        data.tasks.push(Task::new("Added elsewhere"));
+    });
+    assert!(!app.move_task_to_list(source, id, destination));
+    assert_move_left_nothing_pending(&mut app, [source, destination]);
+    assert!(saved(&app, 1).tasks.is_empty());
+    assert!(app.lists[1].data.tasks.is_empty());
+    assert_eq!(fs::read(&app.lists[0].path).unwrap(), remote_bytes);
+    assert_eq!(
+        titles(&app.lists[0].data.tasks),
+        ["Move across a changed file"]
+    );
+    app.next_scan = Instant::now();
+    app.scan_external_changes();
+    let reloaded = &app.lists[app.list_index(source).unwrap()];
+    assert_eq!(
+        titles(&reloaded.data.tasks),
+        ["Move across a changed file", "Added elsewhere"]
+    );
+    fs::remove_dir_all(&app.workspace).unwrap();
+}
+
+#[test]
+fn failed_move_keeps_the_sorted_views_manual_order() {
+    for external_list in [0, 1] {
+        let (_ctx, mut app) = test_app();
+        let (source, destination, _) = move_fixture(&mut app);
+        let moved = Task::new("Middle");
+        let moved_id = moved.id;
+        app.lists[0].data.tasks = vec![Task::new("Zulu"), Task::new("Alpha"), moved];
+        app.lists[1].data.tasks.push(Task::new("Beta"));
+        assert!(app.save_list_index(0));
+        assert!(app.save_list_index(1));
+        for list in [source, destination] {
+            app.sort_tasks(list, TaskSort::Title);
+        }
+        let external = [source, destination][external_list];
+        edit_externally(&app, external, |data| {
+            data.title = "Renamed elsewhere".into()
+        });
+        assert!(!app.move_task_to_list(source, moved_id, destination));
+        assert_move_left_nothing_pending(&mut app, [source, destination]);
+        assert_eq!(
+            titles(&app.lists[0].data.tasks),
+            ["Alpha", "Middle", "Zulu"]
+        );
+        assert_eq!(titles(&app.lists[1].data.tasks), ["Beta"]);
+        for list in [source, destination] {
+            app.sort_tasks(list, TaskSort::Manual);
+        }
+        assert_eq!(
+            titles(&app.lists[0].data.tasks),
+            ["Zulu", "Alpha", "Middle"]
+        );
+        fs::remove_dir_all(&app.workspace).unwrap();
+    }
+}
+
 #[test]
 fn clearing_completed_only_writes_when_tasks_are_archived() {
     let (_ctx, mut app) = test_app();
@@ -426,7 +578,7 @@ fn undo_from_another_list_preserves_its_open_checklist_and_draft() {
     app.open_list(current);
     app.switch_subtask_panel(Some((current, current_parent_id)));
     app.new_subtask = "Current checklist draft".into();
-    app.undo_delete();
+    app.undo_last();
     assert_eq!(app.subtasks_for, Some((current, current_parent_id)));
     assert_eq!(app.new_subtask, "Current checklist draft");
     assert_eq!(saved(&app, 0).tasks[0].subtasks[0].id, child);
@@ -501,7 +653,7 @@ fn child_undo_after_parent_archival_restores_content_without_restoring_parent() 
     app.lists[0].data.tasks.push(task);
     app.delete_subtask(list, task_id, child);
     app.archive_completed(list);
-    app.undo_delete();
+    app.undo_last();
     let saved = saved(&app, 0);
     assert!(saved.tasks.is_empty());
     assert_eq!(
@@ -514,11 +666,11 @@ fn child_undo_after_parent_archival_restores_content_without_restoring_parent() 
 }
 
 #[test]
-fn child_undo_follows_its_parent_after_move_to_another_list() {
+fn a_move_replaces_a_pending_child_undo_and_undo_returns_the_task() {
     let (_ctx, mut app) = test_app();
     let source = app.lists[0].key;
     let mut task = Task::new("Move parent after deleting child");
-    task.subtasks.push(Subtask::new("Recover at destination"));
+    task.subtasks.push(Subtask::new("Deleted before the move"));
     let parent = task.id;
     let child = task.subtasks[0].id;
     app.lists[0].data.tasks.push(task);
@@ -527,9 +679,134 @@ fn child_undo_follows_its_parent_after_move_to_another_list() {
     let destination_id = destination.key;
     app.lists.push(destination);
     assert!(app.move_task_to_list(source, parent, destination_id));
-    app.undo_delete();
-    assert!(saved(&app, 0).tasks.is_empty());
-    assert_eq!(saved(&app, 1).tasks[0].subtasks[0].id, child);
+    assert!(matches!(app.details.undo, Some(UndoItem::Moved { .. })));
+    app.undo_last();
+    assert!(app.details.undo.is_none());
+    assert_eq!(saved(&app, 0).tasks[0].id, parent);
+    assert!(saved(&app, 0).tasks[0].subtasks.is_empty());
+    assert!(saved(&app, 1).tasks.is_empty());
+    app.undo_last();
+    assert!(saved(&app, 0).tasks[0].subtasks.is_empty());
+    fs::remove_dir_all(&app.workspace).unwrap();
+}
+
+#[test]
+fn undoing_a_move_restores_the_original_manual_position_in_every_sort() {
+    for sort in [TaskSort::Manual, TaskSort::Title] {
+        let (_ctx, mut app) = test_app();
+        let (source, destination, _) = move_fixture(&mut app);
+        let moved = Task::new("Middle");
+        let moved_id = moved.id;
+        app.lists[0].data.tasks = vec![Task::new("Zulu"), moved, Task::new("Alpha")];
+        app.lists[1].data.tasks.push(Task::new("Beta"));
+        assert!(app.save_list_index(0));
+        assert!(app.save_list_index(1));
+        app.sort_tasks(source, sort);
+        assert!(app.move_task_to_list(source, moved_id, destination));
+        assert_eq!(titles(&saved(&app, 0).tasks), ["Zulu", "Alpha"]);
+        assert_eq!(titles(&saved(&app, 1).tasks), ["Middle", "Beta"]);
+        app.undo_last();
+        assert_eq!(titles(&saved(&app, 0).tasks), ["Zulu", "Middle", "Alpha"]);
+        assert_eq!(titles(&saved(&app, 1).tasks), ["Beta"]);
+        assert!(app.details.undo.is_none());
+        fs::remove_dir_all(&app.workspace).unwrap();
+    }
+}
+
+#[test]
+fn undoing_a_move_follows_the_task_checklist_draft_back() {
+    let (_ctx, mut app) = test_app();
+    let (source, destination, id) = move_fixture(&mut app);
+    app.switch_subtask_panel(Some((source, id)));
+    app.new_subtask = "Unfinished child".into();
+    assert!(app.move_task_to_list(source, id, destination));
+    app.undo_last();
+    app.switch_subtask_panel(Some((source, id)));
+    assert_eq!(app.new_subtask, "Unfinished child");
+    fs::remove_dir_all(&app.workspace).unwrap();
+}
+
+#[test]
+fn undoing_a_move_that_cannot_apply_explains_why_and_keeps_both_lists() {
+    for case in 0..3 {
+        let (_ctx, mut app) = test_app();
+        let (source, destination, id) = move_fixture(&mut app);
+        assert!(app.move_task_to_list(source, id, destination));
+        match case {
+            0 => {
+                // Archived in the destination.
+                app.lists[1].data.tasks[0].toggle();
+                app.archive_completed(destination);
+            }
+            1 => {
+                // The destination list was deleted.
+                let removed = app.lists.remove(1);
+                storage::delete_list(&app.workspace, &removed).unwrap();
+            }
+            _ => {
+                // The source already holds the identity, as after a sync conflict.
+                let duplicate = app.lists[1].data.tasks[0].clone();
+                app.lists[0].data.tasks.push(duplicate);
+            }
+        }
+        let before: Vec<_> = app
+            .lists
+            .iter()
+            .map(|list| serde_json::to_value(&list.data).unwrap())
+            .collect();
+        app.status = None;
+        app.undo_last();
+        assert!(
+            app.status.is_some(),
+            "case {case} must explain why Undo did nothing"
+        );
+        assert!(matches!(app.details.undo, Some(UndoItem::Moved { .. })));
+        let after: Vec<_> = app
+            .lists
+            .iter()
+            .map(|list| serde_json::to_value(&list.data).unwrap())
+            .collect();
+        assert_eq!(before, after);
+        fs::remove_dir_all(&app.workspace).unwrap();
+    }
+}
+
+#[test]
+fn a_later_deletion_replaces_the_move_undo_and_the_toast_names_the_destination() {
+    let (ctx, mut app) = test_app();
+    let (source, destination, id) = move_fixture(&mut app);
+    let other = Task::new("Delete me");
+    let other_id = other.id;
+    app.lists[0].data.tasks.push(other);
+    assert!(app.move_task_to_list(source, id, destination));
+    let toast = |app: &mut MinimalistApp| {
+        // An area is invisible during its first sizing pass.
+        let mut output = None;
+        for _ in 0..3 {
+            output = Some(crate::app::tests::run_frame(
+                &ctx,
+                Default::default(),
+                |_| app.task_operations_ui(&ctx),
+            ));
+        }
+        output
+            .unwrap()
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::epaint::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let texts = toast(&mut app);
+    assert!(texts.contains(&"Moved to Destination".to_owned()));
+    assert!(texts.contains(&"Undo".to_owned()) && texts.contains(&"Dismiss".to_owned()));
+    app.remove_task(source, other_id);
+    assert!(toast(&mut app).contains(&"Deleted".to_owned()));
+    app.undo_last();
+    assert_eq!(saved(&app, 0).tasks[0].id, other_id);
+    assert_eq!(saved(&app, 1).tasks[0].id, id);
     fs::remove_dir_all(&app.workspace).unwrap();
 }
 
@@ -538,24 +815,28 @@ fn deletion_undo_and_history_restore_keep_manual_positions_while_view_is_sorted(
     let (_ctx, mut app) = test_app();
     let list = app.lists[0].key;
     app.lists[0].data.tasks = ["Zulu", "Alpha", "Middle"].map(Task::new).to_vec();
+    let first = &mut app.lists[0].data.tasks[0];
+    first.toggle();
+    first
+        .subtasks
+        .push(Subtask::new("Preserved checklist item"));
     app.lists[0].data.tasks[1].context = "Hidden details must survive sorted Undo".into();
     let original: Vec<_> = app.lists[0].data.tasks.iter().map(|task| task.id).collect();
+    let before = serde_json::to_value(&app.lists[0].data.tasks).unwrap();
     app.save_list_index(0);
-    app.sort_tasks(list, crate::model::TaskSort::Title);
-    app.remove_task(list, original[1]);
-    app.undo_delete();
-    assert_eq!(
-        saved(&app, 0)
-            .tasks
-            .iter()
-            .map(|task| task.id)
-            .collect::<Vec<_>>(),
-        original
-    );
-    assert_eq!(
-        saved(&app, 0).tasks[1].context,
-        "Hidden details must survive sorted Undo"
-    );
+    app.sort_tasks(list, TaskSort::Title);
+    for removed in [original[0], original[1]] {
+        app.remove_task(list, removed);
+        assert!(saved(&app, 0).tasks.iter().all(|task| task.id != removed));
+        app.undo_last();
+        assert_eq!(serde_json::to_value(saved(&app, 0).tasks).unwrap(), before);
+        app.sort_tasks(list, TaskSort::Manual);
+        assert_eq!(
+            serde_json::to_value(&app.lists[0].data.tasks).unwrap(),
+            before
+        );
+        app.sort_tasks(list, TaskSort::Title);
+    }
     let archived = Task::new("Restored last in Manual");
     let restored_id = archived.id;
     app.lists[0].data.archive.push(ArchivedTask::new(archived));
@@ -570,7 +851,7 @@ fn deletion_undo_and_history_restore_keep_manual_positions_while_view_is_sorted(
             .collect::<Vec<_>>(),
         expected
     );
-    app.sort_tasks(list, crate::model::TaskSort::Manual);
+    app.sort_tasks(list, TaskSort::Manual);
     assert_eq!(
         app.lists[0]
             .data
@@ -581,4 +862,94 @@ fn deletion_undo_and_history_restore_keep_manual_positions_while_view_is_sorted(
         expected
     );
     fs::remove_dir_all(&app.workspace).unwrap();
+}
+
+#[test]
+fn unknown_shared_fields_follow_move_history_undo_and_local_copy() {
+    use crate::model::Subtask;
+    use serde_json::json;
+
+    let (_ctx, mut app) = test_app();
+    let source = app.lists[0].key;
+    app.lists[0]
+        .data
+        .extra
+        .insert("future_list".into(), json!({"keep": [null, 1]}));
+    let mut task = Task::new("Keep newer fields");
+    task.extra
+        .insert("future_task".into(), json!({"keep": true}));
+    let mut child = Subtask::new("Keep child fields");
+    child
+        .extra
+        .insert("future_child".into(), json!(["value", null]));
+    task.subtasks.push(child);
+    let task_id = task.id;
+    app.lists[0].data.tasks.push(task);
+    assert!(app.save_list_index(0));
+    let destination = storage::create_list(&app.workspace, "Destination", Accent::Sky).unwrap();
+    let destination_id = destination.key;
+    app.lists.push(destination);
+
+    assert!(app.move_task_to_list(source, task_id, destination_id));
+    let moved = storage::load_workspace(&app.workspace)
+        .unwrap()
+        .lists
+        .into_iter()
+        .find(|list| list.key == destination_id)
+        .unwrap();
+    assert_eq!(
+        moved.data.tasks[0].extra["future_task"],
+        json!({"keep": true})
+    );
+    assert_eq!(
+        moved.data.tasks[0].subtasks[0].extra["future_child"],
+        json!(["value", null])
+    );
+    app.undo_last();
+    let index = app.list_index(source).unwrap();
+    assert_eq!(app.lists[index].data.tasks[0].id, task_id);
+    app.lists[index].data.tasks[0].toggle();
+    app.archive_completed(source);
+    app.lists[index].data.archive[0]
+        .extra
+        .insert("future_archive".into(), json!({"keep": "entry"}));
+    assert!(app.save_list_index(index));
+    app.delete_archived(source, task_id);
+    app.undo_last();
+    assert_eq!(
+        app.lists[index].data.archive[0].extra["future_archive"],
+        json!({"keep": "entry"})
+    );
+    let archived: serde_json::Value =
+        serde_json::from_slice(&fs::read(&app.lists[index].path).unwrap()).unwrap();
+    assert_eq!(
+        archived["archive"][0]["future_archive"],
+        json!({"keep": "entry"})
+    );
+    app.restore_archived(source, task_id);
+    let (copy, _) = storage::create_local_copy(&app.workspace, &app.lists[index]).unwrap();
+    let reloaded = storage::load_workspace(&app.workspace).unwrap();
+    let original = reloaded
+        .lists
+        .iter()
+        .find(|list| list.key == source)
+        .unwrap();
+    let copied = reloaded
+        .lists
+        .iter()
+        .find(|list| list.key == copy.key)
+        .unwrap();
+    assert_ne!(copied.data.tasks[0].id, task_id);
+    for list in [original, copied] {
+        assert_eq!(list.data.extra["future_list"], json!({"keep": [null, 1]}));
+        assert_eq!(
+            list.data.tasks[0].extra["future_task"],
+            json!({"keep": true})
+        );
+        assert_eq!(
+            list.data.tasks[0].subtasks[0].extra["future_child"],
+            json!(["value", null])
+        );
+    }
+    fs::remove_dir_all(app.workspace).unwrap();
 }

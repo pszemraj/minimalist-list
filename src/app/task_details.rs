@@ -2,19 +2,24 @@
 
 use super::{
     MinimalistApp,
+    context::relative_age,
     keyboard::{FocusItem, mark_own_focus_frame},
     text_input_shortcuts,
     theme::Palette,
 };
-use crate::model::Task;
+use crate::model::{ArchivedTask, Subtask, Task, now_unix_seconds};
 use eframe::egui::{
-    self, Align, Button, CornerRadius, Frame, Id, Layout, Margin, Sense, Stroke, TextEdit, Vec2,
+    self, Align, Button, Color32, CornerRadius, Frame, Id, Label, Layout, Margin, Rect, Sense,
+    Stroke, TextEdit, UiBuilder, Vec2,
 };
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 #[path = "task_operations.rs"]
 mod operations;
+
+#[path = "task_move.rs"]
+mod moving;
 
 #[path = "task_controls.rs"]
 mod controls;
@@ -23,9 +28,10 @@ mod controls;
 /// Session-only editors, recovery content, and expanded History entries.
 pub(super) struct TaskDetailsState {
     pub(super) editor: Option<SubtaskEdit>,
-    deleted: Option<DeletedItem>,
+    undo: Option<UndoItem>,
     expanded_history: HashSet<(Uuid, Uuid)>,
-    pub(super) move_task: Option<(Uuid, Uuid, Uuid)>,
+    pub(super) move_task: Option<MoveDialog>,
+    last_move_destination: Option<Uuid>,
     pub(super) menu_task: Option<(Uuid, Uuid, bool)>,
     pub(super) menu_popup: Option<Id>,
     collapsed_previews: HashSet<(Uuid, Uuid)>,
@@ -40,7 +46,17 @@ pub(super) struct SubtaskEdit {
     request_focus: bool,
 }
 
-enum DeletedItem {
+/// The destination choice for one task while its Move dialog is open.
+pub(super) struct MoveDialog {
+    pub(super) source: Uuid,
+    pub(super) task: Uuid,
+    pub(super) destination: Uuid,
+    picker: Option<Id>,
+    request_focus: bool,
+}
+
+/// The latest deletion, move, or paste batch, retained for one-step Undo.
+enum UndoItem {
     Task {
         list: Uuid,
         position: usize,
@@ -52,6 +68,69 @@ enum DeletedItem {
         position: usize,
         subtask: crate::model::Subtask,
     },
+    Archived {
+        list: Uuid,
+        position: usize,
+        item: ArchivedTask,
+    },
+    Moved {
+        source: Uuid,
+        /// The task's original Manual position in `source`.
+        position: usize,
+        task: Uuid,
+        destination: Uuid,
+    },
+    Pasted {
+        list: Uuid,
+        batch: PastedBatch,
+    },
+}
+
+/// Original pasted contents used to distinguish a paste from later edits.
+enum PastedBatch {
+    Tasks(HashMap<Uuid, Task>),
+    Subtasks {
+        parent: Uuid,
+        items: HashMap<Uuid, Subtask>,
+    },
+}
+
+impl PastedBatch {
+    fn parent(&self) -> Option<Uuid> {
+        match self {
+            Self::Tasks(_) => None,
+            Self::Subtasks { parent, .. } => Some(*parent),
+        }
+    }
+
+    fn len(&self) -> usize {
+        match self {
+            Self::Tasks(items) => items.len(),
+            Self::Subtasks { items, .. } => items.len(),
+        }
+    }
+}
+
+/// Returns the identity of the title control that expands one History row.
+///
+/// # Arguments
+///
+/// - `list` - Parent list identity.
+/// - `task` - Archived task identity.
+///
+/// # Returns
+///
+/// The stable widget identity of the row's title control.
+pub(in crate::app) fn history_title_id(list: Uuid, task: Uuid) -> Id {
+    Id::new(("history-details", list, task))
+}
+
+/// Per-frame values shared by every row of one History pass.
+struct HistoryFrame {
+    /// Archive length when the pass began; a different length ends the pass.
+    count: usize,
+    now: u64,
+    age_height: f32,
 }
 
 impl MinimalistApp {
@@ -253,7 +332,10 @@ impl MinimalistApp {
         self.details.expanded_history.insert((list, task));
     }
 
-    /// Renders naturally sized History rows and their independent Restore actions.
+    /// Renders measured History rows and their independent Restore actions.
+    ///
+    /// Every row reserves its measured height, but only rows that are visible, focused, expanded,
+    /// highlighted, or showing their menu build contents, so long histories stay cheap.
     ///
     /// # Arguments
     ///
@@ -275,7 +357,7 @@ impl MinimalistApp {
         let Some(index) = self.list_index(list) else {
             return;
         };
-        let archived = self.lists[index].data.archive.clone();
+        let count = self.lists[index].data.archive.len();
         ui.add_space(8.0 * progress);
         ui.scope(|ui| {
             ui.set_opacity(progress);
@@ -285,138 +367,202 @@ impl MinimalistApp {
                 .inner_margin(Margin::same(14))
                 .show(ui, |ui| {
                     ui.label(self.rich("History", 18.0, palette.text));
-                    for item in archived {
-                        let task = &item.task;
-                        let mut expanded = self.details.expanded_history.contains(&(list, task.id));
-                        if self.spotlight.as_ref().is_some_and(|spotlight| {
-                            spotlight.archived
-                                && spotlight.list_id == list
-                                && spotlight.task_id == task.id
-                                && spotlight.subtask_id.is_some()
-                        }) {
-                            self.expand_archived(list, task.id);
-                            expanded = true;
-                        }
-                        let width =
-                            (ui.available_width() - 110.0 - 2.0 * ui.spacing().item_spacing.x)
-                                .max(1.0);
-                        let row = ui
-                            .horizontal_top(|ui| {
-                                ui.allocate_ui_with_layout(
-                                    Vec2::new(width, 28.0),
-                                    Layout::top_down(Align::LEFT),
-                                    |ui| {
-                                        let title = ui.add(
-                                            egui::Label::new(self.content_rich(
-                                                format!(
-                                                    "{} {}",
-                                                    if expanded { "▾" } else { "▸" },
-                                                    task.text
-                                                ),
-                                                15.0,
-                                                palette.muted,
-                                            ))
-                                            .wrap(),
-                                        );
-                                        let response = ui.interact(
-                                            title.rect,
-                                            Id::new(("history-details", list, task.id)),
-                                            Sense::click(),
-                                        );
-                                        response.widget_info(|| {
-                                            egui::WidgetInfo::labeled(
-                                                egui::WidgetType::Button,
-                                                true,
-                                                format!(
-                                                    "{} archived task: {}",
-                                                    if expanded { "Collapse" } else { "Inspect" },
-                                                    task.text
-                                                ),
-                                            )
-                                        });
-                                        self.track_focus(
-                                            &response,
-                                            FocusItem::Archived(list, task.id),
-                                        );
-                                        self.task_actions_menu(&response, list, task.id, true);
-                                        if response.clicked() {
-                                            if expanded {
-                                                self.details
-                                                    .expanded_history
-                                                    .remove(&(list, task.id));
-                                            } else {
-                                                self.expand_archived(list, task.id);
-                                            }
-                                        }
-                                        if response.has_focus() {
-                                            ui.painter().rect_stroke(
-                                                response.rect,
-                                                3.0,
-                                                Stroke::new(1.0, palette.accent),
-                                                egui::StrokeKind::Inside,
-                                            );
-                                        }
-                                    },
-                                );
-                                let (copy_rect, _) =
-                                    ui.allocate_exact_size(Vec2::new(26.0, 28.0), Sense::hover());
-                                self.task_copy_control(
-                                    ui,
-                                    copy_rect,
-                                    (list, task.id, true),
-                                    palette,
-                                );
-                                let (rect, _) =
-                                    ui.allocate_exact_size(Vec2::new(76.0, 28.0), Sense::hover());
-                                let response = ui.interact(
-                                    rect,
-                                    FocusItem::Archived(list, task.id).id(),
-                                    Sense::click(),
-                                );
-                                ui.painter().text(
-                                    rect.center(),
-                                    egui::Align2::CENTER_CENTER,
-                                    "Restore",
-                                    self.font_id(13.0),
-                                    palette.accent,
-                                );
-                                response.widget_info(|| {
-                                    egui::WidgetInfo::labeled(
-                                        egui::WidgetType::Button,
-                                        true,
-                                        format!("Restore: {}", task.text),
-                                    )
-                                });
-                                self.track_focus(&response, FocusItem::Archived(list, task.id));
-                                if response.clicked() {
-                                    self.restore_archived(list, task.id);
-                                }
-                            })
-                            .response
-                            .rect;
-                        self.detail_spotlight(ui, row, (list, task.id, None, true), palette);
-                        if expanded {
-                            ui.indent(("history-children", list, task.id), |ui| {
-                                if !task.context.is_empty() && ui.button("View context").clicked() {
-                                    self.open_task_context(list, task.id, true);
-                                }
-                                if task.subtasks.is_empty() {
-                                    ui.label(self.rich("No subtasks", 13.0, palette.muted));
-                                }
-                                for child in &task.subtasks {
-                                    let row = self.child_preview_row(ui, child, palette);
-                                    self.detail_spotlight(
-                                        ui,
-                                        row,
-                                        (list, task.id, Some(child.id), true),
-                                        palette,
-                                    );
-                                }
-                            });
+                    let age_height = ui
+                        .painter()
+                        .layout_no_wrap(
+                            "Archived".to_owned(),
+                            self.font_id(12.0),
+                            Color32::PLACEHOLDER,
+                        )
+                        .size()
+                        .y;
+                    let frame = HistoryFrame {
+                        count,
+                        now: now_unix_seconds(),
+                        age_height,
+                    };
+                    for position in 0..count {
+                        if !self.history_row(ui, list, position, &frame, palette) {
+                            break;
                         }
                     }
                 });
         });
+    }
+
+    /// Reserves one History row and builds its contents when they can be seen or used.
+    ///
+    /// Skipped rows keep their Restore control registered, so keyboard navigation and
+    /// scrolling reach them.
+    ///
+    /// # Returns
+    ///
+    /// Whether the next row may be rendered; false once the archive changed during the pass.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an internally resolved list index is invalid.
+    fn history_row(
+        &mut self,
+        ui: &mut egui::Ui,
+        list: Uuid,
+        position: usize,
+        frame: &HistoryFrame,
+        palette: Palette,
+    ) -> bool {
+        let Some(index) = self.list_index(list) else {
+            return false;
+        };
+        let archive = &self.lists[index].data.archive;
+        if archive.len() != frame.count {
+            return false;
+        }
+        let id = archive[position].task.id;
+        let mut expanded = self.details.expanded_history.contains(&(list, id));
+        if self.spotlight.as_ref().is_some_and(|spotlight| {
+            spotlight.archived
+                && spotlight.list_id == list
+                && spotlight.task_id == id
+                && spotlight.subtask_id.is_some()
+        }) {
+            self.expand_archived(list, id);
+            expanded = true;
+        }
+        let marker = if expanded { "▾" } else { "▸" };
+        let spacing = ui.spacing().item_spacing;
+        let width = (ui.available_width() - 110.0 - 2.0 * spacing.x).max(1.0);
+        let galley = ui.painter().layout(
+            format!(
+                "{marker} {}",
+                self.lists[index].data.archive[position].task.text
+            ),
+            self.content_font_id(15.0),
+            Color32::PLACEHOLDER,
+            width,
+        );
+        let height = (galley.size().y + spacing.y + frame.age_height).max(28.0);
+        let (rect, _) =
+            ui.allocate_exact_size(Vec2::new(ui.available_width(), height), Sense::hover());
+        let title_rect = Rect::from_min_size(rect.min, Vec2::new(width, height));
+        let copy_rect = Rect::from_min_size(
+            egui::pos2(title_rect.right() + spacing.x, rect.top()),
+            Vec2::new(26.0, 28.0),
+        );
+        let restore_rect = Rect::from_min_size(
+            egui::pos2(copy_rect.right() + spacing.x, rect.top()),
+            Vec2::new(76.0, 28.0),
+        );
+        let restore_item = FocusItem::Archived(list, id);
+        let needs_contents = ui.is_rect_visible(rect)
+            || expanded
+            || self.has_focus_within(restore_item)
+            || self.details.menu_task == Some((list, id, true))
+            || self.spotlight.as_ref().is_some_and(|spotlight| {
+                spotlight.archived && spotlight.list_id == list && spotlight.task_id == id
+            });
+        if !needs_contents {
+            let response = Self::history_restore_button(
+                ui,
+                restore_rect,
+                restore_item.id(),
+                &self.lists[index].data.archive[position].task.text,
+            );
+            self.track_focus(&response, restore_item);
+            // A key that focuses an unbuilt row and presses Enter in one frame still activates it.
+            if response.clicked() {
+                self.restore_archived(list, id);
+            }
+            return true;
+        }
+        let item = self.lists[index].data.archive[position].clone();
+        let task = &item.task;
+        let mut title_ui = ui.new_child(
+            UiBuilder::new()
+                .id_salt(("history-row", list, id))
+                .max_rect(title_rect)
+                .layout(Layout::top_down(Align::LEFT)),
+        );
+        let title = title_ui.add(
+            Label::new(self.content_rich(format!("{marker} {}", task.text), 15.0, palette.muted))
+                .wrap(),
+        );
+        let response = title_ui.interact(title.rect, history_title_id(list, id), Sense::click());
+        response.widget_info(|| {
+            egui::WidgetInfo::labeled(
+                egui::WidgetType::Button,
+                true,
+                format!(
+                    "{} archived task: {}",
+                    if expanded { "Collapse" } else { "Inspect" },
+                    task.text
+                ),
+            )
+        });
+        self.track_focus(&response, restore_item);
+        self.task_actions_menu(&response, list, id, true);
+        if response.clicked() {
+            if expanded {
+                self.details.expanded_history.remove(&(list, id));
+            } else {
+                self.expand_archived(list, id);
+            }
+        }
+        if response.has_focus() {
+            title_ui.painter().rect_stroke(
+                response.rect,
+                3.0,
+                Stroke::new(1.0, palette.accent),
+                egui::StrokeKind::Inside,
+            );
+        }
+        title_ui.add(
+            Label::new(self.rich(
+                relative_age("Archived", item.archived_at_unix, frame.now),
+                12.0,
+                palette.muted,
+            ))
+            .truncate(),
+        );
+        self.task_copy_control(ui, copy_rect, (list, id, true), palette);
+        let response =
+            Self::history_restore_button(ui, restore_rect, restore_item.id(), &task.text);
+        ui.painter().text(
+            restore_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            "Restore",
+            self.font_id(13.0),
+            palette.accent,
+        );
+        self.track_focus(&response, restore_item);
+        if response.clicked() {
+            self.restore_archived(list, id);
+        }
+        let row = Rect::from_min_max(rect.min, egui::pos2(restore_rect.right(), rect.bottom()));
+        self.detail_spotlight(ui, row, (list, id, None, true), palette);
+        if expanded {
+            ui.indent(("history-children", list, id), |ui| {
+                if !task.context.is_empty() && ui.button("View context").clicked() {
+                    self.open_task_context(list, id, true);
+                }
+                if task.subtasks.is_empty() {
+                    ui.label(self.rich("No subtasks", 13.0, palette.muted));
+                }
+                for child in &task.subtasks {
+                    let row = self.child_preview_row(ui, child, palette);
+                    self.detail_spotlight(ui, row, (list, id, Some(child.id), true), palette);
+                }
+            });
+        }
+        true
+    }
+
+    /// Registers the same Restore button for visible and skipped History rows.
+    fn history_restore_button(ui: &egui::Ui, rect: Rect, id: Id, title: &str) -> egui::Response {
+        let response = ui.interact(rect, id, Sense::click());
+        response.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Restore: {title}"))
+        });
+        response
     }
 
     fn detail_spotlight(
@@ -447,3 +593,7 @@ impl MinimalistApp {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "history_tests.rs"]
+mod tests;

@@ -49,12 +49,9 @@ pub(super) fn write_json_atomic_checked<T: Serialize>(
     }
     let bytes = serde_json::to_vec_pretty(value)
         .map_err(|error| format!("could not serialize {}: {error}", path.display()))?;
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("data.json");
+    // Keep the sibling writable even when the destination name is already near the filesystem limit.
     let temp = path.with_file_name(format!(
-        ".{file_name}.tmp-{}-{}",
+        ".minimalist-list.json.tmp-{}-{}",
         std::process::id(),
         Uuid::new_v4()
     ));
@@ -133,6 +130,7 @@ pub(super) fn cleanup_stale_temps(directory: &Path) {
 /// Returns an error when the list changed on disk since loading or saving it,
 /// or when it cannot be serialized, written, or replaced.
 pub fn save_list(list: &StoredList) -> Result<(), String> {
+    super::format::check_version(list.data.format_version)?;
     let (metadata, bytes) = write_json_atomic_checked(&list.path, &list.data, || {
         if list_changed_on_disk(list)? {
             return Err(format!(

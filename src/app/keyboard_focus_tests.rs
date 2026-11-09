@@ -709,7 +709,7 @@ fn quoted_workspace_input_opens_existing_lists_and_survives_restart() {
             assert_eq!(app.lists[0].key, existing.key);
             assert_eq!(app.workspace_input, app.settings.workspace_path);
             assert!(old_workspace.join("lists").is_dir());
-            let saved = storage::load_settings().unwrap();
+            let saved = storage::load_settings().0;
             assert_eq!(saved.workspace_path, app.settings.workspace_path);
             let restarted = MinimalistApp::new(&egui::Context::default(), saved, None, None);
             assert_eq!(restarted.workspace, app.workspace);

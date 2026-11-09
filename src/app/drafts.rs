@@ -1,9 +1,6 @@
 //! Session-only drafts scoped to their originating workspace and object.
 
-use super::{
-    MinimalistApp, Screen,
-    overlays::{FindState, QuickCaptureState},
-};
+use super::{MinimalistApp, Screen, overlays::FindState, quick_capture::QuickCaptureState};
 use std::{collections::HashMap, path::PathBuf};
 use uuid::Uuid;
 
@@ -17,6 +14,24 @@ pub(super) struct Drafts {
 }
 
 impl MinimalistApp {
+    /// Checks whether an unfinished checklist entry is attached to this task.
+    ///
+    /// # Arguments
+    /// - `list` - The task's list.
+    /// - `task` - The parent of the checklist entry.
+    ///
+    /// # Returns
+    /// Whether the current or stashed entry contains text.
+    pub(in crate::app) fn has_subtask_draft(&self, list: Uuid, task: Uuid) -> bool {
+        if self.subtasks_for == Some((list, task)) {
+            return !self.new_subtask.is_empty();
+        }
+        self.drafts
+            .children
+            .get(&(self.workspace.clone(), list, task))
+            .is_some_and(|draft| !draft.is_empty())
+    }
+
     /// Saves capture and search state before changing workspaces.
     pub(super) fn stash_overlay_drafts(&mut self) {
         if let Some(draft) = self.quick_capture.take().or(self.capture_draft.take()) {

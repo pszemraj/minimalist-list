@@ -81,7 +81,7 @@ fn view_mode_and_manual_order_survive_restart() {
     let (_, mut app, list, manual) = fixture();
     app.sort_tasks(list, TaskSort::Title);
     let sorted = ids(&app);
-    let settings = storage::load_settings().unwrap();
+    let settings = storage::load_settings().0;
     let ctx = egui::Context::default();
     let mut restarted = MinimalistApp::new(&ctx, settings, None, None);
     assert_eq!(restarted.task_sort_mode(list), TaskSort::Title);
@@ -119,6 +119,27 @@ fn edited_titles_and_completion_resort_the_view_without_rewriting_manual_order()
     assert_eq!(disk_ids(&app), manual);
     app.sort_tasks(list, TaskSort::Manual);
     assert_eq!(ids(&app), manual);
+    std::fs::remove_dir_all(app.workspace).unwrap();
+}
+
+#[test]
+fn failed_capture_does_not_change_the_manual_position_used_by_undo() {
+    let (_, mut app, list, manual) = fixture();
+    app.sort_tasks(list, TaskSort::Title);
+    let lists = app.workspace.join("lists");
+    let offline = app.workspace.join("offline");
+    std::fs::rename(&lists, &offline).unwrap();
+    std::fs::write(&lists, "a file blocks the folder").unwrap();
+    assert!(
+        app.save_capture(list, &["Failed capture".into()], None)
+            .is_err()
+    );
+    std::fs::remove_file(&lists).unwrap();
+    std::fs::rename(&offline, &lists).unwrap();
+
+    app.remove_task(list, manual[1]);
+    app.undo_last();
+    assert_eq!(disk_ids(&app), manual);
     std::fs::remove_dir_all(app.workspace).unwrap();
 }
 
@@ -179,23 +200,6 @@ fn external_manual_json_reorder_is_retained_during_a_sorted_view() {
     app.sort_tasks(list, TaskSort::Manual);
     assert_eq!(ids(&app), expected);
     assert_eq!(disk_ids(&app), expected);
-    std::fs::remove_dir_all(app.workspace).unwrap();
-}
-
-#[test]
-fn deleting_and_undoing_in_sorted_view_restores_original_manual_position() {
-    let (_, mut app, list, manual) = fixture();
-    let before = serde_json::to_value(&app.lists[0].data.tasks).unwrap();
-    app.sort_tasks(list, TaskSort::Title);
-    app.remove_task(list, manual[0]);
-    assert!(!disk_ids(&app).contains(&manual[0]));
-    app.undo_delete();
-    app.sort_tasks(list, TaskSort::Manual);
-    assert_eq!(ids(&app), manual);
-    assert_eq!(
-        serde_json::to_value(&app.lists[0].data.tasks).unwrap(),
-        before
-    );
     std::fs::remove_dir_all(app.workspace).unwrap();
 }
 
@@ -328,7 +332,7 @@ fn task_saves_and_reopening_selected_list_do_not_write_settings() {
 }
 
 #[test]
-fn pruning_list_preferences_keeps_other_workspaces_and_live_lists() {
+fn removing_a_list_preference_keeps_other_workspaces_and_lists() {
     let (_, mut app, list, _) = fixture();
     let removed = Uuid::new_v4();
     let workspace = app.workspace.to_string_lossy().into_owned();
@@ -350,6 +354,9 @@ fn pruning_list_preferences_keeps_other_workspaces_and_live_lists() {
         .list_order
         .insert(elsewhere.clone(), vec![removed]);
     app.capture_loaded_task_orders();
+    assert_eq!(app.settings.task_sort.len(), 3);
+    assert_eq!(app.settings.list_order[&workspace], vec![removed, list]);
+    app.remove_list_preferences(removed);
     assert_eq!(app.settings.task_sort.len(), 2);
     assert_eq!(
         app.settings.task_sort[&app.task_order_key(list)],

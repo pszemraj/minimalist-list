@@ -1,6 +1,7 @@
 //! Serializable list, task, subtask, and archive data models.
 
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
@@ -140,6 +141,9 @@ pub struct TodoList {
     pub tasks: Vec<Task>,
     #[serde(default)]
     pub archive: Vec<ArchivedTask>,
+    /// Fields from compatible newer writers, retained when saving this list.
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 impl TodoList {
@@ -162,6 +166,7 @@ impl TodoList {
             accent,
             tasks: Vec::new(),
             archive: Vec::new(),
+            extra: BTreeMap::new(),
         }
     }
 
@@ -184,7 +189,7 @@ impl TodoList {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 /// A top-level task and its optional checklist.
 pub struct Task {
     pub id: Uuid,
@@ -197,6 +202,9 @@ pub struct Task {
     pub completed_at_unix: Option<u64>,
     #[serde(default)]
     pub subtasks: Vec<Subtask>,
+    /// Fields from compatible newer writers, retained with this task.
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 impl Task {
@@ -214,6 +222,7 @@ impl Task {
             created_at_unix: now_unix_seconds(),
             completed_at_unix: None,
             subtasks: Vec::new(),
+            extra: BTreeMap::new(),
         }
     }
 
@@ -263,12 +272,15 @@ impl Task {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 /// One checklist item attached to a task.
 pub struct Subtask {
     pub id: Uuid,
     pub text: String,
     pub completed: bool,
+    /// Fields from compatible newer writers, retained with this checklist item.
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 impl Subtask {
@@ -282,15 +294,19 @@ impl Subtask {
             id: Uuid::new_v4(),
             text: text.into(),
             completed: false,
+            extra: BTreeMap::new(),
         }
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 /// A completed task retained with the time it entered history.
 pub struct ArchivedTask {
     pub task: Task,
     pub archived_at_unix: u64,
+    /// Fields from compatible newer writers, retained while this archive entry exists.
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 impl ArchivedTask {
@@ -303,6 +319,7 @@ impl ArchivedTask {
         Self {
             task,
             archived_at_unix: now_unix_seconds(),
+            extra: BTreeMap::new(),
         }
     }
 }

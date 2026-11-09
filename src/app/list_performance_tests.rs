@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::app::tests::{chord, test_app};
+use crate::model::Task;
 
 fn frame(ctx: &egui::Context, app: &mut MinimalistApp, width: f32, events: Vec<egui::Event>) {
     crate::app::tests::run_app_frame(

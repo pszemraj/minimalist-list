@@ -1,7 +1,7 @@
 //! Failure recovery, destination-bound drafts, and preference concurrency journeys.
 
 use super::{
-    tests::{run_frame, test_app},
+    tests::{run_frame, snapshot_files, test_app},
     *,
 };
 use crate::model::{Accent, Task};
@@ -125,8 +125,10 @@ fn failed_startup_does_not_load_another_instances_default_workspace() {
     };
     let ctx = egui::Context::default();
     let mut app = MinimalistApp::new(&ctx, settings, None, None);
+    let requested = selected.to_str().unwrap();
+    let resolution = storage::resolve_launch_workspace(requested, false);
     let crate::instance::LaunchOutcome::Primary(recovery_owner) =
-        crate::claim_launch_instance(selected.to_str().unwrap(), false, state_dir, false).unwrap()
+        crate::claim_launch_instance(requested, &resolution, state_dir, false).unwrap()
     else {
         panic!("expected a recovery workspace owner");
     };
@@ -227,7 +229,7 @@ fn temporary_startup_failure_preserves_selected_path_and_retry_recovers_it() {
     app.go_to_overview();
     app.save_settings();
     assert_eq!(
-        storage::load_settings().unwrap().workspace_path,
+        storage::load_settings().0.workspace_path,
         settings.workspace_path
     );
     fs::remove_file(&selected).unwrap();
@@ -235,7 +237,7 @@ fn temporary_startup_failure_preserves_selected_path_and_retry_recovers_it() {
     app.switch_workspace(selected.to_str().unwrap());
     assert_eq!(app.lists[0].key, original.key);
     assert!(app.persistence.workspace_failure.is_none());
-    app.switch_workspace("   ");
+    app.switch_workspace(&storage::parse_workspace_input("   "));
     assert_eq!(app.lists[0].key, original.key);
     fs::remove_dir_all(root).unwrap();
 }
@@ -245,7 +247,7 @@ fn stale_instance_navigation_preserves_newer_appearance_preferences() {
     let (_, mut first) = test_app();
     first.save_settings();
     let (_, mut stale) = test_app();
-    stale.settings = storage::load_settings().unwrap();
+    stale.settings = storage::load_settings().0;
     stale.persistence = persistence::PersistenceState::new(stale.settings.clone(), None);
     first.settings.bold_text = true;
     first.settings.always_on_top = true;
@@ -253,7 +255,7 @@ fn stale_instance_navigation_preserves_newer_appearance_preferences() {
     first.save_settings();
     stale.settings.last_list_id = Some(stale.lists[0].key);
     stale.save_settings();
-    let saved = storage::load_settings().unwrap();
+    let saved = storage::load_settings().0;
     assert!(saved.bold_text && saved.always_on_top);
     assert_eq!(saved.background_opacity, 0.4);
     assert_eq!(saved.last_list_id, Some(stale.lists[0].key));
@@ -350,7 +352,7 @@ fn success_acknowledgement_expires_without_dismissing_save_errors() {
     app.acknowledge("Added to Tasks".into());
     assert!(app.persistence.notice.is_some());
     app.status = Some("Changes are unsaved".into());
-    app.persistence.notice.as_mut().unwrap().1 = Instant::now() - Duration::from_secs(4);
+    app.persistence.notice.as_mut().unwrap().1 = Some(Instant::now() - Duration::from_secs(4));
     app.update_motion(&ctx);
     assert!(app.persistence.notice.is_none());
     assert_eq!(app.status.as_deref(), Some("Changes are unsaved"));
@@ -416,10 +418,43 @@ fn vanished_workspace_shows_recovery_without_recreating_the_folder() {
     assert!(app.persistence.workspace_failure.is_some());
     fs::remove_dir(&lists).unwrap();
     fs::rename(&moved_lists, &lists).unwrap();
-    app.open_workspace(&workspace.to_string_lossy(), false);
+    app.next_scan = Instant::now();
+    app.scan_external_changes();
     assert!(app.persistence.workspace_failure.is_none());
     assert_eq!(fs::read_dir(&lists).unwrap().count(), 1);
     fs::remove_dir_all(&workspace).unwrap();
+}
+
+#[test]
+fn partial_workspace_recovery_keeps_the_pending_rename_attached_to_its_list() {
+    let (_ctx, mut app) = test_app();
+    let original = app.lists[0].path.clone();
+    let list = app.lists[0].key;
+    app.open_settings(Some(list));
+    app.rename_input = "Pending name".into();
+    let lists = app.workspace.join("lists");
+    let offline = app.workspace.join("offline");
+    fs::rename(&lists, &offline).unwrap();
+    app.next_scan = Instant::now();
+    app.scan_external_changes();
+    assert!(app.persistence.workspace_failure.is_some());
+
+    let other = storage::create_list(&app.workspace, "Synced", Accent::Sky).unwrap();
+    app.next_scan = Instant::now();
+    app.scan_external_changes();
+    assert!(app.persistence.workspace_failure.is_none());
+    assert!(app.list_index(other.key).is_some());
+    assert_eq!(app.settings_list_id, Some(list));
+    assert_eq!(app.rename_input, "Pending name");
+
+    fs::rename(offline.join(original.file_name().unwrap()), original).unwrap();
+    app.next_scan = Instant::now();
+    app.scan_external_changes();
+    app.close_settings();
+    let saved = storage::load_workspace(&app.workspace).unwrap();
+    let renamed = saved.lists.iter().find(|item| item.key == list).unwrap();
+    assert_eq!(renamed.data.title, "Pending name");
+    fs::remove_dir_all(&app.workspace).unwrap();
 }
 
 #[test]
@@ -455,6 +490,60 @@ fn missing_or_empty_saved_workspace_starts_in_recovery_but_explicit_launches_cre
     assert!(launched.persistence.workspace_failure.is_none());
     assert_eq!(fs::read_dir(selected.join("lists")).unwrap().count(), 1);
     fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn failed_startup_and_temporary_list_absence_preserve_local_preferences() {
+    let (ctx, original) = test_app();
+    let workspace = original.workspace.clone();
+    let key = workspace.to_string_lossy().into_owned();
+    let first = original.lists[0].key;
+    let second = storage::create_list(&workspace, "Second", Accent::Sky).unwrap();
+    let mut settings = original.settings;
+    settings.last_list_id = Some(second.key);
+    settings
+        .list_order
+        .insert(key.clone(), vec![second.key, first]);
+    let sort_key = format!("{key}::{}", second.key);
+    settings
+        .task_sort
+        .insert(sort_key.clone(), crate::model::TaskSort::Title);
+    storage::save_settings(&settings).unwrap();
+    let offline = workspace.with_extension("offline");
+    fs::rename(&workspace, &offline).unwrap();
+
+    let mut app = MinimalistApp::new(&ctx, settings.clone(), None, None);
+    assert!(app.persistence.workspace_failure.is_some());
+    app.next_scan = Instant::now();
+    app.scan_external_changes();
+    assert!(!workspace.exists());
+    fs::rename(&offline, &workspace).unwrap();
+    app.next_scan = Instant::now();
+    app.scan_external_changes();
+    assert!(app.persistence.workspace_failure.is_none());
+    assert!(matches!(app.screen, super::Screen::List(id) if id == second.key));
+    assert_eq!(app.lists[0].key, second.key);
+
+    let pending = workspace.join("temporarily-offline.json");
+    fs::rename(&second.path, &pending).unwrap();
+    app.next_scan = Instant::now();
+    app.scan_external_changes();
+    assert!(app.list_index(second.key).is_none());
+    app.save_settings();
+    let saved = storage::load_settings().0;
+    assert_eq!(saved.last_list_id, settings.last_list_id);
+    assert_eq!(saved.list_order, settings.list_order);
+    assert_eq!(saved.task_sort, settings.task_sort);
+    fs::rename(&pending, &second.path).unwrap();
+    app.next_scan = Instant::now();
+    app.scan_external_changes();
+    assert_eq!(app.lists[0].key, second.key);
+    assert_eq!(
+        app.task_sort_mode(second.key),
+        crate::model::TaskSort::Title
+    );
+    assert!(app.settings.task_sort.contains_key(&sort_key));
+    fs::remove_dir_all(workspace).unwrap();
 }
 
 #[test]
@@ -496,5 +585,73 @@ fn scan_shows_recovery_when_synced_list_files_vanish() {
     app.open_workspace(&path, false);
     assert!(app.persistence.workspace_failure.is_none());
     assert_eq!(app.lists.len(), 1);
+    fs::remove_dir_all(&app.workspace).unwrap();
+}
+
+#[test]
+fn a_save_keeps_the_replaced_bytes_in_local_backups_not_the_workspace() {
+    let (_ctx, mut app) = test_app();
+    let id = app.lists[0].key;
+    let before = fs::read(&app.lists[0].path).unwrap();
+    app.lists[0].data.tasks.push(Task::new("Changed"));
+    assert!(app.save_list_index(0));
+    let files = snapshot_files(&app, id);
+    assert_eq!(files.len(), 1);
+    assert_eq!(fs::read(&files[0]).unwrap(), before);
+    // A later save within the hour adds nothing.
+    app.lists[0].data.tasks.push(Task::new("Again"));
+    assert!(app.save_list_index(0));
+    assert_eq!(snapshot_files(&app, id).len(), 1);
+    let entries = fs::read_dir(&app.workspace)
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.file_name())
+        .collect::<Vec<_>>();
+    assert_eq!(entries, ["lists"]);
+    assert_eq!(
+        fs::read_dir(app.workspace.join("lists")).unwrap().count(),
+        1
+    );
+    assert!(app.status.is_none());
+    fs::remove_dir_all(storage::backups_dir(&app.workspace)).unwrap();
+    fs::remove_dir_all(&app.workspace).unwrap();
+}
+
+#[test]
+fn a_modal_candidate_save_also_keeps_the_replaced_bytes() {
+    let (_ctx, mut app) = test_app();
+    let id = app.lists[0].key;
+    let before = fs::read(&app.lists[0].path).unwrap();
+    let mut candidate = app.lists[0].clone();
+    candidate.data.tasks.push(Task::new("From a dialog"));
+    app.save_list_candidate(0, candidate).unwrap();
+    let files = snapshot_files(&app, id);
+    assert_eq!(files.len(), 1);
+    assert_eq!(fs::read(&files[0]).unwrap(), before);
+    fs::remove_dir_all(storage::backups_dir(&app.workspace)).unwrap();
+    fs::remove_dir_all(&app.workspace).unwrap();
+}
+
+#[test]
+fn a_backup_failure_warns_once_and_never_blocks_the_save() {
+    let (_ctx, mut app) = test_app();
+    let backups = storage::backups_dir(&app.workspace);
+    fs::create_dir_all(&backups).unwrap();
+    fs::write(backups.join("snapshots"), "a file blocks the folder").unwrap();
+    app.lists[0].data.tasks.push(Task::new("First"));
+    assert!(app.save_list_index(0));
+    assert!(
+        app.status
+            .as_deref()
+            .unwrap()
+            .contains("Local backup unavailable")
+    );
+    app.status = None;
+    app.lists[0].data.tasks.push(Task::new("Second"));
+    assert!(app.save_list_index(0));
+    assert!(app.status.is_none());
+    let saved = storage::load_workspace(&app.workspace).unwrap();
+    assert_eq!(saved.lists[0].data.tasks.len(), 2);
+    fs::remove_dir_all(backups).unwrap();
     fs::remove_dir_all(&app.workspace).unwrap();
 }

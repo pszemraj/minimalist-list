@@ -1,6 +1,6 @@
-//! Explicit recovery keeps local edits in an independent list before reloading sync changes.
+//! Resolving rejected edits without overwriting the list that changed on disk.
 
-use crate::app::MinimalistApp;
+use crate::app::{MinimalistApp, paste::new_tasks};
 use crate::{
     model::Task,
     storage::{self, StoredList},
@@ -8,16 +8,42 @@ use crate::{
 use uuid::Uuid;
 
 impl MinimalistApp {
-    /// Remembers the exact candidate rejected because its associated file changed.
+    /// Remembers conflicts in an accessible folder and leaves offline saves retryable.
     ///
     /// # Arguments
     /// - `candidate` - Local contents that were not written.
-    pub(in crate::app) fn record_save_conflict(&mut self, candidate: &StoredList) {
-        if storage::list_changed_on_disk(candidate).unwrap_or(false) {
+    ///
+    /// # Returns
+    /// The folder error if the folder itself is unavailable.
+    pub(super) fn record_save_conflict(&mut self, candidate: &StoredList) -> Option<String> {
+        let folder = self.workspace.join("lists");
+        let unavailable = std::fs::read_dir(&folder).err();
+        self.persistence.waiting_for_list_folder = unavailable.is_some();
+        if !self.persistence.waiting_for_list_folder
+            && storage::list_changed_on_disk(candidate) != Ok(false)
+        {
             self.persistence
                 .conflicted_candidates
                 .insert(candidate.key, candidate.clone());
         }
+        unavailable.map(|error| format!("could not read {}: {error}", folder.display()))
+    }
+
+    /// Makes pending edits retryable when their original disk contents return.
+    pub(in crate::app) fn refresh_save_conflicts(&mut self) {
+        if self.persistence.waiting_for_list_folder
+            || !self.persistence.dirty_lists.is_empty()
+            || !self.persistence.conflicted_candidates.is_empty()
+        {
+            self.persistence.waiting_for_list_folder =
+                std::fs::read_dir(self.workspace.join("lists")).is_err();
+        }
+        if self.persistence.waiting_for_list_folder {
+            return;
+        }
+        self.persistence
+            .conflicted_candidates
+            .retain(|_, candidate| storage::list_changed_on_disk(candidate) != Ok(false));
     }
 
     /// Returns whether this list has a retained candidate needing conflict recovery.
@@ -28,14 +54,55 @@ impl MinimalistApp {
         self.persistence.conflicted_candidates.contains_key(&list)
     }
 
-    /// Forgets conflict snapshots after a workspace change or successful external reload.
+    /// Forgets conflict snapshots after opening a workspace.
     pub(in crate::app) fn clear_save_conflicts(&mut self) {
         self.persistence.conflicted_candidates.clear();
+        self.persistence.waiting_for_list_folder = false;
     }
 
-    /// Forgets a resolved or explicitly canceled list's conflict snapshot.
+    /// Forgets a canceled conflict and makes the next scan reload its cached list.
     pub(in crate::app) fn forget_save_conflict(&mut self, list: Uuid) {
-        self.persistence.conflicted_candidates.remove(&list);
+        if self
+            .persistence
+            .conflicted_candidates
+            .remove(&list)
+            .is_some()
+        {
+            // An earlier scan may have observed the new file while retaining local content.
+            self.fingerprint = storage::WorkspaceFingerprint::default();
+            self.next_scan = std::time::Instant::now();
+        }
+    }
+
+    /// Copies the retained conflict snapshot so an abandoned write can restore it.
+    ///
+    /// # Arguments
+    /// - `list` - List identity.
+    ///
+    /// # Returns
+    /// The retained candidate, if this list has one.
+    pub(in crate::app) fn save_conflict_snapshot(&self, list: Uuid) -> Option<StoredList> {
+        self.persistence.conflicted_candidates.get(&list).cloned()
+    }
+
+    /// Replaces a list's conflict snapshot after an abandoned write recorded a new one.
+    ///
+    /// # Arguments
+    /// - `list` - List identity.
+    /// - `snapshot` - The earlier retained candidate, or `None` if there was none.
+    pub(in crate::app) fn restore_save_conflict(
+        &mut self,
+        list: Uuid,
+        snapshot: Option<StoredList>,
+    ) {
+        match snapshot {
+            Some(candidate) => {
+                self.persistence
+                    .conflicted_candidates
+                    .insert(list, candidate);
+            }
+            None => self.forget_save_conflict(list),
+        }
     }
 
     /// Saves a local copy before adopting the independently changed original list.
@@ -49,12 +116,40 @@ impl MinimalistApp {
     /// # Panics
     /// Panics if an internally resolved loaded-list index is invalid.
     pub(in crate::app) fn keep_local_copy_and_reload(&mut self, list: Uuid) -> bool {
-        let Some(mut candidate) = self.persistence.conflicted_candidates.get(&list).cloned() else {
+        if !self.has_save_conflict(list) {
+            return false;
+        }
+        let Some(candidate) = self.unsaved_list_candidate(list) else {
             return false;
         };
-        if let Some(index) = self.list_index(list) {
-            candidate.data = self.lists[index].data.clone();
-        }
+        let (copy, original) = match storage::create_local_copy(&self.workspace, &candidate) {
+            Ok(saved) => saved,
+            Err(error) => {
+                self.status = Some(error);
+                return false;
+            }
+        };
+        let message = original.as_ref().map_or_else(
+            || "Local changes kept in a separate list. The original is unavailable.".into(),
+            |original| {
+                let differences = storage::recovery_summary(&original.data, &candidate.data);
+                format!("Local changes kept in a separate list. {differences}")
+            },
+        );
+        self.lists.push(copy);
+        self.finish_conflict_reload(list, original);
+        self.acknowledge_recovery(message);
+        log::info!("Save conflict resolved by keeping a local copy");
+        true
+    }
+
+    /// Collects accepted edits and open drafts that a reload would replace.
+    fn unsaved_list_candidate(&self, list: Uuid) -> Option<StoredList> {
+        let mut candidate = self
+            .list_index(list)
+            .map(|index| &self.lists[index])
+            .or_else(|| self.persistence.conflicted_candidates.get(&list))?
+            .clone();
         if let Some((editing_list, task_id)) = self.editing
             && editing_list == list
             && let Some(task) = candidate
@@ -102,6 +197,10 @@ impl MinimalistApp {
             if !text.is_empty() {
                 candidate.data.tasks.insert(0, Task::new(text));
             }
+            candidate
+                .data
+                .tasks
+                .splice(0..0, new_tasks(&draft.pending_batch));
         }
         if self.settings_list_id == Some(list)
             && self.rename_input.trim() != self.rename_baseline.trim()
@@ -110,27 +209,56 @@ impl MinimalistApp {
             candidate.data.title = self.rename_input.trim().to_owned();
         }
         self.prepare_list_for_save(&mut candidate);
-        let result = storage::load_existing_workspace(&self.workspace).and_then(|snapshot| {
-            storage::create_local_copy(&self.workspace, &candidate).map(|copy| (snapshot, copy))
-        });
-        let (snapshot, copy) = match result {
-            Ok(saved) => saved,
+        Some(candidate)
+    }
+
+    /// Backs up unsaved edits locally, then displays the current on-disk version, if present.
+    ///
+    /// # Returns
+    /// Whether pending list changes were backed up and discarded.
+    pub(in crate::app) fn discard_local_change_and_reload(&mut self, list: Uuid) -> bool {
+        if !self.has_save_conflict(list) && !self.persistence.dirty_lists.contains(&list) {
+            return false;
+        }
+        let Some(candidate) = self.unsaved_list_candidate(list) else {
+            return false;
+        };
+        if let Err(error) = storage::backup_discarded_list(&self.workspace, &candidate) {
+            self.status = Some(error);
+            return false;
+        }
+        let original = match storage::load_existing_workspace(&self.workspace) {
+            Ok(snapshot) => snapshot.lists.into_iter().find(|stored| stored.key == list),
             Err(error) => {
-                self.status = Some(error);
-                return false;
+                self.mark_workspace_unavailable(error);
+                None
             }
         };
-        let copy_title = copy.data.title.clone();
+        let message = if original.is_some() {
+            "Unsaved changes kept in local backups. List reloaded."
+        } else {
+            "Unsaved changes kept in local backups. The list is unavailable on disk."
+        };
+        self.finish_conflict_reload(list, original);
+        self.acknowledge(message.into());
+        log::info!("Unsaved list changes discarded");
+        true
+    }
+
+    fn finish_conflict_reload(&mut self, list: Uuid, original: Option<StoredList>) {
         self.lists.retain(|stored| stored.key != list);
         self.manual_task_order.remove(&list);
-        if let Some(original) = snapshot.lists.into_iter().find(|stored| stored.key == list) {
+        if let Some(original) = original {
+            if self.settings_list_id == Some(list) {
+                self.rename_input.clone_from(&original.data.title);
+                self.rename_baseline.clone_from(&self.rename_input);
+            }
             self.manual_task_order.insert(
                 list,
                 original.data.tasks.iter().map(|task| task.id).collect(),
             );
             self.lists.push(original);
         }
-        self.lists.push(copy);
         if self
             .editing
             .is_some_and(|(editing_list, _)| editing_list == list)
@@ -169,20 +297,17 @@ impl MinimalistApp {
         {
             self.capture_draft = None;
         }
-        if self.settings_list_id == Some(list) {
-            self.rename_input.clone_from(&self.rename_baseline);
+        if self.list_index(list).is_none() {
+            if self.settings_list_id == Some(list) {
+                self.settings_list_id = None;
+            }
+            if matches!(self.screen, crate::app::Screen::List(id) if id == list) {
+                self.go_to_overview();
+            }
         }
-        if self.list_index(list).is_none()
-            && matches!(self.screen, crate::app::Screen::List(id) if id == list)
-        {
-            self.go_to_overview();
-        }
+        self.clear_resolved_save_error();
         self.apply_list_order();
         self.apply_task_sorts();
         self.next_scan = std::time::Instant::now();
-        self.status = Some(format!(
-            "Local changes kept in “{copy_title}”; the original file was kept on disk."
-        ));
-        true
     }
 }

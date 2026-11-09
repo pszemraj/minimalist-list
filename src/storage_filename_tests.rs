@@ -90,7 +90,7 @@ fn descriptive_filename_identity_wins_over_json_and_sync_conflict_copies() {
     assert_eq!(loaded.lists[0].key, list.key);
     assert_eq!(loaded.lists[0].data.id, list.key);
     assert_eq!(loaded.lists[0].data.title, "Current title");
-    assert_eq!(loaded.warnings.len(), 2);
+    assert_eq!(loaded.duplicate_paths.len(), 2);
     assert!(copy.path.exists() && legacy.exists());
     fs::remove_dir_all(root).unwrap();
 }
@@ -183,7 +183,7 @@ fn rename_collision_reloads_the_latest_saved_contents_without_replacing_copies()
             serde_json::to_value(&loaded.lists[0].data).unwrap(),
             serde_json::to_value(&list.data).unwrap()
         );
-        assert_eq!(loaded.warnings.len(), 1);
+        assert_eq!(loaded.duplicate_paths, [stale.path.clone()]);
         assert_eq!(fs::read(&stale.path).unwrap(), stale_bytes);
 
         // A subsequent real edit to the destination must beat the older source.
@@ -245,10 +245,21 @@ fn rename_preserves_an_existing_dangling_symlink() {
 fn omitted_shortcut_uses_default_while_explicit_empty_remains_disabled() {
     let legacy: Settings = serde_json::from_str("{}").unwrap();
     assert_eq!(legacy.global_shortcut, "CommandOrControl+Alt+Shift+KeyL");
+    assert_eq!(legacy.quick_add_shortcut, "CommandOrControl+Alt+Shift+KeyN");
     let disabled: Settings = serde_json::from_str(r#"{"global_shortcut":""}"#).unwrap();
     assert!(disabled.global_shortcut.is_empty());
+    assert_eq!(
+        disabled.quick_add_shortcut,
+        "CommandOrControl+Alt+Shift+KeyN"
+    );
+    let quick_disabled: Settings = serde_json::from_str(r#"{"quick_add_shortcut":""}"#).unwrap();
+    assert!(quick_disabled.quick_add_shortcut.is_empty());
+    assert_eq!(
+        quick_disabled.global_shortcut,
+        "CommandOrControl+Alt+Shift+KeyL"
+    );
     save_settings(&disabled).unwrap();
-    assert!(load_settings().unwrap().global_shortcut.is_empty());
+    assert!(load_settings().0.global_shortcut.is_empty());
 }
 
 #[test]
@@ -264,7 +275,7 @@ fn show_subtasks_defaults_off_and_merges_as_a_global_preference() {
     let merged = save_settings_changes(&second, &baseline).unwrap();
     assert!(merged.show_subtasks);
     assert_eq!(merged.font_size, 24.0);
-    assert!(load_settings().unwrap().show_subtasks);
+    assert!(load_settings().0.show_subtasks);
     let disabled = Settings {
         show_subtasks: false,
         ..merged.clone()
@@ -283,18 +294,16 @@ fn invalid_settings_json_recovers_on_preference_save() {
         fs::create_dir_all(&root).unwrap();
         let path = root.join("settings.json");
         fs::write(&path, invalid).unwrap();
-        assert!(
-            load_settings_from(&path)
-                .unwrap_err()
-                .contains("could not parse")
-        );
+        let (loaded, warning) = load_settings_from(&path);
+        assert!(warning.unwrap().contains("could not parse"));
+        assert_eq!(loaded.font_size, Settings::default().font_size);
         let baseline = Settings::default();
         let mut desired = baseline.clone();
         desired.font_size = 28.0;
         desired.global_shortcut.clear();
         desired.workspace_path = root.join("selected").to_string_lossy().into_owned();
         let merged = save_settings_changes_at(&path, &desired, &baseline).unwrap();
-        let saved = load_settings_from(&path).unwrap();
+        let saved = load_settings_from(&path).0;
         for recovered in [merged, saved] {
             assert_eq!(
                 serde_json::to_value(recovered).unwrap(),
@@ -366,7 +375,7 @@ fn settings_merge_waits_for_lock_before_reading_newer_preferences() {
     drop(lock);
     let merged = early.unwrap_or_else(|_| result.recv().unwrap()).unwrap();
     worker.join().unwrap();
-    let saved = load_settings_from(&path).unwrap();
+    let saved = load_settings_from(&path).0;
     fs::remove_dir_all(root).unwrap();
     assert!(waited, "settings merge ignored another writer's lock");
     for settings in [merged, saved] {

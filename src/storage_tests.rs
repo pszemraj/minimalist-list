@@ -78,6 +78,80 @@ fn escaped_macos_workspace_input_opens_existing_lists() {
     fs::remove_dir_all(root).unwrap();
 }
 
+#[cfg(unix)]
+#[test]
+fn literal_workspace_paths_keep_significant_spaces() {
+    let root = test_root();
+    let workspace = root.join("  workspace  ");
+    let path = workspace.to_str().unwrap();
+    let normalized = normalize_workspace_path(path).unwrap();
+    assert_eq!(normalized, workspace.canonicalize().unwrap());
+    assert_eq!(existing_workspace_path(path).unwrap(), normalized);
+    assert_eq!(
+        resolve_launch_workspace(path, true).unwrap(),
+        (normalized.clone(), true)
+    );
+    assert_eq!(
+        resolve_launch_workspace(path, false).unwrap(),
+        (normalized, false)
+    );
+    assert_eq!(parse_workspace_input(&format!("  \"{path}\"  ")), path);
+    assert!(workspace.join("lists").is_dir());
+    assert!(!root.join("  workspace").exists());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn utf8_workspace_alias_rejects_non_utf8_target_before_creating_lists() {
+    use std::os::unix::{ffi::OsStringExt, fs::symlink};
+
+    let root = test_root();
+    let target = root.join(OsString::from_vec(b"workspace\xff".to_vec()));
+    fs::create_dir_all(&target).unwrap();
+    let alias = root.join("workspace-alias");
+    symlink(&target, &alias).unwrap();
+    assert!(
+        normalize_workspace_path(alias.to_str().unwrap())
+            .unwrap_err()
+            .contains("UTF-8")
+    );
+    assert!(!target.join("lists").exists());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn selecting_the_list_directory_opens_its_parent_without_creating_a_nested_workspace() {
+    let root = test_root();
+    let list = create_list(&root, "Synced tasks", Accent::Mint).unwrap();
+    let lists = root.join("lists");
+    let selected = lists.to_string_lossy();
+    assert_eq!(
+        normalize_workspace_path(&selected).unwrap(),
+        root.canonicalize().unwrap()
+    );
+    let (launched, _) = resolve_launch_workspace(&selected, true).unwrap();
+    assert_eq!(load_workspace(&launched).unwrap().lists[0].key, list.key);
+    assert!(!lists.join("lists").exists());
+
+    let future = serde_json::json!({"format_version": 999, "id": list.key});
+    fs::write(&list.path, serde_json::to_vec(&future).unwrap()).unwrap();
+    let selected_parent = normalize_workspace_path(&selected).unwrap();
+    assert_eq!(selected_parent, root.canonicalize().unwrap());
+    let snapshot = load_workspace(&selected_parent).unwrap();
+    assert!(snapshot.lists.is_empty());
+    assert!(snapshot.warnings[0].contains("unsupported list format 999"));
+    assert!(!lists.join("lists").exists());
+
+    let nested = create_list(&lists, "Existing nested workspace", Accent::Sky).unwrap();
+    assert_eq!(
+        normalize_workspace_path(&selected).unwrap(),
+        lists.canonicalize().unwrap()
+    );
+    assert_eq!(load_workspace(&lists).unwrap().lists[0].key, nested.key);
+    fs::remove_dir_all(root).unwrap();
+}
+
 #[test]
 fn native_paths_reuse_legacy_locations_independently() {
     let root = test_root();
@@ -419,7 +493,9 @@ fn updating_one_file_keeps_other_changes_detectable() {
 }
 
 #[test]
-fn canonical_file_wins_over_sync_conflict_copy() {
+fn canonical_file_wins_until_sync_conflict_copy_is_recovered() {
+    use crate::model::{Subtask, Task};
+
     let root = test_root();
     let root = normalize_workspace_path(&root.to_string_lossy()).expect("create test workspace");
     let canonical = create_list(&root, "Canonical", Accent::Mint).expect("create list");
@@ -430,14 +506,63 @@ fn canonical_file_wins_over_sync_conflict_copy() {
     conflict.path = conflict_path;
     conflict.stamp.set(None);
     conflict.data.title = "Conflict".to_owned();
+    let mut task = Task::new("Change from another machine");
+    task.context = "Notes from the copy".into();
+    task.subtasks.push(Subtask::new("Next step"));
+    conflict.data.tasks.push(task);
     save_list(&conflict).expect("write conflict copy");
+    let canonical_bytes = fs::read(&canonical.path).unwrap();
+    let conflict_bytes = fs::read(&conflict.path).unwrap();
 
     let snapshot = load_workspace(&root).expect("load workspace");
     assert_eq!(snapshot.lists.len(), 1);
     assert_eq!(snapshot.lists[0].data.title, "Canonical");
-    assert_eq!(snapshot.warnings.len(), 1);
-    assert!(conflict.path.exists());
+    assert!(snapshot.warnings.is_empty());
+    assert_eq!(snapshot.duplicate_paths, [conflict.path.clone()]);
+    assert!(delete_list(&root, &canonical).is_err());
+    assert!(recover_duplicate(&root, &canonical.path).is_err());
 
+    let backups = backups_dir(&root);
+    fs::create_dir_all(&backups).unwrap();
+    let conflicted_backups = backups.join("conflicted");
+    fs::write(&conflicted_backups, b"obstructed backup folder").unwrap();
+    assert!(recover_duplicate(&root, &conflict.path).is_err());
+    assert_eq!(fs::read(&conflict.path).unwrap(), conflict_bytes);
+    assert_eq!(workspace_fingerprint(&root).unwrap(), snapshot.fingerprint);
+    fs::remove_file(&conflicted_backups).unwrap();
+
+    let (recovered, differences) = recover_duplicate(&root, &conflict.path).unwrap();
+    assert!(differences.contains("Only in copy (1) · Change from another machine"));
+    assert!(differences.contains("List details or Manual order differ"));
+    let snapshot = load_existing_workspace(&root).unwrap();
+    assert!(snapshot.duplicate_paths.is_empty());
+    assert_eq!(snapshot.lists.len(), 2);
+    assert_eq!(recovered.data.title, "Conflict (recovered copy)");
+    assert_ne!(recovered.key, canonical.key);
+    let recovered_task = &recovered.data.tasks[0];
+    let original_task = &conflict.data.tasks[0];
+    assert_eq!(recovered_task.text, original_task.text);
+    assert_eq!(recovered_task.context, original_task.context);
+    assert_ne!(recovered_task.id, original_task.id);
+    assert_eq!(
+        recovered_task.subtasks[0].text,
+        original_task.subtasks[0].text
+    );
+    assert_ne!(recovered_task.subtasks[0].id, original_task.subtasks[0].id);
+    let backup = fs::read_dir(conflicted_backups)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path()
+        .join(conflict.path.file_name().unwrap());
+    assert_eq!(fs::read(backup).unwrap(), conflict_bytes);
+    assert_eq!(fs::read(&canonical.path).unwrap(), canonical_bytes);
+    assert!(!conflict.path.exists());
+    assert!(recover_duplicate(&root, &conflict.path).is_err());
+    assert_eq!(load_existing_workspace(&root).unwrap().lists.len(), 2);
+    delete_list(&root, &canonical).unwrap();
+    fs::remove_dir_all(backups).unwrap();
     fs::remove_dir_all(root).expect("remove test workspace");
 }
 

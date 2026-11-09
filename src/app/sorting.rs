@@ -64,16 +64,12 @@ impl MinimalistApp {
     /// Captures fresh JSON orders without replacing snapshots of cached lists.
     ///
     /// # Arguments
-    /// - `retained_paths` - Unreadable files whose already sorted cached lists survived a scan.
-    pub(super) fn capture_loaded_task_orders_except(
-        &mut self,
-        retained_paths: &[std::path::PathBuf],
-    ) {
-        self.prune_list_preferences();
+    /// - `retained_ids` - Cached lists carried over from the previous scan.
+    pub(super) fn capture_loaded_task_orders_except(&mut self, retained_ids: &[Uuid]) {
         self.manual_task_order
             .retain(|id, _| self.lists.iter().any(|list| list.key == *id));
         for list in &self.lists {
-            if retained_paths.contains(&list.path) {
+            if retained_ids.contains(&list.key) {
                 continue;
             }
             self.manual_task_order.insert(
@@ -83,17 +79,12 @@ impl MinimalistApp {
         }
     }
 
-    /// Removes preferences for lists no longer present in the current workspace.
-    pub(super) fn prune_list_preferences(&mut self) {
+    /// Removes local order and sort preferences after a confirmed list deletion.
+    pub(super) fn remove_list_preferences(&mut self, list: Uuid) {
+        self.settings.task_sort.remove(&self.task_order_key(list));
         let workspace = self.workspace.to_string_lossy();
-        let prefix = format!("{workspace}::");
-        let live: HashSet<_> = self.lists.iter().map(|list| list.key).collect();
-        self.settings.task_sort.retain(|key, _| {
-            key.strip_prefix(&prefix)
-                .is_none_or(|id| id.parse::<Uuid>().is_ok_and(|id| live.contains(&id)))
-        });
         if let Some(order) = self.settings.list_order.get_mut(workspace.as_ref()) {
-            order.retain(|id| live.contains(id));
+            order.retain(|id| *id != list);
         }
     }
 
@@ -128,7 +119,10 @@ impl MinimalistApp {
     ///
     /// # Arguments
     /// - `candidate` - Whole-list candidate, including its latest task mutations.
-    pub(super) fn prepare_list_for_save(&mut self, candidate: &mut StoredList) {
+    ///
+    /// # Returns
+    /// The candidate's Manual order, without adopting it in the loaded list.
+    pub(super) fn prepare_list_for_save(&self, candidate: &mut StoredList) -> Vec<Uuid> {
         let mode = self.task_sort_mode(candidate.key);
         let manual = if mode == TaskSort::Manual {
             candidate.data.tasks.iter().map(|task| task.id).collect()
@@ -140,8 +134,8 @@ impl MinimalistApp {
                 .unwrap_or_default();
             reconcile_order(&previous, &candidate.data.tasks)
         };
-        self.manual_task_order.insert(candidate.key, manual.clone());
         apply_order(&mut candidate.data.tasks, &manual, TaskSort::Manual);
+        manual
     }
 
     /// Clones the loaded list and prepares its tasks for a Manual-order disk write.
@@ -156,7 +150,9 @@ impl MinimalistApp {
     /// Panics if the caller supplies an invalid loaded-list index.
     pub(super) fn list_for_save(&mut self, index: usize) -> StoredList {
         let mut candidate = self.lists[index].clone();
-        self.prepare_list_for_save(&mut candidate);
+        let manual = self.prepare_list_for_save(&mut candidate);
+        // The loaded edits survive a write failure, including their Manual order.
+        self.manual_task_order.insert(candidate.key, manual);
         candidate
     }
 

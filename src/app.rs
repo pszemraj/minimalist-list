@@ -5,13 +5,16 @@ mod adversarial_tests;
 mod context;
 mod desktop;
 mod drafts;
+mod duplicate_recovery;
 mod keyboard;
 mod list;
 mod overlays;
 mod overview;
+mod paste;
 mod persistence;
 #[cfg(test)]
 mod persistence_tests;
+mod quick_capture;
 mod settings;
 mod sorting;
 mod task_details;
@@ -20,7 +23,7 @@ mod theme;
 mod window;
 
 use self::keyboard::KeyboardState;
-use self::overlays::{FindState, QuickCaptureState, ShortcutsState, Spotlight};
+use self::overlays::{FindState, ShortcutsState, Spotlight};
 use self::theme::Palette;
 use crate::model::Accent;
 use crate::storage::{self, Settings, StoredList, WorkspaceFingerprint};
@@ -82,6 +85,8 @@ pub struct MinimalistApp {
     lists: Vec<StoredList>,
     manual_task_order: std::collections::HashMap<Uuid, Vec<Uuid>>,
     fingerprint: WorkspaceFingerprint,
+    duplicate_paths: Vec<PathBuf>,
+    duplicate_recovery_error: Option<String>,
     screen: Screen,
     return_screen: Option<Screen>,
     settings_list_id: Option<Uuid>,
@@ -110,6 +115,7 @@ pub struct MinimalistApp {
     rename_input: String,
     rename_baseline: String,
     delete_armed: bool,
+    clear_history_armed: bool,
     next_scan: Instant,
     last_pin_state: Option<bool>,
     last_decorations_state: Option<bool>,
@@ -119,7 +125,7 @@ pub struct MinimalistApp {
     newest_task: Option<(Uuid, Instant)>,
     clear_animation: Option<(Uuid, Instant)>,
     delete_animation: Option<(Uuid, Uuid, Instant)>,
-    quick_capture: Option<QuickCaptureState>,
+    quick_capture: Option<quick_capture::QuickCaptureState>,
     find: Option<FindState>,
     shortcuts: Option<ShortcutsState>,
     spotlight: Option<Spotlight>,
@@ -133,38 +139,44 @@ pub struct MinimalistApp {
     next_taskbar_check: Instant,
     instance: Option<crate::instance::InstanceGuard>,
     global_shortcut: Option<crate::hotkey::GlobalShortcut>,
-    global_shortcut_input: String,
-    /// Last shortcut failure shown, cleared by a later successful apply.
-    shortcut_error: Option<String>,
+    global_quick_add_requested: Option<bool>,
+    /// Editable shortcut text per `GlobalAction`.
+    shortcut_inputs: crate::hotkey::PerAction<String>,
+    /// Last failure shown per `GlobalAction`, cleared by a later successful apply.
+    shortcut_errors: crate::hotkey::PerAction<Option<String>>,
     task_context: Option<context::TaskContextEditor>,
     #[cfg(target_os = "macos")]
     reopen: Option<crate::macos::ReopenHandler>,
     quitting: bool,
+    pending_native_shutdown: Option<window::NativeShutdown>,
     keyboard: KeyboardState,
     persistence: persistence::PersistenceState,
     drafts: drafts::Drafts,
     details: task_details::TaskDetailsState,
-    capture_draft: Option<QuickCaptureState>,
+    capture_draft: Option<quick_capture::QuickCaptureState>,
     find_draft: Option<FindState>,
 }
 
 impl MinimalistApp {
-    /// Initializes the UI, resolves the workspace, and loads its lists.
+    /// Initializes the UI and loads the workspace selected before native startup.
     ///
     /// # Arguments
     ///
     /// - `ctx` - Egui context used to configure the interface.
     /// - `settings` - Persisted preferences to apply.
     /// - `workspace_override` - Optional workspace path supplied for this launch.
+    /// - `resolved_workspace` - Workspace path and initialization policy used to claim the instance,
+    ///   or the resolution error to show in workspace recovery.
     /// - `startup_warning` - Optional warning to show after startup.
     ///
     /// # Returns
     ///
     /// A fully initialized application state.
-    pub fn new(
+    pub fn from_launch(
         ctx: &egui::Context,
         mut settings: Settings,
         workspace_override: Option<String>,
+        resolved_workspace: Result<(PathBuf, bool), String>,
         startup_warning: Option<String>,
     ) -> Self {
         let mut visuals = egui::Visuals::dark();
@@ -183,30 +195,20 @@ impl MinimalistApp {
             settings.workspace_path.clone_from(path);
         }
         let mut status = startup_warning;
-        let mut initialize = false;
-        let workspace = match storage::resolve_launch_workspace(
-            &settings.workspace_path,
-            workspace_override.is_some(),
-        ) {
-            Ok((path, create)) => {
-                initialize = create;
-                path
-            }
+        let (workspace, initialize) = match resolved_workspace {
+            Ok(resolved) => resolved,
             Err(error) => {
-                status = Some(format!(
-                    "Workspace {} unavailable: {error}",
-                    settings.workspace_path
-                ));
+                status = Some(error);
                 workspace_failure = Some(settings.workspace_path.clone());
-                PathBuf::from(&settings.workspace_path)
+                (PathBuf::from(&settings.workspace_path), false)
             }
         };
         settings.workspace_path = workspace.to_string_lossy().into_owned();
         if workspace_override.is_none() && workspace_failure.is_none() {
             persisted_workspace_path.clone_from(&settings.workspace_path);
         }
-        let (lists, fingerprint) = if workspace_failure.is_some() {
-            (Vec::new(), WorkspaceFingerprint::default())
+        let (lists, fingerprint, duplicate_paths) = if workspace_failure.is_some() {
+            (Vec::new(), WorkspaceFingerprint::default(), Vec::new())
         } else {
             // Only a folder this launch may create can start with a default list.
             let loaded = if initialize {
@@ -219,12 +221,16 @@ impl MinimalistApp {
                     if !snapshot.warnings.is_empty() {
                         status = Some(snapshot.warnings.join("\n"));
                     }
-                    (snapshot.lists, snapshot.fingerprint)
+                    (
+                        snapshot.lists,
+                        snapshot.fingerprint,
+                        snapshot.duplicate_paths,
+                    )
                 }
                 Err(error) => {
                     workspace_failure = Some(settings.workspace_path.clone());
                     status = Some(error);
-                    (Vec::new(), WorkspaceFingerprint::default())
+                    (Vec::new(), WorkspaceFingerprint::default(), Vec::new())
                 }
             }
         };
@@ -232,6 +238,11 @@ impl MinimalistApp {
             .last_list_id
             .filter(|id| lists.iter().any(|item| item.key == *id))
             .or_else(|| lists.first().map(|item| item.key));
+        if workspace_failure.is_some() {
+            log::warn!("Workspace unavailable at startup; waiting for existing files");
+        } else {
+            log::debug!("Workspace loaded");
+        }
         let screen = initial.map(Screen::List).unwrap_or(Screen::Overview);
         let view_zoom = 1.0;
         let displayed_palette = initial
@@ -243,11 +254,7 @@ impl MinimalistApp {
             })
             .unwrap_or_else(|| Palette::from_accent(Accent::Charcoal));
         let workspace_input = settings.workspace_path.clone();
-        let global_shortcut_input = if settings.global_shortcut.is_empty() {
-            String::new()
-        } else {
-            crate::hotkey::label(&settings.global_shortcut)
-        };
+        let shortcut_inputs = crate::hotkey::input_texts(&settings);
 
         let mut app = Self {
             settings,
@@ -256,6 +263,8 @@ impl MinimalistApp {
             lists,
             manual_task_order: std::collections::HashMap::new(),
             fingerprint,
+            duplicate_paths,
+            duplicate_recovery_error: None,
             screen,
             return_screen: None,
             settings_list_id: None,
@@ -280,6 +289,7 @@ impl MinimalistApp {
             rename_input: String::new(),
             rename_baseline: String::new(),
             delete_armed: false,
+            clear_history_armed: false,
             next_scan: Instant::now() + SCAN_INTERVAL,
             last_pin_state: None,
             last_decorations_state: None,
@@ -303,12 +313,14 @@ impl MinimalistApp {
             next_taskbar_check: Instant::now(),
             instance: None,
             global_shortcut: None,
-            global_shortcut_input,
-            shortcut_error: None,
+            global_quick_add_requested: None,
+            shortcut_inputs,
+            shortcut_errors: Default::default(),
             task_context: None,
             #[cfg(target_os = "macos")]
             reopen: None,
             quitting: false,
+            pending_native_shutdown: None,
             keyboard: KeyboardState::default(),
             persistence: persistence::PersistenceState::new(settings_baseline, workspace_failure),
             drafts: drafts::Drafts::default(),
@@ -320,6 +332,28 @@ impl MinimalistApp {
         app.capture_loaded_task_orders();
         app.apply_task_sorts();
         app
+    }
+
+    #[cfg(test)]
+    fn new(
+        ctx: &egui::Context,
+        settings: Settings,
+        workspace_override: Option<String>,
+        startup_warning: Option<String>,
+    ) -> Self {
+        let workspace = storage::resolve_launch_workspace(
+            workspace_override
+                .as_deref()
+                .unwrap_or(&settings.workspace_path),
+            workspace_override.is_some(),
+        );
+        Self::from_launch(
+            ctx,
+            settings,
+            workspace_override,
+            workspace,
+            startup_warning,
+        )
     }
 
     fn list_index(&self, id: Uuid) -> Option<usize> {
@@ -368,7 +402,7 @@ impl MinimalistApp {
 
     fn update_motion(&mut self, ctx: &egui::Context) {
         let now = Instant::now();
-        if let Some((_, started)) = &self.persistence.notice {
+        if let Some((_, Some(started))) = &self.persistence.notice {
             let remaining = Duration::from_secs(3).saturating_sub(started.elapsed());
             if remaining.is_zero() {
                 self.persistence.notice = None;
@@ -528,12 +562,9 @@ impl MinimalistApp {
             .unwrap_or_default();
         self.rename_baseline.clone_from(&self.rename_input);
         self.workspace_input = self.settings.workspace_path.clone();
-        self.global_shortcut_input = if self.settings.global_shortcut.is_empty() {
-            String::new()
-        } else {
-            crate::hotkey::label(&self.settings.global_shortcut)
-        };
+        self.shortcut_inputs = crate::hotkey::input_texts(&self.settings);
         self.delete_armed = false;
+        self.clear_history_armed = false;
         self.begin_transition(1.0);
         self.screen = Screen::Settings;
     }
@@ -552,19 +583,28 @@ impl MinimalistApp {
     }
 
     fn scan_external_changes(&mut self) {
-        if Instant::now() < self.next_scan
-            || self.drag.is_some()
-            || self.overview_drag.is_some()
-            || self.task_context.is_some()
-            || self.editing.is_some()
-            || self.details.editor.is_some()
-            || !self.persistence.dirty_lists.is_empty()
-            || !self.persistence.pending_filenames.is_empty()
-            || self.persistence.workspace_failure.is_some()
-        {
+        if Instant::now() < self.next_scan {
             return;
         }
         self.next_scan = Instant::now() + SCAN_INTERVAL;
+        self.refresh_save_conflicts();
+        if self.drag.is_some()
+            || self.overview_drag.is_some()
+            || self.task_context.as_ref().is_some_and(|editor| {
+                editor.failure.is_none() && !self.has_save_conflict(editor.list)
+            })
+            || self.editing.is_some()
+            || self.details.editor.is_some()
+        {
+            return;
+        }
+        let recovering = self.persistence.workspace_failure.is_some();
+        if recovering && self.lists.is_empty() {
+            if !matches!(self.screen, Screen::Settings) {
+                self.retry_workspace();
+            }
+            return;
+        }
         let current = match storage::workspace_fingerprint(&self.workspace) {
             Ok(current) => current,
             Err(error) => {
@@ -572,36 +612,56 @@ impl MinimalistApp {
                 return;
             }
         };
-        if current == self.fingerprint {
+        if !recovering && current == self.fingerprint && self.cached_list_paths_present(&current) {
             return;
         }
         match storage::load_existing_workspace(&self.workspace) {
-            Ok(snapshot) => {
+            Ok(mut snapshot) => {
                 let focus_neighbors = self.focus_neighbors();
                 let mut lists = snapshot.lists;
-                for failed_path in &snapshot.failed_paths {
-                    if let Some(previous) = self
-                        .lists
-                        .iter()
-                        .find(|list| &list.path == failed_path)
-                        .cloned()
-                        && !lists.iter().any(|list| list.key == previous.key)
+                let mut retained_ids = Vec::new();
+                for previous in &self.lists {
+                    let has_replacement = lists.iter().any(|list| list.key == previous.key);
+                    if self.persistence.dirty_lists.contains(&previous.key)
+                        || self.persistence.pending_filenames.contains(&previous.key)
+                        || self.has_save_conflict(previous.key)
+                        || self
+                            .task_context
+                            .as_ref()
+                            .is_some_and(|editor| editor.list == previous.key)
+                        || (!has_replacement && self.has_pending_list_draft(previous.key))
                     {
-                        lists.push(previous);
+                        lists.retain(|list| list.key != previous.key);
+                        storage::remove_file_from_fingerprint(
+                            &mut snapshot.fingerprint,
+                            &previous.path,
+                        );
+                    } else if has_replacement || !snapshot.failed_paths.contains(&previous.path) {
+                        continue;
                     }
+                    retained_ids.push(previous.key);
+                    lists.push(previous.clone());
                 }
-                storage::sort_lists(&mut lists);
                 self.cancel_overview_drag();
-                self.clear_save_conflicts();
                 self.lists = lists;
                 self.apply_list_order();
-                self.capture_loaded_task_orders_except(&snapshot.failed_paths);
+                self.capture_loaded_task_orders_except(&retained_ids);
                 self.apply_task_sorts();
                 self.fingerprint = snapshot.fingerprint;
+                if self.duplicate_paths.first() != snapshot.duplicate_paths.first() {
+                    self.duplicate_recovery_error = None;
+                }
+                self.duplicate_paths = snapshot.duplicate_paths;
+                if self.persistence.workspace_failure.take().is_some() {
+                    self.status = None;
+                    log::info!("Workspace access restored");
+                }
                 if !snapshot.warnings.is_empty() {
                     self.status = Some(snapshot.warnings.join("\n"));
                 }
+                log::debug!("External workspace changes loaded");
 
+                let modal_focus = self.has_modal().then_some(self.keyboard.pending);
                 match self.screen.clone() {
                     Screen::List(id) if self.list_index(id).is_none() => self.go_to_overview(),
                     Screen::Settings => {
@@ -619,6 +679,9 @@ impl MinimalistApp {
                     Screen::Overview | Screen::List(_) => {}
                 }
                 self.repair_focus(&focus_neighbors);
+                if let Some(pending) = modal_focus {
+                    self.keyboard.pending = pending;
+                }
             }
             Err(error) => self.mark_workspace_unavailable(error),
         }
@@ -627,10 +690,10 @@ impl MinimalistApp {
     /// Shows workspace recovery after the open folder disappears, becomes unreadable,
     /// or loses all of its list files.
     fn mark_workspace_unavailable(&mut self, error: String) {
-        self.status = Some(format!(
-            "Workspace {} unavailable: {error}",
-            self.settings.workspace_path
-        ));
+        if self.persistence.workspace_failure.is_none() {
+            log::warn!("Open workspace became unavailable; waiting for existing files");
+        }
+        self.status = Some(error);
         self.persistence.workspace_failure = Some(self.settings.workspace_path.clone());
     }
 
@@ -646,7 +709,7 @@ impl MinimalistApp {
     /// - `explicit` - Whether this is a user's folder choice rather than a retry of
     ///   the current selection, which may be a launch-only override.
     fn open_workspace(&mut self, raw: &str, explicit: bool) {
-        if raw.trim().is_empty() {
+        if raw.is_empty() {
             return;
         }
         if !self.finish_pending_changes() {
@@ -703,11 +766,19 @@ impl MinimalistApp {
                     self.instance = Some(next);
                 }
                 self.stash_input_drafts();
-                self.stash_overlay_drafts();
+                let switching = self.workspace != path;
+                if switching {
+                    self.stash_overlay_drafts();
+                }
                 self.clear_save_conflicts();
                 self.workspace = path;
-                self.restore_overlay_drafts();
+                if switching {
+                    self.restore_overlay_drafts();
+                }
                 let recovered = self.persistence.workspace_failure.take().is_some();
+                if recovered {
+                    log::info!("Workspace access restored");
+                }
                 self.details = task_details::TaskDetailsState::default();
                 self.subtasks_for = None;
                 self.editing = None;
@@ -723,19 +794,24 @@ impl MinimalistApp {
                 self.capture_loaded_task_orders();
                 self.apply_task_sorts();
                 self.fingerprint = snapshot.fingerprint;
+                self.duplicate_paths = snapshot.duplicate_paths;
+                self.duplicate_recovery_error = None;
                 if !snapshot.warnings.is_empty() {
                     self.status = Some(snapshot.warnings.join("\n"));
                 } else if recovered {
                     self.status = None;
                 }
-                self.settings.last_list_id = self.lists.first().map(|item| item.key);
-                self.save_settings();
-                self.begin_transition(1.0);
-                self.screen = self
+                let selected = self
                     .settings
                     .last_list_id
-                    .map(Screen::List)
-                    .unwrap_or(Screen::Overview);
+                    .filter(|id| self.list_index(*id).is_some())
+                    .or_else(|| self.lists.first().map(|item| item.key));
+                if explicit && switching {
+                    self.settings.last_list_id = selected;
+                }
+                self.save_settings();
+                self.begin_transition(1.0);
+                self.screen = selected.map(Screen::List).unwrap_or(Screen::Overview);
                 self.return_screen = None;
                 self.settings_list_id = None;
                 self.keyboard = KeyboardState::default();
@@ -751,7 +827,8 @@ impl MinimalistApp {
 
 impl eframe::App for MinimalistApp {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
-        self.finish_pending_changes();
+        let saved = self.finish_pending_changes();
+        log::info!("Native shutdown (pending changes saved: {saved})");
     }
 
     fn persist_egui_memory(&self) -> bool {
@@ -767,7 +844,9 @@ impl eframe::App for MinimalistApp {
             .winit_window()
             .is_some_and(|window| window.is_minimized().unwrap_or(false));
         self.handle_window_actions(ctx, minimized);
-        self.poll_global_shortcut(ctx);
+        if self.quitting {
+            return;
+        }
         #[cfg(any(target_os = "windows", target_os = "linux"))]
         self.update_taskbar_presence(frame.winit_window().map(AsRef::as_ref));
         self.apply_window_preferences(ctx);
@@ -777,6 +856,9 @@ impl eframe::App for MinimalistApp {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        if self.quitting {
+            return;
+        }
         self.flush_deferred_settings(ui.ctx());
         self.handle_app_shortcuts(ui.ctx());
         let palette = self.palette();
@@ -874,6 +956,16 @@ impl eframe::App for MinimalistApp {
             self.status_ui(&mut status_ui, palette);
             content_rect.min.y = status_ui.min_rect().bottom() + 8.0;
         }
+        if workspace_available && !self.duplicate_paths.is_empty() {
+            let mut duplicate_ui = ui.new_child(
+                egui::UiBuilder::new()
+                    .id_salt("duplicate-status")
+                    .max_rect(content_rect)
+                    .layout(Layout::top_down(Align::LEFT)),
+            );
+            self.duplicate_status_ui(&mut duplicate_ui, palette);
+            content_rect.min.y = duplicate_ui.min_rect().bottom() + 8.0;
+        }
         let mut content_ui = ui.new_child(
             egui::UiBuilder::new()
                 .id(egui::Id::new("main-content"))
@@ -881,12 +973,7 @@ impl eframe::App for MinimalistApp {
                 .layout(Layout::top_down(Align::LEFT)),
         );
         content_ui.set_opacity(0.14 + eased * 0.86);
-        if self.quick_capture.is_some()
-            || self.find.is_some()
-            || self.shortcuts.is_some()
-            || self.details.move_task.is_some()
-            || self.task_context.is_some()
-        {
+        if self.has_modal() {
             content_ui.disable();
         }
         let screen = self.screen.clone();
@@ -903,6 +990,7 @@ impl eframe::App for MinimalistApp {
         self.task_operations_ui(ui.ctx());
         self.task_context_ui(ui.ctx());
         self.finish_keyboard_frame(ui.ctx());
+        self.finish_window_actions_after_input(ui.ctx());
     }
 }
 

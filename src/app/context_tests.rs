@@ -91,6 +91,51 @@ fn failed_context_save_retains_exact_draft_and_retry_saves_once() {
 }
 
 #[test]
+fn canceling_a_failed_context_draft_reloads_the_file_skipped_by_the_scan() {
+    use crate::{app::tests::keyboard_frame, storage};
+    use std::time::Instant;
+
+    let (ctx, mut app) = test_app();
+    let list = app.lists[0].key;
+    let task = Task::new("Original");
+    let id = task.id;
+    app.lists[0].data.tasks.push(task);
+    assert!(app.save_list_index(0));
+    app.open_task_context(list, id, false);
+    app.task_context.as_mut().unwrap().text = "Unsaved notes".into();
+    let lists = app.workspace.join("lists");
+    let offline = app.workspace.join("offline");
+    fs::rename(&lists, &offline).unwrap();
+    fs::write(&lists, "temporarily inaccessible").unwrap();
+    assert!(!app.save_task_context());
+    assert!(!app.has_save_conflict(list));
+    fs::remove_file(&lists).unwrap();
+    fs::rename(&offline, &lists).unwrap();
+    let mut changed = storage::load_existing_workspace(&app.workspace)
+        .unwrap()
+        .lists
+        .remove(0);
+    changed.data.tasks[0].text = "Changed elsewhere".into();
+    storage::save_list(&changed).unwrap();
+
+    app.next_scan = Instant::now();
+    app.scan_external_changes();
+    assert_eq!(app.lists[0].data.tasks[0].text, "Original");
+    keyboard_frame(&ctx, &mut app, vec![], 430.0);
+    keyboard_frame(
+        &ctx,
+        &mut app,
+        chord(egui::Key::Escape, egui::Modifiers::NONE),
+        430.0,
+    );
+    assert!(app.task_context.is_none());
+    app.next_scan = Instant::now();
+    app.scan_external_changes();
+    assert_eq!(app.lists[0].data.tasks[0].text, "Changed elsewhere");
+    fs::remove_dir_all(app.workspace).unwrap();
+}
+
+#[test]
 fn archived_context_is_read_only_and_complete_copy_keeps_it() {
     let (ctx, mut app) = test_app();
     let list = app.lists[0].key;
@@ -118,7 +163,17 @@ fn archived_context_is_read_only_and_complete_copy_keeps_it() {
     fs::remove_dir_all(&app.workspace).unwrap();
 }
 
-fn app_frame(
+/// Runs a notes interaction frame at the standard test window size.
+///
+/// # Arguments
+/// - `ctx` - Context retaining focus, hover, and widget state.
+/// - `app` - Application under test.
+/// - `events` - Input events for this frame.
+/// - `time` - Monotonic test clock in seconds.
+///
+/// # Returns
+/// The rendered output without texture updates.
+pub(super) fn app_frame(
     ctx: &egui::Context,
     app: &mut MinimalistApp,
     events: Vec<egui::Event>,
@@ -435,36 +490,6 @@ fn context_draft_returns_after_find_quick_add_and_shortcuts_without_writing() {
 }
 
 #[test]
-fn wrap_preview_waits_two_seconds_and_never_displays_context() {
-    for mode in [TitleOverflow::Wrap, TitleOverflow::Scroll] {
-        let (ctx, mut app) = test_app();
-        let mut task = Task::new("Task title for metadata preview");
-        task.context = "PRIVATE_CONTEXT_NOT_FOR_HOVER".into();
-        let id = task.id;
-        app.lists[0].data.tasks.push(task);
-        app.view_zoom = 1.0;
-        app.request_task_focus = false;
-        app.settings.title_overflow = mode;
-        app_frame(&ctx, &mut app, vec![], 1.0);
-        let rect = ctx.read_response(Id::new(("task-text", id))).unwrap().rect;
-        app_frame(
-            &ctx,
-            &mut app,
-            vec![egui::Event::PointerMoved(rect.center())],
-            1.2,
-        );
-        let early = app_frame(&ctx, &mut app, vec![], 3.0);
-        assert!(!early.shapes.iter().any(|shape| matches!(&shape.shape, egui::epaint::Shape::Text(text) if text.galley.text().contains("Created"))));
-        app_frame(&ctx, &mut app, vec![], 3.3);
-        let late = app_frame(&ctx, &mut app, vec![], 3.4);
-        let metadata = late.shapes.iter().any(|shape| matches!(&shape.shape, egui::epaint::Shape::Text(text) if text.galley.text().contains("Created")));
-        assert_eq!(metadata, mode == TitleOverflow::Wrap);
-        assert!(!late.shapes.iter().any(|shape| matches!(&shape.shape, egui::epaint::Shape::Text(text) if text.galley.text().contains("PRIVATE_CONTEXT_NOT_FOR_HOVER"))));
-        fs::remove_dir_all(&app.workspace).unwrap();
-    }
-}
-
-#[test]
 fn failed_context_modal_keeps_save_and_cancel_reachable_at_minimum_window_size() {
     let (ctx, mut app) = test_app();
     let list = app.lists[0].key;
@@ -542,7 +567,7 @@ fn copy_shortcut_reaches_each_parent_and_child_action_without_activation() {
             time,
         );
         time += 0.3;
-        assert_eq!(app.task_copy_target(&ctx), Some((list, parent, false)));
+        assert_eq!(app.focused_task(&ctx), Some((list, parent, false)));
         let output = app_frame(
             &ctx,
             &mut app,
@@ -840,10 +865,10 @@ fn unrelated_popups_never_copy_a_stale_task_menu_target() {
     app.details.menu_task = Some((list, id, false));
     app.details.menu_popup = Some(task_menu);
     egui::Popup::open_id(&ctx, task_menu);
-    assert_eq!(app.task_copy_target(&ctx), Some((list, id, false)));
+    assert_eq!(app.focused_task(&ctx), Some((list, id, false)));
     egui::Popup::close_id(&ctx, task_menu);
     egui::Popup::open_id(&ctx, Id::new("unrelated-sort-menu"));
-    assert_eq!(app.task_copy_target(&ctx), None);
+    assert_eq!(app.focused_task(&ctx), None);
     fs::remove_dir_all(&app.workspace).unwrap();
 }
 

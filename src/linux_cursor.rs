@@ -1,15 +1,14 @@
 //! Desktop cursor settings consumed before winit creates its X11 cursor cache.
 //!
 //! XSETTINGS format: https://specifications.freedesktop.org/xsettings/0.5/
-//! GTK maps Gtk/CursorThemeName, Gtk/CursorThemeSize and Gdk/WindowScalingFactor,
-//! then requests cursor pixels as logical theme size times the display scale.
+//! Gtk/CursorThemeSize already contains the desktop-scaled cursor size in pixels;
+//! multiplying it by Gdk/WindowScalingFactor again would make cursors too large.
 
 #[derive(Default, Debug, PartialEq, Eq)]
 /// Cursor preferences advertised by the desktop's XSETTINGS owner.
 pub(crate) struct CursorPreferences {
     theme: Option<String>,
     size: Option<i32>,
-    scale: Option<i32>,
 }
 
 impl CursorPreferences {
@@ -27,12 +26,7 @@ impl CursorPreferences {
         explicit_size: bool,
     ) -> (Option<&str>, Option<i32>) {
         let theme = (!explicit_theme).then_some(self.theme.as_deref()).flatten();
-        let size = if explicit_size {
-            None
-        } else {
-            self.size
-                .and_then(|size| size.checked_mul(self.scale.unwrap_or(1)))
-        };
+        let size = if explicit_size { None } else { self.size };
         (theme, size)
     }
 }
@@ -64,13 +58,8 @@ pub(crate) fn parse_xsettings(data: &[u8]) -> Option<CursorPreferences> {
         match kind {
             0 => {
                 let integer = reader.i32()?;
-                if integer > 0 {
-                    if name == b"Gtk/CursorThemeSize" {
-                        preferences.size = Some(integer);
-                    }
-                    if name == b"Gdk/WindowScalingFactor" {
-                        preferences.scale = Some(integer);
-                    }
+                if integer > 0 && name == b"Gtk/CursorThemeSize" {
+                    preferences.size = Some(integer);
                 }
             }
             1 => {
@@ -198,9 +187,9 @@ mod tests {
     }
 
     #[test]
-    fn desktop_theme_and_size_follow_gtk_scale_in_either_byte_order() {
+    fn desktop_cursor_size_is_already_scaled_in_either_byte_order() {
         for little in [false, true] {
-            let mut data = fixture(little, "Adwaita", 24, 2);
+            let mut data = fixture(little, "Adwaita", 48, 2);
             let preferences = parse_xsettings(&data).unwrap();
             assert_eq!(
                 preferences.overrides(false, false),
@@ -214,7 +203,7 @@ mod tests {
     #[test]
     fn explicit_environment_choices_win_independently() {
         let preferences = parse_xsettings(&fixture(true, "Breeze", 32, 2)).unwrap();
-        assert_eq!(preferences.overrides(true, false), (None, Some(64)));
+        assert_eq!(preferences.overrides(true, false), (None, Some(32)));
         assert_eq!(preferences.overrides(false, true), (Some("Breeze"), None));
         assert_eq!(preferences.overrides(true, true), (None, None));
     }
@@ -232,7 +221,5 @@ mod tests {
             invalid_scale.overrides(false, false),
             (Some("Breeze"), Some(32))
         );
-        let large = parse_xsettings(&fixture(true, "Breeze", i32::MAX, 2)).unwrap();
-        assert_eq!(large.overrides(false, false), (Some("Breeze"), None));
     }
 }

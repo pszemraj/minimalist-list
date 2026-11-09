@@ -76,11 +76,16 @@ impl InstanceGuard {
     pub(crate) fn take_show_request(&self) -> bool {
         self.show_requested.swap(false, Ordering::AcqRel)
     }
+
+    /// Stops acknowledging reveal requests while the closing app still owns the workspace.
+    pub(crate) fn stop_reveal_requests(&self) {
+        self.stopping.store(true, Ordering::Release);
+    }
 }
 
 impl Drop for InstanceGuard {
     fn drop(&mut self) {
-        self.stopping.store(true, Ordering::Release);
+        self.stop_reveal_requests();
         // A stop flag cannot interrupt blocking accept. Join only after waking
         // it successfully; otherwise detach instead of hanging application exit.
         let woke = TcpStream::connect_timeout(&self.address, Duration::from_millis(150)).is_ok();
@@ -120,18 +125,10 @@ pub(crate) fn claim(
     start_hidden: bool,
 ) -> Result<LaunchOutcome, String> {
     let workspace = fs::canonicalize(workspace).unwrap_or_else(|_| workspace.to_owned());
-    // A fixed FNV-1a hash keeps the filename stable across Rust/toolchain updates.
-    let key = workspace
-        .as_os_str()
-        .as_encoded_bytes()
-        .iter()
-        .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
-            (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
-        });
     let directory = local_state_dir.join("instances");
     fs::create_dir_all(&directory)
         .map_err(|error| format!("could not create instance directory: {error}"))?;
-    let stem = format!("{key:016x}");
+    let stem = crate::storage::workspace_key(&workspace);
     let lock_path = directory.join(format!("{stem}.lock"));
     let endpoint = directory.join(format!("{stem}.endpoint"));
     let lock = OpenOptions::new()
@@ -180,7 +177,9 @@ pub(crate) fn claim(
                         let _ = stream.set_write_timeout(Some(Duration::from_millis(150)));
                         let expected = format!("SHOW {token}\n");
                         let mut request = vec![0; expected.len()];
-                        if stream.read_exact(&mut request).is_ok() && request == expected.as_bytes()
+                        if stream.read_exact(&mut request).is_ok()
+                            && request == expected.as_bytes()
+                            && !thread_stop.load(Ordering::Acquire)
                         {
                             thread_show.store(true, Ordering::Release);
                             if let Ok(repaint) = thread_repaint.lock()

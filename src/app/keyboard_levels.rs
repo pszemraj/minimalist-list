@@ -4,8 +4,29 @@ use super::{
     DELETE_TASK, FocusItem, MOVE_TASK_DOWN, MOVE_TASK_UP, MinimalistApp, RowAction, take_key,
     take_shortcut,
 };
+use crate::app::task_details::history_title_id;
 use eframe::egui::{self, Event, Id, Key, Modifiers};
 use uuid::Uuid;
+
+/// Drops auto-repeated Delete presses so one physical press removes one item.
+///
+/// # Arguments
+/// - `ctx` - Context holding the current input events.
+pub(super) fn drop_repeated_delete(ctx: &egui::Context) {
+    ctx.input_mut(|input| {
+        input.events.retain(|event| {
+            !matches!(
+                event,
+                Event::Key {
+                    key: Key::Delete,
+                    pressed: true,
+                    repeat: true,
+                    ..
+                }
+            )
+        });
+    });
+}
 
 impl MinimalistApp {
     /// Closes History and restores its toggle, or the screen's default control.
@@ -75,6 +96,23 @@ impl MinimalistApp {
             .anchor
             .filter(|(id, _)| Some(*id) == focused)
             .map(|(_, item)| item);
+        if let Some(task) = self.lists[index]
+            .data
+            .archive
+            .iter()
+            .map(|item| item.task.id)
+            .find(|task| {
+                focused == Some(FocusItem::Archived(list, *task).id())
+                    || focused == Some(history_title_id(list, *task))
+            })
+        {
+            drop_repeated_delete(ctx);
+            if take_shortcut(ctx, DELETE_TASK) {
+                self.keyboard.history_delete_held = ctx.input(|input| input.key_down(Key::Delete));
+                self.delete_archived(list, task);
+                return;
+            }
+        }
         if let Some(position) = self.lists[index]
             .data
             .archive
@@ -139,17 +177,20 @@ impl MinimalistApp {
             self.focus_now(ctx, FocusItem::Task(list, tasks[0].id).id());
         } else if take_key(ctx, Key::End, Modifiers::NONE) {
             self.focus_now(ctx, FocusItem::Task(list, tasks.last().unwrap().id).id());
+        } else if take_key(ctx, Key::ArrowRight, Modifiers::NONE) {
+            self.switch_subtask_panel(Some((list, task.id)));
+            let target = task
+                .subtasks
+                .first()
+                .map_or(Id::new(("new-subtask", list, task.id)), |subtask| {
+                    FocusItem::Subtask(list, task.id, subtask.id).id()
+                });
+            self.focus_now(ctx, target);
+        } else if take_key(ctx, Key::ArrowLeft, Modifiers::NONE) {
+            self.switch_subtask_panel(None);
         } else if focused == Some(row) {
             self.keyboard.anchor = Some((row, FocusItem::Task(list, task.id)));
-            // Delete removes one row per press; held navigation may still repeat.
-            ctx.input_mut(|input| {
-                input.events.retain(|event| {
-                    !matches!(event,
-                        Event::Key { key: Key::Delete, pressed: true, repeat: true, modifiers, .. }
-                        if modifiers.matches_exact(Modifiers::NONE)
-                    )
-                })
-            });
+            drop_repeated_delete(ctx);
             if take_shortcut(ctx, MOVE_TASK_UP) {
                 self.apply_row_action(RowAction::Reorder(
                     list,
@@ -168,17 +209,6 @@ impl MinimalistApp {
                 self.apply_row_action(RowAction::Toggle(list, task.id));
             } else if take_shortcut(ctx, DELETE_TASK) {
                 self.apply_row_action(RowAction::Delete(list, task.id));
-            } else if take_key(ctx, Key::ArrowRight, Modifiers::NONE) {
-                self.switch_subtask_panel(Some((list, task.id)));
-                let target = task
-                    .subtasks
-                    .first()
-                    .map_or(Id::new(("new-subtask", list, task.id)), |subtask| {
-                        FocusItem::Subtask(list, task.id, subtask.id).id()
-                    });
-                self.focus_now(ctx, target);
-            } else if take_key(ctx, Key::ArrowLeft, Modifiers::NONE) {
-                self.switch_subtask_panel(None);
             }
         }
     }
@@ -222,6 +252,9 @@ impl MinimalistApp {
             } else {
                 take_key(ctx, Key::ArrowDown, Modifiers::NONE);
             }
+            return true;
+        }
+        if ctx.text_edit_focused() {
             return true;
         }
         let Some(position) = position else {

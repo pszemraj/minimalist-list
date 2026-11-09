@@ -1,12 +1,13 @@
-//! Checklist edits, task recovery, moving, and archival mutations.
+//! Checklist edits, task recovery, and archival mutations.
 
-use super::{DeletedItem, MinimalistApp, SubtaskEdit};
+use super::{MinimalistApp, PastedBatch, SubtaskEdit, UndoItem};
 use crate::{
-    app::{CLEAR_ANIMATION_SECONDS, DELETE_ANIMATION_SECONDS, keyboard::FocusItem},
-    model::{ArchivedTask, Subtask},
+    app::{CLEAR_ANIMATION_SECONDS, DELETE_ANIMATION_SECONDS, Screen, keyboard::FocusItem},
+    model::{ArchivedTask, Subtask, Task},
+    storage,
 };
 use eframe::egui::{self, Id};
-use std::time::Instant;
+use std::{collections::HashSet, time::Instant};
 use uuid::Uuid;
 
 impl MinimalistApp {
@@ -21,21 +22,56 @@ impl MinimalistApp {
     ///
     /// Panics if an internally resolved list index is invalid.
     pub(super) fn add_subtask(&mut self, list: Uuid, task: Uuid) {
-        let text = self.new_subtask.trim();
-        if text.is_empty() {
-            return;
-        }
-        if let Some(index) = self.list_index(list)
-            && let Some(parent) = self.lists[index]
-                .data
-                .tasks
-                .iter_mut()
-                .find(|item| item.id == task)
-        {
-            parent.subtasks.push(Subtask::new(text));
+        let text = self.new_subtask.trim().to_owned();
+        if !text.is_empty() && self.add_subtasks(list, task, &[text]).is_some() {
             self.new_subtask.clear();
-            self.save_list_index(index);
         }
+    }
+
+    /// Appends checklist items to a parent task in one save, keeping their given order.
+    ///
+    /// # Arguments
+    ///
+    /// - `list` - Parent list identity.
+    /// - `task` - Parent task identity.
+    /// - `texts` - Item titles in top-to-bottom order.
+    ///
+    /// # Returns
+    ///
+    /// `None` if the parent is missing; otherwise whether the list reached disk.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an internally resolved list index is invalid.
+    pub(in crate::app) fn add_subtasks(
+        &mut self,
+        list: Uuid,
+        task: Uuid,
+        texts: &[String],
+    ) -> Option<bool> {
+        let index = self.list_index(list)?;
+        let parent_index = self.lists[index]
+            .data
+            .tasks
+            .iter()
+            .position(|item| item.id == task)?;
+        let subtasks: Vec<_> = texts.iter().map(Subtask::new).collect();
+        if subtasks.len() > 1 {
+            self.details.undo = Some(UndoItem::Pasted {
+                list,
+                batch: PastedBatch::Subtasks {
+                    parent: task,
+                    items: subtasks
+                        .iter()
+                        .map(|child| (child.id, child.clone()))
+                        .collect(),
+                },
+            });
+        }
+        self.lists[index].data.tasks[parent_index]
+            .subtasks
+            .extend(subtasks);
+        Some(self.save_list_index(index))
     }
 
     /// Toggles a checklist completion state and saves its parent list.
@@ -98,6 +134,14 @@ impl MinimalistApp {
         });
     }
 
+    /// Saves the active inline title or checklist edit before leaving its editor.
+    pub(in crate::app) fn finish_inline_edit(&mut self) {
+        self.finish_subtask_edit();
+        if let Some((list_id, task_id)) = self.editing {
+            self.commit_task_edit(list_id, task_id, &self.edit_text.clone());
+        }
+    }
+
     /// Applies an outgoing checklist edit without changing its identity or state.
     ///
     /// # Panics
@@ -158,7 +202,7 @@ impl MinimalistApp {
             && let Some(position) = parent.subtasks.iter().position(|item| item.id == child)
         {
             let subtask = parent.subtasks.remove(position);
-            self.details.deleted = Some(DeletedItem::Subtask {
+            self.details.undo = Some(UndoItem::Subtask {
                 list,
                 task,
                 position,
@@ -251,7 +295,7 @@ impl MinimalistApp {
             }
             let manual_position = self.manual_task_position(list, task).unwrap_or(position);
             let task = self.lists[index].data.tasks.remove(position);
-            self.details.deleted = Some(DeletedItem::Task {
+            self.details.undo = Some(UndoItem::Task {
                 list,
                 position: manual_position,
                 task,
@@ -261,115 +305,280 @@ impl MinimalistApp {
         }
     }
 
-    /// Restores the latest deletion at its original position, preserving all content.
+    /// Tracks a task paste for Undo, including the contents before any later edit.
+    ///
+    /// # Arguments
+    /// - `list` - Destination list.
+    /// - `tasks` - The tasks added in this operation.
+    pub(in crate::app) fn record_task_paste_undo(&mut self, list: Uuid, tasks: &[Task]) {
+        if tasks.len() > 1 {
+            self.details.undo = Some(UndoItem::Pasted {
+                list,
+                batch: PastedBatch::Tasks(
+                    tasks.iter().map(|task| (task.id, task.clone())).collect(),
+                ),
+            });
+        }
+    }
+
+    /// Identifies an empty entry where Ctrl+Z can undo a paste without undoing draft text.
+    ///
+    /// # Returns
+    /// Whether the matching entry owns focus and has no text input to undo.
+    pub(in crate::app) fn can_undo_paste_in_entry(&self, ctx: &egui::Context) -> bool {
+        let Some(UndoItem::Pasted { list, batch }) = &self.details.undo else {
+            return false;
+        };
+        let (field, draft) = match batch.parent() {
+            Some(task) => (Id::new(("new-subtask", list, task)), &self.new_subtask),
+            None => (Id::new(("new-task", list)), &self.new_task),
+        };
+        draft.is_empty()
+            && ctx.memory(|memory| memory.has_focus(field))
+            && !ctx.input(|input| {
+                input.events.iter().any(|event| {
+                    matches!(
+                        event,
+                        egui::Event::Text(_) | egui::Event::Paste(_) | egui::Event::Ime(_)
+                    )
+                })
+            })
+    }
+
+    /// Reverses the latest deletion, move, or paste in one step.
+    pub(in crate::app) fn undo_last(&mut self) {
+        match self.details.undo.take() {
+            Some(UndoItem::Task {
+                list,
+                position,
+                task,
+            }) => self.undo_task_deletion(list, position, task),
+            Some(UndoItem::Subtask {
+                list,
+                task,
+                position,
+                subtask,
+            }) => self.undo_subtask_deletion(list, task, position, subtask),
+            Some(UndoItem::Moved {
+                source,
+                position,
+                task,
+                destination,
+            }) => self.undo_move(source, position, task, destination),
+            Some(UndoItem::Archived {
+                list,
+                position,
+                item,
+            }) => self.undo_archived_deletion(list, position, item),
+            Some(UndoItem::Pasted { list, batch }) => self.undo_paste(list, batch),
+            None => {}
+        }
+    }
+
+    fn undo_paste(&mut self, list: Uuid, batch: PastedBatch) {
+        self.finish_inline_edit();
+        let neighbors = self.focus_neighbors();
+        let Some(index) = self.list_index(list) else {
+            self.details.undo = Some(UndoItem::Pasted { list, batch });
+            self.status = Some("The pasted items' list is unavailable.".into());
+            return;
+        };
+        let removed = match &batch {
+            PastedBatch::Tasks(items) => {
+                let protected: HashSet<_> = items
+                    .keys()
+                    .copied()
+                    .filter(|&task| self.has_subtask_draft(list, task))
+                    .collect();
+                let tasks = &mut self.lists[index].data.tasks;
+                let before = tasks.len();
+                tasks.retain(|task| {
+                    protected.contains(&task.id) || items.get(&task.id) != Some(task)
+                });
+                before - tasks.len()
+            }
+            PastedBatch::Subtasks { parent, items } => {
+                let Some(task) = self.lists[index]
+                    .data
+                    .tasks
+                    .iter_mut()
+                    .find(|task| task.id == *parent)
+                else {
+                    self.details.undo = Some(UndoItem::Pasted { list, batch });
+                    self.status = Some("The pasted items' parent task is not active.".into());
+                    return;
+                };
+                let before = task.subtasks.len();
+                task.subtasks
+                    .retain(|child| items.get(&child.id) != Some(child));
+                before - task.subtasks.len()
+            }
+        };
+        if removed == 0 {
+            self.acknowledge("No unchanged pasted items to remove.".into());
+            return;
+        }
+        self.drag = None;
+        if self.save_list_index(index) {
+            self.acknowledge(if removed == batch.len() {
+                "Paste undone".into()
+            } else {
+                "Unchanged pasted items removed.".into()
+            });
+        }
+        self.repair_focus(&neighbors);
+    }
+
+    /// Reinserts a deleted task at its original Manual position.
     ///
     /// # Panics
     ///
     /// Panics if an internally resolved list index is invalid.
-    pub(in crate::app) fn undo_delete(&mut self) {
-        let Some(deleted) = self.details.deleted.take() else {
-            return;
-        };
-        let list = match &deleted {
-            DeletedItem::Task { list, .. } | DeletedItem::Subtask { list, .. } => *list,
-        };
+    fn undo_task_deletion(&mut self, list: Uuid, position: usize, task: Task) {
         let Some(index) = self.list_index(list) else {
-            self.details.deleted = Some(deleted);
+            self.details.undo = Some(UndoItem::Task {
+                list,
+                position,
+                task,
+            });
             return;
         };
-        let mut restored_task_position = None;
-        let focus = match deleted {
-            DeletedItem::Task { position, task, .. } => {
-                let focus = FocusItem::Task(list, task.id);
-                if self.lists.iter().any(|item| {
-                    item.data
-                        .tasks
-                        .iter()
-                        .any(|existing| existing.id == task.id)
-                        || item
-                            .data
-                            .archive
-                            .iter()
-                            .any(|existing| existing.task.id == task.id)
-                }) {
-                    // Keep Undo available so a stale or different duplicate can be resolved.
-                    self.details.deleted = Some(DeletedItem::Task {
-                        list,
-                        position,
-                        task,
-                    });
-                    self.status = Some("The deleted task already exists in the workspace.".into());
-                    return;
-                }
-                let position = position.min(self.lists[index].data.tasks.len());
-                restored_task_position = Some((task.id, position));
-                self.lists[index].data.tasks.insert(position, task);
-                focus
-            }
-            DeletedItem::Subtask {
-                task,
+        if self.task_id_exists(task.id) {
+            // Keep Undo available so a stale or different duplicate can be resolved.
+            self.details.undo = Some(UndoItem::Task {
+                list,
                 position,
-                subtask,
-                ..
-            } => {
-                let archived = self.lists[index]
+                task,
+            });
+            self.status = Some("The deleted task already exists in the workspace.".into());
+            return;
+        }
+        let id = task.id;
+        let position = position.min(self.lists[index].data.tasks.len());
+        self.lists[index].data.tasks.insert(position, task);
+        self.restore_manual_task_position(list, id, position);
+        self.finish_undo(list, index, FocusItem::Task(list, id));
+    }
+
+    /// Reports whether any list holds an active or archived task with this identity.
+    fn task_id_exists(&self, id: Uuid) -> bool {
+        self.lists.iter().any(|item| {
+            item.data.tasks.iter().any(|existing| existing.id == id)
+                || item
                     .data
                     .archive
                     .iter()
-                    .any(|item| item.task.id == task);
-                let data = &mut self.lists[index].data;
-                let Some(parent) = data
-                    .tasks
-                    .iter_mut()
-                    .chain(data.archive.iter_mut().map(|item| &mut item.task))
-                    .find(|item| item.id == task)
-                else {
-                    self.details.deleted = Some(DeletedItem::Subtask {
-                        list,
-                        task,
-                        position,
-                        subtask,
-                    });
-                    self.status =
-                        Some("Restore the parent task before restoring this subtask.".into());
-                    return;
-                };
-                let focus = if archived {
-                    FocusItem::Archived(list, task)
-                } else {
-                    FocusItem::Subtask(list, task, subtask.id)
-                };
-                if parent.subtasks.iter().any(|item| item.id == subtask.id) {
-                    // Keep Undo available so a stale or different duplicate can be resolved.
-                    self.details.deleted = Some(DeletedItem::Subtask {
-                        list,
-                        task,
-                        position,
-                        subtask,
-                    });
-                    self.status = Some("The deleted subtask already exists in its task.".into());
-                    return;
-                }
-                parent
-                    .subtasks
-                    .insert(position.min(parent.subtasks.len()), subtask);
-                if matches!(self.screen, crate::app::Screen::List(active) if active == list) {
-                    if archived {
-                        self.history_open = true;
-                        self.expand_archived(list, task);
-                    } else {
-                        self.switch_subtask_panel(Some((list, task)));
-                    }
-                }
-                focus
-            }
+                    .any(|existing| existing.task.id == id)
+        })
+    }
+
+    /// Reinserts a permanently deleted History entry at its original position and time.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an internally resolved list index is invalid.
+    fn undo_archived_deletion(&mut self, list: Uuid, position: usize, item: ArchivedTask) {
+        let Some(index) = self.list_index(list) else {
+            self.details.undo = Some(UndoItem::Archived {
+                list,
+                position,
+                item,
+            });
+            return;
         };
-        if let Some((task, position)) = restored_task_position {
-            self.restore_manual_task_position(list, task, position);
+        if self.task_id_exists(item.task.id) {
+            // Keep Undo available so a stale or different duplicate can be resolved.
+            self.details.undo = Some(UndoItem::Archived {
+                list,
+                position,
+                item,
+            });
+            self.status = Some("The deleted task already exists in the workspace.".into());
+            return;
         }
+        let id = item.task.id;
+        let archive = &mut self.lists[index].data.archive;
+        archive.insert(position.min(archive.len()), item);
+        if matches!(self.screen, Screen::List(active) if active == list) {
+            self.history_open = true;
+        }
+        self.finish_undo(list, index, FocusItem::Archived(list, id));
+    }
+
+    /// Reinserts a deleted checklist item at its original position.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an internally resolved list index is invalid.
+    fn undo_subtask_deletion(&mut self, list: Uuid, task: Uuid, position: usize, subtask: Subtask) {
+        let Some(index) = self.list_index(list) else {
+            self.details.undo = Some(UndoItem::Subtask {
+                list,
+                task,
+                position,
+                subtask,
+            });
+            return;
+        };
+        let archived = self.lists[index]
+            .data
+            .archive
+            .iter()
+            .any(|item| item.task.id == task);
+        let data = &mut self.lists[index].data;
+        let Some(parent) = data
+            .tasks
+            .iter_mut()
+            .chain(data.archive.iter_mut().map(|item| &mut item.task))
+            .find(|item| item.id == task)
+        else {
+            self.details.undo = Some(UndoItem::Subtask {
+                list,
+                task,
+                position,
+                subtask,
+            });
+            self.status = Some("Restore the parent task before restoring this subtask.".into());
+            return;
+        };
+        let focus = if archived {
+            FocusItem::Archived(list, task)
+        } else {
+            FocusItem::Subtask(list, task, subtask.id)
+        };
+        if parent.subtasks.iter().any(|item| item.id == subtask.id) {
+            // Keep Undo available so a stale or different duplicate can be resolved.
+            self.details.undo = Some(UndoItem::Subtask {
+                list,
+                task,
+                position,
+                subtask,
+            });
+            self.status = Some("The deleted subtask already exists in its task.".into());
+            return;
+        }
+        parent
+            .subtasks
+            .insert(position.min(parent.subtasks.len()), subtask);
+        if matches!(self.screen, Screen::List(active) if active == list) {
+            if archived {
+                self.history_open = true;
+                self.expand_archived(list, task);
+            } else {
+                self.switch_subtask_panel(Some((list, task)));
+            }
+        }
+        self.finish_undo(list, index, focus);
+    }
+
+    /// Saves a restored deletion and focuses it when its list is open.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the caller supplies an invalid loaded-list index.
+    fn finish_undo(&mut self, list: Uuid, index: usize, focus: FocusItem) {
         self.save_list_index(index);
-        self.apply_task_sorts();
-        if matches!(self.screen, crate::app::Screen::List(active) if active == list) {
+        if matches!(self.screen, Screen::List(active) if active == list) {
             self.keyboard.pending = Some(focus.id());
         }
     }
@@ -472,174 +681,126 @@ impl MinimalistApp {
         }
     }
 
-    /// Opens the task's destination picker from its existing action menu.
+    /// Permanently removes one History entry, retaining it with its time for Undo.
     ///
     /// # Arguments
     ///
-    /// - `list` - Source list identity.
-    /// - `task` - Task to move.
-    pub(in crate::app) fn begin_move_task(&mut self, list: Uuid, task: Uuid) {
-        self.finish_inline_edit();
-        self.drag = None;
-        self.revealed = None;
-        if let Some(destination) = self
-            .lists
-            .iter()
-            .find(|item| item.key != list)
-            .map(|item| item.key)
-        {
-            self.details.move_task = Some((list, task, destination));
-        } else {
-            self.status = Some("Create another list before moving a task.".into());
-        }
-    }
-
-    /// Moves a task between ordinary list files, rolling back both lists on failure.
-    fn move_task_to_list(&mut self, source: Uuid, task: Uuid, destination: Uuid) -> bool {
-        if source == destination {
-            return false;
-        }
-        self.finish_inline_edit();
-        let (Some(from), Some(to)) = (self.list_index(source), self.list_index(destination)) else {
-            return false;
-        };
-        let Some(position) = self.lists[from]
-            .data
-            .tasks
-            .iter()
-            .position(|item| item.id == task)
-        else {
-            return false;
-        };
-        if self.lists[to].data.tasks.iter().any(|item| item.id == task)
-            || self.lists[to]
+    /// - `list` - Parent list identity.
+    /// - `task` - Archived task identity.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an internally resolved list index is invalid.
+    pub(in crate::app) fn delete_archived(&mut self, list: Uuid, task: Uuid) {
+        let neighbors = self.focus_neighbors();
+        if let Some(index) = self.list_index(list)
+            && let Some(position) = self.lists[index]
                 .data
                 .archive
                 .iter()
-                .any(|item| item.task.id == task)
+                .position(|item| item.task.id == task)
         {
-            self.status = Some(
-                "The destination already contains this task. Resolve the duplicate before moving."
-                    .into(),
-            );
-            return false;
-        }
-        let neighbors = self.focus_neighbors();
-        let manual_position = self.manual_task_position(source, task).unwrap_or(position);
-        let original_source = self.lists[from].data.clone();
-        let original_destination = self.lists[to].data.clone();
-        let moved = self.lists[from].data.tasks[position].clone();
-        self.lists[to].data.tasks.insert(0, moved);
-        let destination_saved = self.save_list_index(to);
-        if destination_saved
-            && let Some(position) = self.lists[from]
-                .data
-                .tasks
-                .iter()
-                .position(|item| item.id == task)
-        {
-            self.lists[from].data.tasks.remove(position);
-            if self.save_list_index(from) {
-                self.move_subtask_draft(source, destination, task);
-                if let Some(DeletedItem::Subtask {
-                    list, task: parent, ..
-                }) = &mut self.details.deleted
-                    && *list == source
-                    && *parent == task
-                {
-                    *list = destination;
-                }
-                self.repair_focus(&neighbors);
-                self.acknowledge(format!("Moved to {}", self.lists[to].data.title));
-                return true;
+            let item = self.lists[index].data.archive.remove(position);
+            self.details.undo = Some(UndoItem::Archived {
+                list,
+                position,
+                item,
+            });
+            self.details.expanded_history.remove(&(list, task));
+            if self.lists[index].data.archive.is_empty() {
+                self.history_open = false;
             }
+            self.save_list_index(index);
+            self.repair_focus(&neighbors);
         }
-        self.lists[from].data = original_source;
-        self.lists[to].data = original_destination;
-        self.restore_manual_task_position(source, task, manual_position);
-        let failure = self.status.clone();
-        self.save_list_index(from);
-        self.save_list_index(to);
-        self.status = Some(format!(
-            "Move did not finish; the task remains in its original list. {}",
-            failure.unwrap_or_default()
-        ));
-        false
     }
 
-    /// Renders one-step deletion recovery and the destination picker.
+    /// Empties a list's History without touching its active tasks.
+    ///
+    /// Pending edits must reach disk before taking the forced snapshot, so it
+    /// includes every entry being cleared. Either failure leaves History intact.
+    ///
+    /// # Arguments
+    ///
+    /// - `list` - List whose archived tasks are removed.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an internally resolved list index is invalid.
+    pub(in crate::app) fn clear_history(&mut self, list: Uuid) {
+        if let Some(index) = self.list_index(list) {
+            if self.persistence.dirty_lists.contains(&list) && !self.save_list_index(index) {
+                return;
+            }
+            if let Err(error) = storage::snapshot_list_now(&self.workspace, &self.lists[index]) {
+                self.status = Some(format!(
+                    "History was kept because no backup could be written: {error}"
+                ));
+                return;
+            }
+            self.lists[index].data.archive.clear();
+            self.details
+                .expanded_history
+                .retain(|(parent, _)| *parent != list);
+            self.history_open = false;
+            self.save_list_index(index);
+            self.clear_resolved_save_error();
+        }
+    }
+
+    /// Renders one-step Undo for task changes, then the Move dialog.
     ///
     /// # Panics
     ///
     /// Panics if an internally resolved list index is invalid.
     pub(in crate::app) fn task_operations_ui(&mut self, ctx: &egui::Context) {
-        if self.details.deleted.is_some() {
+        let toast = match &self.details.undo {
+            Some(UndoItem::Moved { destination, .. }) => Some(
+                self.list_index(*destination)
+                    .map_or("Moved".to_owned(), |index| {
+                        format!("Moved to {}", clipped(&self.lists[index].data.title, 40))
+                    }),
+            ),
+            Some(UndoItem::Pasted { batch, .. }) => Some(format!(
+                "Pasted {} {}",
+                batch.len(),
+                if batch.parent().is_some() {
+                    "subtasks"
+                } else {
+                    "tasks"
+                },
+            )),
+            Some(_) => Some("Deleted".to_owned()),
+            None => None,
+        };
+        if let Some(message) = toast {
             egui::Area::new(Id::new("delete-undo"))
                 .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -12.0))
                 .order(egui::Order::Foreground)
                 .show(ctx, |ui| {
                     egui::Frame::popup(ui.style()).show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            ui.label("Deleted");
+                            ui.label(message);
                             if ui.button("Undo").clicked() {
-                                self.undo_delete();
+                                self.undo_last();
                             }
                             if ui.button("Dismiss").clicked() {
-                                self.details.deleted = None;
+                                self.details.undo = None;
                             }
                         });
                     });
                 });
         }
-        let Some((source, task, mut destination)) = self.details.move_task else {
-            return;
-        };
-        let mut move_now = false;
-        let mut cancel = false;
-        let title = self
-            .list_index(source)
-            .and_then(|index| {
-                self.lists[index]
-                    .data
-                    .tasks
-                    .iter()
-                    .find(|item| item.id == task)
-            })
-            .map(|item| item.text.clone());
-        let Some(title) = title else {
-            self.details.move_task = None;
-            return;
-        };
-        let modal = egui::Modal::new(Id::new("move-task-modal")).show(ctx, |ui| {
-            ui.set_max_width((ctx.content_rect().width() - 56.0).clamp(100.0, 360.0));
-            ui.heading("Move to list");
-            ui.add(egui::Label::new(title).wrap());
-            egui::ComboBox::from_id_salt("move-destination")
-                .selected_text(
-                    self.list_index(destination)
-                        .map(|index| self.lists[index].data.title.as_str())
-                        .unwrap_or("Choose list"),
-                )
-                .show_ui(ui, |ui| {
-                    for list in &self.lists {
-                        if list.key != source {
-                            ui.selectable_value(&mut destination, list.key, &list.data.title);
-                        }
-                    }
-                });
-            ui.horizontal(|ui| {
-                move_now = ui.button("Move").clicked();
-                cancel = ui.button("Cancel").clicked();
-            });
-        });
-        self.details.move_task = Some((source, task, destination));
-        if cancel
-            || modal.should_close()
-            || (move_now && self.move_task_to_list(source, task, destination))
-        {
-            self.details.move_task = None;
-        }
+        self.move_dialog_ui(ctx);
     }
+}
+
+/// Shortens a list title for the Undo notice.
+fn clipped(text: &str, limit: usize) -> String {
+    if text.chars().count() <= limit {
+        return text.to_owned();
+    }
+    text.chars().take(limit - 1).chain(['…']).collect()
 }
 
 #[cfg(test)]

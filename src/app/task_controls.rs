@@ -179,6 +179,7 @@ impl MinimalistApp {
             }
         } else {
             self.switch_subtask_panel(Some((list, task)));
+            self.keyboard.pending = Some(Id::new(("new-subtask", list, task)));
         }
     }
 

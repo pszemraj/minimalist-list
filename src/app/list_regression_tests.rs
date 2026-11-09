@@ -5,7 +5,7 @@ use crate::app::{
     Screen,
     tests::{chord, test_app},
 };
-use crate::model::Accent;
+use crate::model::{Accent, Task};
 use crate::storage;
 use egui::{Event, Key, Modifiers};
 

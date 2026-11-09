@@ -23,6 +23,19 @@ use io::write_json_atomic_checked;
 use io::{cleanup_stale_temps, write_json_atomic};
 pub use io::{list_changed_on_disk, save_list};
 
+#[path = "storage_backup.rs"]
+mod backup;
+pub use backup::{backups_dir, delete_list, snapshot_list, snapshot_list_now, workspace_key};
+
+#[path = "storage_format.rs"]
+mod format;
+
+#[path = "storage_conflict_recovery.rs"]
+mod conflict_recovery;
+pub use conflict_recovery::{
+    backup_discarded_list, create_local_copy, recover_duplicate, recovery_summary,
+};
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 /// User preferences persisted outside the task workspace.
@@ -46,6 +59,7 @@ pub struct Settings {
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub manual_task_order: BTreeMap<String, Vec<Uuid>>,
     pub global_shortcut: String,
+    pub quick_add_shortcut: String,
 }
 
 impl Default for Settings {
@@ -68,6 +82,7 @@ impl Default for Settings {
             task_sort: BTreeMap::new(),
             manual_task_order: BTreeMap::new(),
             global_shortcut: "CommandOrControl+Alt+Shift+KeyL".into(),
+            quick_add_shortcut: "CommandOrControl+Alt+Shift+KeyN".into(),
         }
     }
 }
@@ -101,32 +116,74 @@ pub struct WorkspaceSnapshot {
     pub fingerprint: WorkspaceFingerprint,
     pub warnings: Vec<String>,
     pub failed_paths: Vec<PathBuf>,
+    pub duplicate_paths: Vec<PathBuf>,
 }
 
-/// Loads persisted settings, or defaults when no settings file exists.
+/// Loads persisted settings, keeping every valid preference from a damaged file.
 ///
 /// # Returns
 ///
-/// Persisted settings, or defaults when the settings file is absent.
-///
-/// # Errors
-///
-/// Returns an error when the settings file cannot be read or parsed.
-pub fn load_settings() -> Result<Settings, String> {
+/// Persisted settings, or defaults when the file is absent or unusable, and a
+/// warning when the file could not be read or parsed completely.
+pub fn load_settings() -> (Settings, Option<String>) {
     load_settings_from(&settings_path())
 }
 
-fn load_settings_from(path: &Path) -> Result<Settings, String> {
+fn load_settings_from(path: &Path) -> (Settings, Option<String>) {
     if let Some(parent) = path.parent() {
         cleanup_stale_temps(parent);
     }
     if !path.exists() {
-        return Ok(Settings::default());
+        return (Settings::default(), None);
     }
-    let bytes =
-        fs::read(path).map_err(|error| format!("could not read {}: {error}", path.display()))?;
-    serde_json::from_slice(&bytes)
-        .map_err(|error| format!("could not parse {}: {error}", path.display()))
+    let bytes = match fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            let warning = format!("could not read {}: {error}", path.display());
+            return (Settings::default(), Some(warning));
+        }
+    };
+    match serde_json::from_slice(&bytes) {
+        Ok(settings) => (settings, None),
+        Err(error) => {
+            let (settings, ignored) = recover_settings(&bytes).unwrap_or_default();
+            let outcome = if ignored.is_empty() {
+                "using default preferences".to_owned()
+            } else {
+                format!("using defaults for {}", ignored.join(", "))
+            };
+            let warning = format!("could not parse {}: {error}; {outcome}", path.display());
+            (settings, Some(warning))
+        }
+    }
+}
+
+/// Starts from defaults and keeps each stored value that parses on its own.
+///
+/// # Returns
+///
+/// The recovered settings and ignored preference names, or `None` for an unusable file.
+fn recover_settings(bytes: &[u8]) -> Option<(Settings, Vec<String>)> {
+    let serde_json::Value::Object(stored) = serde_json::from_slice(bytes).ok()? else {
+        return None;
+    };
+    let mut recovered = serde_json::to_value(Settings::default()).unwrap_or_default();
+    let mut ignored = Vec::new();
+    for (key, value) in stored {
+        let mut candidate = recovered.clone();
+        if let Some(map) = candidate.as_object_mut() {
+            map.insert(key.clone(), value);
+        }
+        if serde_json::from_value::<Settings>(candidate.clone()).is_ok() {
+            recovered = candidate;
+        } else {
+            ignored.push(key);
+        }
+    }
+    Some((
+        serde_json::from_value(recovered).unwrap_or_default(),
+        ignored,
+    ))
 }
 
 /// Persists application settings atomically.
@@ -184,14 +241,17 @@ fn save_settings_changes_at(
     }
     let bytes =
         fs::read(path).map_err(|error| format!("could not read {}: {error}", path.display()))?;
-    let current: Settings = match serde_json::from_slice(&bytes) {
-        Ok(settings) => settings,
+    let (current, repairing): (Settings, bool) = match serde_json::from_slice(&bytes) {
+        Ok(settings) => (settings, false),
         Err(_) => {
             let backup = path.with_file_name(format!("settings.invalid-{}.json", Uuid::new_v4()));
             fs::copy(path, &backup)
                 .map_err(|error| format!("could not preserve {}: {error}", path.display()))?;
-            write_json_atomic(path, desired)?;
-            return Ok(desired.clone());
+            let Some((settings, _)) = recover_settings(&bytes) else {
+                write_json_atomic(path, desired)?;
+                return Ok(desired.clone());
+            };
+            (settings, true)
         }
     };
     let mut current = serde_json::to_value(current).map_err(|error| error.to_string())?;
@@ -239,7 +299,7 @@ fn save_settings_changes_at(
         .remove("manual_task_order");
     let changed = current != original;
     let merged: Settings = serde_json::from_value(current).map_err(|error| error.to_string())?;
-    if changed {
+    if changed || repairing {
         write_json_atomic(path, &merged)?;
     }
     Ok(merged)
@@ -295,7 +355,7 @@ fn parse_workspace_input_from(raw: &str, windows: bool) -> String {
 ///
 /// # Returns
 ///
-/// The canonical absolute workspace path.
+/// The canonical absolute UTF-8 workspace path.
 ///
 /// # Errors
 ///
@@ -316,14 +376,14 @@ pub fn normalize_workspace_path(raw: &str) -> Result<PathBuf, String> {
 ///
 /// # Returns
 ///
-/// The canonical absolute workspace path, and whether loading it may create a first list.
+/// The canonical absolute UTF-8 workspace path, and whether loading it may create a first list.
 ///
 /// # Errors
 ///
 /// Returns an error when a saved non-default folder or its list directory is
 /// missing, or when the path cannot be resolved or its list directory cannot be created.
 pub fn resolve_launch_workspace(raw: &str, explicit: bool) -> Result<(PathBuf, bool), String> {
-    let create = explicit || expand_tilde(raw.trim()) == default_workspace_dir();
+    let create = explicit || expand_tilde(raw) == default_workspace_dir();
     resolve_workspace_path(raw, create).map(|path| (path, create))
 }
 
@@ -331,7 +391,7 @@ pub fn resolve_launch_workspace(raw: &str, explicit: bool) -> Result<(PathBuf, b
 ///
 /// # Returns
 ///
-/// The canonical absolute workspace path.
+/// The canonical absolute UTF-8 workspace path.
 ///
 /// # Errors
 ///
@@ -342,28 +402,51 @@ pub fn existing_workspace_path(raw: &str) -> Result<PathBuf, String> {
 }
 
 fn resolve_workspace_path(raw: &str, create_missing: bool) -> Result<PathBuf, String> {
-    if raw.trim().is_empty() {
+    if raw.is_empty() {
         return Err("workspace path is empty".into());
     }
-    let path = expand_tilde(raw.trim());
-    let absolute = if path.is_absolute() {
+    let path = expand_tilde(raw);
+    let mut absolute = if path.is_absolute() {
         path
     } else {
         env::current_dir()
             .map_err(|error| format!("could not resolve current directory: {error}"))?
             .join(path)
     };
+    // An existing nested workspace still takes precedence over its parent's lists.
+    if create_missing
+        && absolute.file_name().is_some_and(|name| name == "lists")
+        && !absolute.join("lists").exists()
+        && fs::read_dir(&absolute).is_ok_and(|entries| {
+            entries.flatten().any(|entry| {
+                let path = entry.path();
+                is_list_path(&path) && format::read_identity(&path).is_ok()
+            })
+        })
+    {
+        absolute.pop();
+    }
     let lists = absolute.join("lists");
     if !create_missing && !lists.is_dir() {
         // A synced lists folder can vanish while its parent remains.
         let missing = if absolute.is_dir() { &lists } else { &absolute };
         return Err(format!("{} is missing", missing.display()));
     }
-    fs::create_dir_all(&lists)
-        .map_err(|error| format!("could not create {}: {error}", absolute.display()))?;
-    absolute
+    if create_missing {
+        fs::create_dir_all(&absolute)
+            .map_err(|error| format!("could not create {}: {error}", absolute.display()))?;
+    }
+    let workspace = absolute
         .canonicalize()
-        .map_err(|error| format!("could not resolve {}: {error}", absolute.display()))
+        .map_err(|error| format!("could not resolve {}: {error}", absolute.display()))?;
+    if workspace.to_str().is_none() {
+        return Err("The resolved workspace path must be valid UTF-8.".into());
+    }
+    if create_missing {
+        fs::create_dir_all(workspace.join("lists"))
+            .map_err(|error| format!("could not create {}: {error}", workspace.display()))?;
+    }
+    Ok(workspace)
 }
 
 /// Loads all readable list files and a fingerprint from a workspace, creating its
@@ -393,7 +476,14 @@ pub fn load_workspace(root: &Path) -> Result<WorkspaceSnapshot, String> {
 ///
 /// Returns an error when the workspace list directory is missing, unreadable, or empty.
 pub fn load_existing_workspace(root: &Path) -> Result<WorkspaceSnapshot, String> {
-    load_lists(root, false)
+    let snapshot = load_lists(root, false)?;
+    if snapshot.lists.is_empty() && snapshot.failed_paths.is_empty() {
+        return Err(format!(
+            "{} has no list files",
+            root.join("lists").display()
+        ));
+    }
+    Ok(snapshot)
 }
 
 fn load_lists(root: &Path, initialize: bool) -> Result<WorkspaceSnapshot, String> {
@@ -411,17 +501,11 @@ fn load_lists(root: &Path, initialize: bool) -> Result<WorkspaceSnapshot, String
         .map_err(|error| format!("could not read {}: {error}", lists_dir.display()))?
         .filter_map(Result::ok)
         .map(|entry| entry.path())
-        .filter(|path| {
-            path.is_file()
-                && path.extension().and_then(|extension| extension.to_str()) == Some("json")
-        })
+        .filter(|path| is_list_path(path))
         .collect::<Vec<_>>();
     paths.sort();
 
-    if paths.is_empty() {
-        if !initialize {
-            return Err(format!("{} has no list files", lists_dir.display()));
-        }
+    if paths.is_empty() && initialize {
         let list = create_list(root, "Tasks", Accent::default())?;
         update_fingerprint_for_file(&mut fingerprint, &list)?;
         return Ok(WorkspaceSnapshot {
@@ -429,6 +513,7 @@ fn load_lists(root: &Path, initialize: bool) -> Result<WorkspaceSnapshot, String
             fingerprint,
             warnings: Vec::new(),
             failed_paths: Vec::new(),
+            duplicate_paths: Vec::new(),
         });
     }
 
@@ -464,14 +549,12 @@ fn load_lists(root: &Path, initialize: bool) -> Result<WorkspaceSnapshot, String
 
     let mut seen_ids = HashSet::new();
     let mut lists = Vec::new();
+    let mut duplicate_paths = Vec::new();
     for (stored, _) in candidates {
         if seen_ids.insert(stored.key) {
             lists.push(stored);
         } else {
-            warnings.push(format!(
-                "ignored duplicate list identity in {}; the file remains untouched on disk",
-                stored.path.display()
-            ));
+            duplicate_paths.push(stored.path);
         }
     }
     sort_lists(&mut lists);
@@ -481,7 +564,15 @@ fn load_lists(root: &Path, initialize: bool) -> Result<WorkspaceSnapshot, String
         fingerprint,
         warnings,
         failed_paths,
+        duplicate_paths,
     })
+}
+
+fn is_list_path(path: &Path) -> bool {
+    path.is_file()
+        && path
+            .extension()
+            .is_some_and(|extension| extension == "json")
 }
 
 fn read_list(path: &Path) -> Result<(StoredList, u8), String> {
@@ -490,26 +581,17 @@ fn read_list(path: &Path) -> Result<(StoredList, u8), String> {
         .map_err(|error| format!("could not inspect {}: {error}", path.display()))?;
     let bytes =
         fs::read(path).map_err(|error| format!("could not read {}: {error}", path.display()))?;
+    format::check_list_format(&bytes, path)?;
     let mut data = serde_json::from_slice::<TodoList>(&bytes)
         .map_err(|error| format!("ignored {}: {error}", path.display()))?;
 
-    let stem = path
-        .file_stem()
-        .and_then(|stem| stem.to_str())
-        .unwrap_or_default();
-    let legacy_id = Uuid::parse_str(stem).ok();
-    let descriptive = stem.rsplit_once("--").and_then(|(name, id)| {
-        (!name.is_empty())
-            .then(|| Uuid::parse_str(id).ok().map(|id| (name, id)))
-            .flatten()
-    });
-    let file_id = legacy_id.or_else(|| descriptive.map(|(_, id)| id));
-    let canonical_name = match descriptive {
-        Some((name, _)) if name == filename_title(&data.title) => 2,
-        _ if file_id.is_some() => 1,
-        _ => 0,
+    let identity = format::filename_identity(path);
+    let canonical_name = match identity {
+        Some((_, Some(name))) if name == filename_title(&data.title) => 2,
+        Some(_) => 1,
+        None => 0,
     };
-    let key = file_id.unwrap_or(data.id);
+    let key = identity.map_or(data.id, |(id, _)| id);
     data.id = key;
 
     Ok((
@@ -560,34 +642,6 @@ fn save_new_list(root: &Path, data: TodoList) -> Result<StoredList, String> {
     };
     save_list(&stored)?;
     Ok(stored)
-}
-
-/// Preserves local contents in an independent ordinary list before conflict recovery.
-///
-/// # Arguments
-/// - `root` - Active workspace root.
-/// - `source` - Local contents to preserve.
-///
-/// # Returns
-/// The saved local copy, with independent list, task, and checklist identities.
-///
-/// # Errors
-/// Returns an error when the copy cannot be saved.
-pub fn create_local_copy(root: &Path, source: &StoredList) -> Result<StoredList, String> {
-    let mut data = source.data.clone();
-    data.id = Uuid::new_v4();
-    data.title = format!("{} (local copy)", data.title);
-    for task in data
-        .tasks
-        .iter_mut()
-        .chain(data.archive.iter_mut().map(|entry| &mut entry.task))
-    {
-        task.id = Uuid::new_v4();
-        for child in &mut task.subtasks {
-            child.id = Uuid::new_v4();
-        }
-    }
-    save_new_list(root, data)
 }
 
 fn filename_title(title: &str) -> String {
@@ -651,6 +705,7 @@ pub fn rename_list_file(list: &mut StoredList) -> Result<(), String> {
             ));
         }
     }
+    format::check_file_for_mutation(&list.path, list.key)?;
     fs::rename(&list.path, &destination).map_err(|error| {
         format!(
             "could not rename {} to {}: {error}",
@@ -660,38 +715,6 @@ pub fn rename_list_file(list: &mut StoredList) -> Result<(), String> {
     })?;
     list.path = destination;
     Ok(())
-}
-
-/// Deletes a list's associated file.
-///
-/// # Returns
-///
-/// `Ok(())` after the file is removed.
-///
-/// # Errors
-///
-/// Returns an error when another readable file has the same identity or the file cannot be removed.
-pub fn delete_list(list: &StoredList) -> Result<(), String> {
-    if let Some(directory) = list.path.parent() {
-        for entry in fs::read_dir(directory)
-            .map_err(|error| format!("could not read {}: {error}", directory.display()))?
-            .filter_map(Result::ok)
-        {
-            let path = entry.path();
-            if path != list.path
-                && path.extension().and_then(|extension| extension.to_str()) == Some("json")
-                && let Ok((other, _)) = read_list(&path)
-                && other.key == list.key
-            {
-                return Err(format!(
-                    "could not delete list: duplicate list identity in {}; resolve the duplicate files first",
-                    path.display()
-                ));
-            }
-        }
-    }
-    fs::remove_file(&list.path)
-        .map_err(|error| format!("could not delete {}: {error}", list.path.display()))
 }
 
 /// Collects change-detection metadata for every list file in a workspace.
@@ -712,9 +735,7 @@ pub fn workspace_fingerprint(root: &Path) -> Result<WorkspaceFingerprint, String
         .flatten()
     {
         let path = entry.path();
-        if !path.is_file()
-            || path.extension().and_then(|extension| extension.to_str()) != Some("json")
-        {
+        if !is_list_path(&path) {
             continue;
         }
         let Ok(metadata) = entry.metadata() else {
@@ -766,8 +787,8 @@ pub fn update_fingerprint_for_file(
 /// - `fingerprint` - Snapshot to update in place.
 /// - `path` - List file whose entry should be removed.
 pub fn remove_file_from_fingerprint(fingerprint: &mut WorkspaceFingerprint, path: &Path) {
-    if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
-        fingerprint.0.remove(name);
+    if let Some(name) = path.file_name() {
+        fingerprint.0.remove(name.to_string_lossy().as_ref());
     }
 }
 
@@ -925,7 +946,11 @@ fn xdg_dir_from(
         .unwrap_or_else(|| home.join(fallback))
 }
 
-fn home_dir() -> PathBuf {
+/// Returns the home directory using the current platform's environment.
+///
+/// # Returns
+/// The configured home directory or a relative fallback when none is available.
+pub(crate) fn home_dir() -> PathBuf {
     home_dir_from(PathPlatform::current(), &|name| env::var_os(name))
 }
 
