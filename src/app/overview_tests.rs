@@ -545,34 +545,14 @@ fn frame(
     app: &mut MinimalistApp,
     events: Vec<egui::Event>,
 ) -> egui::FullOutput {
-    crate::app::tests::run_frame(
-        ctx,
-        crate::app::tests::frame_input(
-            egui::vec2(320.0, 760.0),
-            ctx.input(|input| input.time) + 0.3,
-            events,
-        ),
-        |ui| app.overview_ui(ui, app.palette()),
-    )
+    grid_frame(ctx, app, 320.0, ctx.input(|input| input.time) + 0.3, events)
 }
 
 fn click_label(ctx: &egui::Context, app: &mut MinimalistApp, label: &str) {
     let output = frame(ctx, app, Vec::new());
     let point = label_center(&output, label);
     for pressed in [true, false] {
-        frame(
-            ctx,
-            app,
-            vec![
-                egui::Event::PointerMoved(point),
-                egui::Event::PointerButton {
-                    pos: point,
-                    button: egui::PointerButton::Primary,
-                    pressed,
-                    modifiers: egui::Modifiers::NONE,
-                },
-            ],
-        );
+        frame(ctx, app, pointer(point, pressed));
     }
 }
 
