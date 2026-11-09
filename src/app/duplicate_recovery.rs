@@ -18,11 +18,7 @@ impl MinimalistApp {
         let filename = path
             .file_name()
             .map_or_else(|| path.to_string_lossy(), |name| name.to_string_lossy());
-        let enabled = self.quick_capture.is_none()
-            && self.find.is_none()
-            && self.shortcuts.is_none()
-            && self.details.move_task.is_none()
-            && self.task_context.is_none();
+        let enabled = !self.has_modal();
         let mut recover = false;
         Frame::NONE
             .fill(Color32::from_rgba_unmultiplied(80, 25, 35, 245))

@@ -153,13 +153,7 @@ impl MinimalistApp {
         let Screen::List(list) = self.screen else {
             return None;
         };
-        if self.shortcuts.is_some()
-            || self.quick_capture.is_some()
-            || self.find.is_some()
-            || self.details.move_task.is_some()
-            || self.task_context.is_some()
-            || self.persistence.workspace_failure.is_some()
-        {
+        if self.has_modal() || self.persistence.workspace_failure.is_some() {
             return None;
         }
         if focused == Id::new(("new-task", list)) {
