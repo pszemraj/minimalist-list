@@ -3,7 +3,7 @@
 use super::*;
 use crate::{
     app::tests::test_app,
-    model::{Accent, Task, TaskSort, TaskStatus, TodoList},
+    model::{Accent, Task, TaskSort, TodoList},
     storage,
 };
 use std::{
@@ -955,118 +955,4 @@ fn unknown_shared_fields_follow_move_history_undo_and_local_copy() {
         );
     }
     fs::remove_dir_all(app.workspace).unwrap();
-}
-
-#[test]
-fn task_status_infers_starts_from_checked_children_and_survives_reopening() {
-    let mut task = Task::new("Plan the trip");
-    assert_eq!(task.status(), TaskStatus::NotStarted);
-    task.toggle_started();
-    assert_eq!(
-        (task.status(), task.started),
-        (TaskStatus::InProgress, Some(true))
-    );
-    task.toggle_started();
-    assert_eq!(
-        (task.status(), task.started),
-        (TaskStatus::NotStarted, Some(false))
-    );
-
-    // A file from before the flag existed infers progress from its checklist.
-    let mut legacy: Task = serde_json::from_value(serde_json::json!({
-        "id": Uuid::new_v4(),
-        "text": "Legacy",
-        "completed": false,
-        "created_at_unix": 1,
-        "completed_at_unix": null,
-        "subtasks": [
-            {"id": Uuid::new_v4(), "text": "One", "completed": true},
-            {"id": Uuid::new_v4(), "text": "Two", "completed": false}
-        ]
-    }))
-    .unwrap();
-    assert_eq!(
-        (legacy.status(), legacy.started),
-        (TaskStatus::InProgress, None)
-    );
-    let first = legacy.subtasks[0].id;
-    assert!(legacy.toggle_subtask(first));
-    assert_eq!(legacy.status(), TaskStatus::InProgress);
-
-    // Marking it not started sticks despite checked children until another check.
-    assert!(legacy.toggle_subtask(first));
-    legacy.toggle_started();
-    assert_eq!(legacy.status(), TaskStatus::NotStarted);
-    let second = legacy.subtasks[1].id;
-    assert!(legacy.toggle_subtask(second));
-    assert_eq!(legacy.status(), TaskStatus::InProgress);
-
-    legacy.toggle();
-    assert_eq!(legacy.status(), TaskStatus::Done);
-    legacy.toggle();
-    assert_eq!(legacy.status(), TaskStatus::InProgress);
-    legacy.toggle();
-    legacy.toggle_started();
-    assert_eq!(legacy.status(), TaskStatus::InProgress);
-    assert_eq!(legacy.completed_at_unix, None);
-
-    let untouched = serde_json::to_value(Task::new("Unstarted")).unwrap();
-    assert!(untouched.get("started").is_none());
-}
-
-#[test]
-fn restoring_history_keeps_the_previous_open_status() {
-    let (_ctx, mut app) = test_app();
-    let list = app.lists[0].key;
-    let mut task = Task::new("Started before archiving");
-    task.toggle_started();
-    task.toggle();
-    let id = task.id;
-    app.lists[0].data.tasks.push(task);
-    app.save_list_index(0);
-    app.archive_completed(list);
-    app.restore_archived(list, id);
-    let restored = &saved(&app, 0).tasks[0];
-    assert_eq!(restored.status(), TaskStatus::InProgress);
-    fs::remove_dir_all(&app.workspace).unwrap();
-}
-
-#[test]
-fn deleting_and_undoing_the_last_checked_child_preserves_the_parents_open_status() {
-    for started in [None, Some(false), Some(true)] {
-        for done in [false, true] {
-            let (_ctx, mut app) = test_app();
-            let list = app.lists[0].key;
-            let mut task = Task::new("Legacy parent");
-            let id = task.id;
-            let mut child = Subtask::new("Checked child");
-            let child_id = child.id;
-            child.completed = true;
-            task.subtasks.push(child);
-            task.started = started;
-            if done {
-                task.toggle();
-            }
-            let status = task.status();
-            let completed_at = task.completed_at_unix;
-            app.lists[0].data.tasks.push(task);
-            app.save_list_index(0);
-
-            app.delete_subtask(list, id, child_id);
-            let deleted = saved(&app, 0).tasks.remove(0);
-            assert!(deleted.subtasks.is_empty());
-            assert_eq!(deleted.status(), status);
-            assert_eq!(deleted.started, started.or(Some(true)));
-            assert_eq!(deleted.completed_at_unix, completed_at);
-
-            app.undo_last();
-            let restored = saved(&app, 0).tasks.remove(0);
-            assert_eq!(restored.status(), status);
-            assert_eq!(restored.started, deleted.started);
-            assert_eq!(restored.completed_at_unix, completed_at);
-            assert!(restored.subtasks[0].completed);
-            assert_eq!(restored.subtasks[0].id, child_id);
-            fs::remove_dir_all(&app.workspace).unwrap();
-        }
-    }
 }

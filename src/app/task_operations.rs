@@ -805,3 +805,7 @@ fn clipped(text: &str, limit: usize) -> String {
 #[cfg(test)]
 #[path = "task_operations_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "task_status_tests.rs"]
+mod status_tests;
