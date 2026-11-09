@@ -1,12 +1,7 @@
 //! Native tray icon, menu events, and Linux tray-host detection.
 
 use eframe::egui;
-use std::sync::mpsc::{self, Receiver};
-#[cfg(target_os = "linux")]
-use std::{
-    cell::Cell,
-    time::{Duration, Instant},
-};
+use std::sync::mpsc::{self, Receiver, Sender};
 use tray_icon::{
     Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent,
     menu::{Menu, MenuEvent, MenuItem},
@@ -20,6 +15,11 @@ pub enum Action {
     Quit,
 }
 
+#[cfg(target_os = "linux")]
+mod linux;
+#[cfg(target_os = "linux")]
+pub(crate) use linux::linux_host_available;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 /// Result of checking whether an existing native tray can still reopen the window.
 pub(crate) enum Availability {
@@ -31,23 +31,22 @@ pub(crate) enum Availability {
 }
 
 impl Availability {
-    /// Keeps an established tray's hiding behavior during an inconclusive check.
+    /// Requires a confirmed reopen path before hiding a visible window.
     ///
     /// # Returns
-    /// Whether hiding remains possible; applications without a tray use `Unavailable`.
+    /// Whether the tray can reopen the window.
     pub(crate) fn can_hide(self) -> bool {
-        self != Self::Unavailable
+        self == Self::Available
     }
 }
 
 /// Keeps the native icon alive and receives its menu actions.
 pub struct Tray {
+    #[cfg(not(target_os = "linux"))]
     _icon: TrayIcon,
     actions: Receiver<Action>,
     #[cfg(target_os = "linux")]
-    host: zbus::blocking::Proxy<'static>,
-    #[cfg(target_os = "linux")]
-    host_loss: Cell<LinuxHostLoss>,
+    monitor: linux::Monitor,
 }
 
 impl Tray {
@@ -56,7 +55,6 @@ impl Tray {
     /// # Arguments
     ///
     /// - `ctx` - Context to wake when a tray action arrives.
-    /// - `supports_hiding` - Whether the selected window backend supports hide and restore.
     ///
     /// # Returns
     ///
@@ -65,70 +63,22 @@ impl Tray {
     /// # Errors
     ///
     /// Returns an error if native tray support is unavailable.
-    pub fn new(ctx: &egui::Context, supports_hiding: bool) -> Result<Self, String> {
-        if !supports_hiding {
-            return Err("Hiding to the tray requires X11 or XWayland on Linux.".into());
-        }
-        #[cfg(target_os = "linux")]
-        let host = linux_host()?;
-        let menu = Menu::new();
-        let show = MenuItem::new("Show Minimalist List", true, None);
-        let quick_add = MenuItem::new("Quick add", true, None);
-        let quit = MenuItem::new("Quit", true, None);
-        menu.append_items(&[&show, &quick_add, &quit])
-            .map_err(|error| error.to_string())?;
-        let icon = icon_data();
-        let icon = Icon::from_rgba(icon.rgba, icon.width, icon.height)
-            .map_err(|error| error.to_string())?;
-        let builder = TrayIconBuilder::new()
-            .with_id("minimalist-list")
-            .with_tooltip("Minimalist List")
-            .with_menu(Box::new(menu))
-            .with_menu_on_left_click(false);
-        #[cfg(target_os = "macos")]
-        let builder = builder.with_icon_templated(icon);
-        #[cfg(not(target_os = "macos"))]
-        let builder = builder.with_icon(icon);
-        let icon = builder.build().map_err(|error| error.to_string())?;
-
+    pub fn new(ctx: &egui::Context) -> Result<Self, String> {
         let (sender, actions) = mpsc::channel();
-        let menu_sender = sender.clone();
-        let menu_ctx = ctx.clone();
-        let show_id = show.id().clone();
-        let quick_add_id = quick_add.id().clone();
-        let quit_id = quit.id().clone();
-        MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
-            let action = if event.id == show_id {
-                Action::Show
-            } else if event.id == quick_add_id {
-                Action::QuickAdd
-            } else if event.id == quit_id {
-                Action::Quit
-            } else {
-                return;
-            };
-            let _ = menu_sender.send(action);
-            menu_ctx.request_repaint();
-        }));
-        let tray_ctx = ctx.clone();
-        let tray_id = icon.id().clone();
-        TrayIconEvent::set_event_handler(Some(move |event| {
-            if matches!(event, TrayIconEvent::Click {
-                id, button: MouseButton::Left, button_state: MouseButtonState::Up, ..
-            } if id == tray_id)
-            {
-                let _ = sender.send(Action::Show);
-                tray_ctx.request_repaint();
-            }
-        }));
+        install_handlers(ctx, sender);
         Ok(Self {
-            _icon: icon,
+            #[cfg(not(target_os = "linux"))]
+            _icon: build_icon()?,
             actions,
             #[cfg(target_os = "linux")]
-            host,
-            #[cfg(target_os = "linux")]
-            host_loss: Cell::new(LinuxHostLoss::Clear),
+            monitor: linux::Monitor::start(ctx.clone())?,
         })
+    }
+
+    /// Waits briefly for the first background result before starting hidden.
+    #[cfg(target_os = "linux")]
+    pub(crate) fn wait_for_startup(&self) {
+        self.monitor.wait_for_startup();
     }
 
     /// Returns the next pending native action, if any.
@@ -147,38 +97,7 @@ impl Tray {
     /// Whether the host is present, absent, or temporarily could not be checked.
     pub(crate) fn availability(&self) -> Availability {
         #[cfg(target_os = "linux")]
-        {
-            let result = self
-                .host
-                .get_property::<bool>("IsStatusNotifierHostRegistered");
-            let closed = self.host.connection().is_closed();
-            let availability = linux_availability(&result, closed);
-            let displays_asleep = availability == Availability::Unavailable
-                && !closed
-                && gnome_displays_asleep(self.host.connection());
-            let previous = self.host_loss.get();
-            let confirmed = confirm_linux_availability(
-                availability,
-                displays_asleep,
-                &self.host_loss,
-                Instant::now(),
-            );
-            let current = self.host_loss.get();
-            if current != previous {
-                match current {
-                    LinuxHostLoss::Clear => {
-                        log::debug!("Linux tray loss check cleared ({availability:?})")
-                    }
-                    LinuxHostLoss::DisplaysAsleep => log::debug!(
-                        "Linux tray loss deferred while displays are asleep (reply: {result:?})"
-                    ),
-                    LinuxHostLoss::Since(_) => log::debug!(
-                        "Linux tray watcher unavailable; waiting for confirmation (connection closed: {closed}, reply: {result:?})"
-                    ),
-                }
-            }
-            confirmed
-        }
+        return self.monitor.availability();
         #[cfg(target_os = "windows")]
         {
             #[link(name = "user32")]
@@ -200,133 +119,54 @@ impl Tray {
     }
 }
 
-/// Distinguishes a missing Linux host from a failed availability query.
-///
-/// A closed connection or an explicit D-Bus service/owner/disconnection error
-/// confirms that the existing tray cannot be reached. Timeouts and other
-/// inconclusive property-read errors retain the established hiding behavior.
-///
-/// # Arguments
-/// - `result` - Native host property's reply or D-Bus error.
-/// - `connection_closed` - Whether the session-bus connection has closed.
-///
-/// # Returns
-/// The state reported by this probe, or `Unknown` for an inconclusive query.
-#[cfg(target_os = "linux")]
-fn linux_availability(result: &Result<bool, zbus::Error>, connection_closed: bool) -> Availability {
-    if connection_closed {
-        return Availability::Unavailable;
-    }
-    match result {
-        Ok(true) => Availability::Available,
-        Ok(false) => Availability::Unavailable,
-        Err(error) => match zbus::fdo::Error::from(error.clone()) {
-            zbus::fdo::Error::ServiceUnknown(_)
-            | zbus::fdo::Error::NameHasNoOwner(_)
-            | zbus::fdo::Error::Disconnected(_) => Availability::Unavailable,
-            _ => Availability::Unknown,
-        },
-    }
+const TRAY_ID: &str = "minimalist-list";
+const MENU_ACTIONS: [(Action, &str, &str); 3] = [
+    (Action::Show, "minimalist-show", "Show Minimalist List"),
+    (Action::QuickAdd, "minimalist-quick-add", "Quick add"),
+    (Action::Quit, "minimalist-quit", "Quit"),
+];
+
+fn install_handlers(ctx: &egui::Context, sender: Sender<Action>) {
+    let menu_sender = sender.clone();
+    let menu_ctx = ctx.clone();
+    MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
+        if let Some((action, _, _)) = MENU_ACTIONS.iter().find(|(_, id, _)| event.id.0 == *id) {
+            let _ = menu_sender.send(*action);
+            menu_ctx.request_repaint();
+        }
+    }));
+    let tray_ctx = ctx.clone();
+    TrayIconEvent::set_event_handler(Some(move |event: TrayIconEvent| {
+        if matches!(event, TrayIconEvent::Click {
+            id, button: MouseButton::Left, button_state: MouseButtonState::Up, ..
+        } if id.as_ref() == TRAY_ID)
+        {
+            let _ = sender.send(Action::Show);
+            tray_ctx.request_repaint();
+        }
+    }));
 }
 
-#[cfg(target_os = "linux")]
-const HOST_LOSS_GRACE: Duration = Duration::from_secs(5);
-
-#[cfg(target_os = "linux")]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum LinuxHostLoss {
-    Clear,
-    DisplaysAsleep,
-    Since(Instant),
-}
-
-/// Reads GNOME's display power state without changing it.
-///
-/// Unknown state and desktops without this interface keep the normal tray fallback.
-#[cfg(target_os = "linux")]
-fn gnome_displays_asleep(bus: &zbus::blocking::Connection) -> bool {
-    const DISPLAY_CONFIG: &str = "org.gnome.Mutter.DisplayConfig";
-    bus.call_method(
-        Some(DISPLAY_CONFIG),
-        "/org/gnome/Mutter/DisplayConfig",
-        Some("org.freedesktop.DBus.Properties"),
-        "Get",
-        &(DISPLAY_CONFIG, "PowerSaveMode"),
-    )
-    .and_then(|reply| reply.body().deserialize::<zbus::zvariant::OwnedValue>())
-    .ok()
-    .and_then(|value| i32::try_from(value).ok())
-    .is_some_and(|mode| matches!(mode, 1..=3))
-}
-
-#[cfg(target_os = "linux")]
-fn confirm_linux_availability(
-    availability: Availability,
-    displays_asleep: bool,
-    loss: &Cell<LinuxHostLoss>,
-    now: Instant,
-) -> Availability {
-    if availability != Availability::Unavailable {
-        loss.set(LinuxHostLoss::Clear);
-        return availability;
+fn build_icon() -> Result<TrayIcon, String> {
+    let menu = Menu::new();
+    for (_, id, label) in MENU_ACTIONS {
+        menu.append(&MenuItem::with_id(id, label, true, None))
+            .map_err(|error| error.to_string())?;
     }
-    if displays_asleep {
-        loss.set(LinuxHostLoss::DisplaysAsleep);
-        return Availability::Unknown;
-    }
-    // GNOME can briefly release the watcher name while changing session modes.
-    // After the displays wake, give the watcher a fresh chance to return.
-    let LinuxHostLoss::Since(first_missing) = loss.get() else {
-        loss.set(LinuxHostLoss::Since(now));
-        return Availability::Unknown;
-    };
-    if now.duration_since(first_missing) < HOST_LOSS_GRACE {
-        return Availability::Unknown;
-    }
-    Availability::Unavailable
+    let icon = icon_data();
+    let icon =
+        Icon::from_rgba(icon.rgba, icon.width, icon.height).map_err(|error| error.to_string())?;
+    let builder = TrayIconBuilder::new()
+        .with_id(TRAY_ID)
+        .with_tooltip("Minimalist List")
+        .with_menu(Box::new(menu))
+        .with_menu_on_left_click(false);
+    #[cfg(target_os = "macos")]
+    let builder = builder.with_icon_templated(icon);
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.with_icon(icon);
+    builder.build().map_err(|error| error.to_string())
 }
-
-/// Reports whether Linux has a registered desktop tray host.
-///
-/// # Returns
-///
-/// Whether the desktop exposes a usable StatusNotifier host.
-#[cfg(target_os = "linux")]
-pub(crate) fn linux_host_available() -> bool {
-    linux_host().is_ok()
-}
-
-#[cfg(target_os = "linux")]
-fn linux_host() -> Result<zbus::blocking::Proxy<'static>, String> {
-    let connection = zbus::blocking::connection::Builder::session()
-        .and_then(|builder| {
-            builder
-                .method_timeout(std::time::Duration::from_secs(1))
-                .build()
-        })
-        .map_err(|error| error.to_string())?;
-    let host: zbus::blocking::Proxy<'static> = zbus::blocking::proxy::Builder::new(&connection)
-        .destination("org.kde.StatusNotifierWatcher")
-        .and_then(|builder| builder.path("/StatusNotifierWatcher"))
-        .and_then(|builder| builder.interface("org.kde.StatusNotifierWatcher"))
-        .and_then(|builder| {
-            builder
-                .cache_properties(zbus::proxy::CacheProperties::No)
-                .build()
-        })
-        .map_err(|error| error.to_string())?;
-    if !host
-        .get_property::<bool>("IsStatusNotifierHostRegistered")
-        .unwrap_or(false)
-    {
-        return Err(
-            "No desktop tray host is available. Close and minimize use their normal behavior."
-                .into(),
-        );
-    }
-    Ok(host)
-}
-
 /// Creates the template-friendly checklist icon used by the native tray.
 ///
 /// # Returns
@@ -386,99 +226,6 @@ fn icon_rgba() -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn linux_host_checks_distinguish_absence_from_transient_failures() {
-        use super::{Availability, linux_availability};
-        use zbus::fdo::Error;
-
-        assert_eq!(
-            linux_availability(&Ok(true), false),
-            Availability::Available
-        );
-        assert_eq!(
-            linux_availability(&Ok(false), false),
-            Availability::Unavailable
-        );
-        for error in [
-            Error::ServiceUnknown("watcher is not registered".into()),
-            Error::NameHasNoOwner("watcher has no owner".into()),
-            Error::Disconnected("bus disconnected".into()),
-        ] {
-            assert_eq!(
-                linux_availability(&Err(zbus::Error::FDO(Box::new(error))), false),
-                Availability::Unavailable
-            );
-        }
-        for error in [
-            Error::NoReply("temporary timeout".into()),
-            Error::Timeout("temporary timeout".into()),
-            Error::TimedOut("temporary timeout".into()),
-            Error::Failed("temporary property failure".into()),
-        ] {
-            assert_eq!(
-                linux_availability(&Err(zbus::Error::FDO(Box::new(error))), false),
-                Availability::Unknown
-            );
-        }
-        assert_eq!(
-            linux_availability(&Ok(true), true),
-            Availability::Unavailable
-        );
-        assert_eq!(
-            linux_availability(&Err(zbus::Error::Failure("connection lost".into())), true),
-            Availability::Unavailable
-        );
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn linux_tray_loss_requires_absence_on_separated_checks() {
-        use super::{
-            Availability::*, Cell, HOST_LOSS_GRACE, Instant, LinuxHostLoss,
-            confirm_linux_availability,
-        };
-
-        for intervening in [Available, Unknown] {
-            let start = Instant::now();
-            let loss = Cell::new(LinuxHostLoss::Clear);
-            let check =
-                |reply, elapsed| confirm_linux_availability(reply, false, &loss, start + elapsed);
-            assert_eq!(check(Unavailable, HOST_LOSS_GRACE / 2), Unknown);
-            assert_eq!(check(Unavailable, HOST_LOSS_GRACE * 3 / 4), Unknown);
-            assert_eq!(check(intervening, HOST_LOSS_GRACE), intervening);
-            assert_eq!(check(Unavailable, HOST_LOSS_GRACE * 2), Unknown);
-            assert_eq!(check(Unavailable, HOST_LOSS_GRACE * 3), Unavailable);
-            assert_eq!(check(Available, HOST_LOSS_GRACE * 4), Available);
-            assert_eq!(check(Unavailable, HOST_LOSS_GRACE * 5), Unknown);
-        }
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn linux_tray_loss_waits_for_display_wake_before_confirming_absence() {
-        use super::{
-            Availability::*, Cell, HOST_LOSS_GRACE, Instant, LinuxHostLoss,
-            confirm_linux_availability,
-        };
-
-        let start = Instant::now();
-        let loss = Cell::new(LinuxHostLoss::Clear);
-        let check = |displays_asleep, intervals| {
-            confirm_linux_availability(
-                Unavailable,
-                displays_asleep,
-                &loss,
-                start + HOST_LOSS_GRACE * intervals,
-            )
-        };
-        assert_eq!(check(false, 0), Unknown);
-        assert_eq!(check(true, 2), Unknown);
-        assert_eq!(check(true, 12), Unknown);
-        assert_eq!(check(false, 13), Unknown);
-        assert_eq!(check(false, 14), Unavailable);
-    }
-
     #[test]
     fn shell_and_window_icons_have_all_required_sizes_and_transparency() {
         let window = super::window_icon_data();

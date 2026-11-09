@@ -405,7 +405,10 @@ fn failed_quick_add_blocks_shutdown_until_retry_without_losing_destination() {
             .get_mut(&egui::ViewportId::ROOT)
             .unwrap()
             .events = vec![egui::ViewportEvent::Close];
-        let output = ctx.run_logic(&input, |ctx| app.handle_window_actions(ctx, false));
+        let output = ctx.run_logic(&input, |ctx| {
+            app.handle_window_actions(ctx, false);
+            app.finish_window_actions_after_input(ctx);
+        });
         assert!(
             output.viewport_commands[&egui::ViewportId::ROOT]
                 .contains(&egui::ViewportCommand::CancelClose)
@@ -537,6 +540,26 @@ fn global_capture_remembers_hidden_origin_and_can_finish_without_a_tray() {
         assert!(!app.window_hidden, "no tray is available");
         assert!(!app.quitting);
         assert_eq!(app.lists[0].data.tasks.len(), usize::from(submit));
+        std::fs::remove_dir_all(app.workspace).unwrap();
+    }
+}
+
+#[test]
+fn explicit_show_clears_return_to_tray_for_open_and_suspended_capture() {
+    for suspended in [false, true] {
+        let (ctx, mut app) = super::super::tests::test_app();
+        app.open_global_quick_add(&ctx, true);
+        app.quick_capture.as_mut().unwrap().text = "Retained capture".into();
+        if suspended {
+            app.open_find();
+        }
+
+        app.keep_window_after_capture();
+
+        app.open_global_quick_add(&ctx, false);
+        let capture = app.quick_capture.as_ref().unwrap();
+        assert!(!capture.return_to_tray);
+        assert_eq!(capture.text, "Retained capture");
         std::fs::remove_dir_all(app.workspace).unwrap();
     }
 }

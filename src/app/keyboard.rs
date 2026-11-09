@@ -122,7 +122,7 @@ pub(super) struct KeyboardState {
     pub(super) history_toggle: Option<Id>,
     pub(super) creation_choices: Vec<Id>,
     anchor: Option<(Id, FocusItem)>,
-    deferred_events: Vec<Event>,
+    pub(super) deferred_events: Vec<Event>,
     history_delete_held: bool,
 }
 

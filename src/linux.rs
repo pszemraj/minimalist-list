@@ -70,7 +70,21 @@ fn update_taskbar_hint(
         .reply()?
         .atom;
     let attributes = connection.get_window_attributes(window)?.reply()?;
-    if attributes.map_state == MapState::UNMAPPED {
+    let managed = if attributes.map_state == MapState::UNMAPPED {
+        // A window manager can unmap an iconic window without withdrawing it.
+        // Managed windows still receive EWMH changes through the manager.
+        let wm_state = connection.intern_atom(false, b"WM_STATE")?.reply()?.atom;
+        let state = connection
+            .get_property(false, window, wm_state, wm_state, 0, 1)?
+            .reply()?;
+        matches!(
+            state.value32().and_then(|mut value| value.next()),
+            Some(1 | 3)
+        )
+    } else {
+        true
+    };
+    if !managed {
         let reply = connection
             .get_property(false, window, state, AtomEnum::ATOM, 0, 262_144)?
             .reply()?;
@@ -124,7 +138,7 @@ fn update_taskbar_hint(
 /// Success after the native application exits.
 ///
 /// # Errors
-/// Returns native event-loop initialization or execution errors.
+/// Returns native event-loop, window, renderer, or app creation errors.
 pub(crate) fn run_native(
     app_name: &str,
     mut options: eframe::NativeOptions,
@@ -144,9 +158,24 @@ pub(crate) fn run_native(
         log::debug!("Linux display backend: {backend}");
     }
     configure_cursor_display(&event_loop);
-    let mut app = eframe::create_native(app_name, options, creator, &event_loop);
-    event_loop.run_app(&mut app)?;
-    Ok(())
+    // Eframe logs renderer errors but its external event-loop adapter cannot return them.
+    let mut startup_error = Some("could not initialize the native window or renderer".to_owned());
+    {
+        let mut app = eframe::create_native(
+            app_name,
+            options,
+            Box::new(|ctx| {
+                let result = creator(ctx);
+                startup_error = result.as_ref().err().map(ToString::to_string);
+                result
+            }),
+            &event_loop,
+        );
+        event_loop.run_app(&mut app)?;
+    }
+    startup_error.map_or(Ok(()), |error| {
+        Err(eframe::Error::AppCreation(error.into()))
+    })
 }
 
 fn configure_cursor_display(event_loop: &EventLoop<eframe::UserEvent>) {

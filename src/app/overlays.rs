@@ -204,6 +204,14 @@ impl MinimalistApp {
         self.show_window(ctx);
     }
 
+    /// Keeps the window visible after a capture when Show was requested independently.
+    pub(super) fn keep_window_after_capture(&mut self) {
+        self.global_quick_add_requested = self.global_quick_add_requested.map(|_| false);
+        for capture in self.quick_capture.iter_mut().chain(&mut self.capture_draft) {
+            capture.return_to_tray = false;
+        }
+    }
+
     /// Opens quick capture for a request from outside the window, above other transient layers.
     ///
     /// Dismissing the keyboard reference or Move keeps its return focus for Quick add. Open

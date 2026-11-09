@@ -2,6 +2,7 @@
 
 use super::{MinimalistApp, text_input_shortcuts, theme::Palette};
 use crate::hotkey::GlobalAction;
+use crate::tray::Action;
 use eframe::egui::{self, Button, Id, Label};
 use std::path::Path;
 use std::process::Command;
@@ -19,7 +20,7 @@ impl MinimalistApp {
         match crate::hotkey::GlobalShortcut::new(ctx) {
             Ok(shortcut) => {
                 self.global_shortcut = Some(shortcut);
-                self.poll_global_shortcut(ctx);
+                self.refresh_global_shortcuts();
             }
             Err(error) => {
                 let error = format!("Global shortcut unavailable: {error}");
@@ -36,8 +37,8 @@ impl MinimalistApp {
         self.status = Some(error);
     }
 
-    /// Applies changed preferences and serves global presses by revealing the window.
-    pub(super) fn poll_global_shortcut(&mut self, ctx: &egui::Context) {
+    /// Applies preferences that have not been attempted by the native manager.
+    fn refresh_global_shortcuts(&mut self) {
         let Some(shortcut) = self.global_shortcut.as_mut() else {
             return;
         };
@@ -51,16 +52,28 @@ impl MinimalistApp {
                 }
             }
         }
-        let show = shortcut.take_request(GlobalAction::Show);
-        let quick_add = shortcut.take_request(GlobalAction::QuickAdd);
         for (action, error) in failures {
             self.report_shortcut_error(action, error);
         }
-        if quick_add {
-            self.request_global_quick_add(ctx);
-        } else if show {
-            self.show_window(ctx);
-        }
+    }
+
+    /// Collects global presses alongside the other native window actions.
+    ///
+    /// # Returns
+    /// Pending Show and Quick add requests.
+    pub(super) fn take_global_shortcut_actions(&mut self) -> impl Iterator<Item = Action> + '_ {
+        self.refresh_global_shortcuts();
+        [
+            (GlobalAction::Show, Action::Show),
+            (GlobalAction::QuickAdd, Action::QuickAdd),
+        ]
+        .into_iter()
+        .filter_map(|(shortcut_action, window_action)| {
+            self.global_shortcut
+                .as_ref()
+                .is_some_and(|shortcut| shortcut.take_request(shortcut_action))
+                .then_some(window_action)
+        })
     }
 
     /// Shows the current workspace in Finder, Explorer, or the desktop file manager.

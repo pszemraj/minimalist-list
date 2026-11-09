@@ -141,11 +141,11 @@ The [installers](../README.md#install-and-run) add a sign-in entry with `--start
 
 From the tray icon's menu, choose **Show Minimalist List** to restore the window, **Quick add** to open it with the capture field focused, or **Quit** to exit. Activating the icon also restores the window on desktops that support it. [Workspace scans](storage.md#file-sync-behavior) continue while hidden. See [save recovery](storage.md#save-recovery) for pending edits.
 
-Launching again with the same workspace and local settings shows the existing window. A duplicate `--start-hidden` launch leaves its visibility alone. Different workspaces can run separately.
+Launching again with the same workspace and local settings asks the existing window to come forward. On native Wayland, use the compositor's app switcher to bring the window forward. A duplicate `--start-hidden` launch leaves its visibility alone. Different workspaces can run separately.
 
 With a usable tray, Windows keeps the app out of the taskbar even while its window is open. X11 requests the same behavior through the desktop's skip-taskbar hint; window managers may ignore it. If the tray is unavailable or disappears, Windows and X11 restore the taskbar entry. Native Wayland leaves taskbar placement to the compositor.
 
-Linux uses X11 or XWayland for hiding and restoration when a desktop tray host is available, such as GNOME's AppIndicator extension or KDE's system tray. Without a usable tray, the app keeps the normal window backend and close/minimize behavior without a startup warning. If the tray host disappears while hidden, the window returns after a later check confirms the loss. On GNOME, automatic restoration waits until the displays wake and the app can check the tray again.
+Linux uses X11 or XWayland for tray hiding and restoration. The app confirms that its own icon is registered before it hides the window. On X11, a tray that appears later becomes usable without restarting the app. An inconclusive check keeps an already-hidden window in place briefly and leaves a visible window accessible. If the icon remains unavailable while hidden, the window returns. On GNOME, that fallback waits for the session to become active again, including when the displays wake at a lock screen.
 
 On X11, cursor theme and size follow the desktop's XSettings. The advertised cursor size already includes the desktop scale and is used directly. Explicit `XCURSOR_THEME` and `XCURSOR_SIZE` overrides take precedence. Restart the app after changing these desktop settings; native Wayland uses its existing cursor backend.
 
@@ -159,7 +159,7 @@ While the app is running, `Ctrl+Alt+Shift+L` shows its window and keeps it visib
 
 In **Settings -> Global shortcut** or **Settings -> Quick add shortcut**, type a chord and choose **Apply shortcut**, or choose **Disable shortcut**. Use Ctrl or Command with another modifier and a letter, number, Space, or function key. Each action needs its own chord. If registration fails, the previous shortcut remains active.
 
-On Linux, built-in global shortcuts use X11. Without an X11 display, bind the app launcher in your desktop settings to open or reveal the window.
+On Linux, built-in global shortcuts use X11.
 
 ## Diagnostic logs
 

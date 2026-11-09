@@ -147,6 +147,7 @@ pub struct MinimalistApp {
     #[cfg(target_os = "macos")]
     reopen: Option<crate::macos::ReopenHandler>,
     quitting: bool,
+    pending_native_shutdown: Option<window::NativeShutdown>,
     keyboard: KeyboardState,
     persistence: persistence::PersistenceState,
     drafts: drafts::Drafts,
@@ -156,22 +157,25 @@ pub struct MinimalistApp {
 }
 
 impl MinimalistApp {
-    /// Initializes the UI, resolves the workspace, and loads its lists.
+    /// Initializes the UI and loads the workspace selected before native startup.
     ///
     /// # Arguments
     ///
     /// - `ctx` - Egui context used to configure the interface.
     /// - `settings` - Persisted preferences to apply.
     /// - `workspace_override` - Optional workspace path supplied for this launch.
+    /// - `resolved_workspace` - Workspace path and initialization policy used to claim the instance,
+    ///   or the resolution error to show in workspace recovery.
     /// - `startup_warning` - Optional warning to show after startup.
     ///
     /// # Returns
     ///
     /// A fully initialized application state.
-    pub fn new(
+    pub fn from_launch(
         ctx: &egui::Context,
         mut settings: Settings,
         workspace_override: Option<String>,
+        resolved_workspace: Result<(PathBuf, bool), String>,
         startup_warning: Option<String>,
     ) -> Self {
         let mut visuals = egui::Visuals::dark();
@@ -190,22 +194,12 @@ impl MinimalistApp {
             settings.workspace_path.clone_from(path);
         }
         let mut status = startup_warning;
-        let mut initialize = false;
-        let workspace = match storage::resolve_launch_workspace(
-            &settings.workspace_path,
-            workspace_override.is_some(),
-        ) {
-            Ok((path, create)) => {
-                initialize = create;
-                path
-            }
+        let (workspace, initialize) = match resolved_workspace {
+            Ok(resolved) => resolved,
             Err(error) => {
-                status = Some(format!(
-                    "Workspace {} unavailable: {error}",
-                    settings.workspace_path
-                ));
+                status = Some(error);
                 workspace_failure = Some(settings.workspace_path.clone());
-                PathBuf::from(&settings.workspace_path)
+                (PathBuf::from(&settings.workspace_path), false)
             }
         };
         settings.workspace_path = workspace.to_string_lossy().into_owned();
@@ -325,6 +319,7 @@ impl MinimalistApp {
             #[cfg(target_os = "macos")]
             reopen: None,
             quitting: false,
+            pending_native_shutdown: None,
             keyboard: KeyboardState::default(),
             persistence: persistence::PersistenceState::new(settings_baseline, workspace_failure),
             drafts: drafts::Drafts::default(),
@@ -336,6 +331,28 @@ impl MinimalistApp {
         app.capture_loaded_task_orders();
         app.apply_task_sorts();
         app
+    }
+
+    #[cfg(test)]
+    fn new(
+        ctx: &egui::Context,
+        settings: Settings,
+        workspace_override: Option<String>,
+        startup_warning: Option<String>,
+    ) -> Self {
+        let workspace = storage::resolve_launch_workspace(
+            workspace_override
+                .as_deref()
+                .unwrap_or(&settings.workspace_path),
+            workspace_override.is_some(),
+        );
+        Self::from_launch(
+            ctx,
+            settings,
+            workspace_override,
+            workspace,
+            startup_warning,
+        )
     }
 
     fn list_index(&self, id: Uuid) -> Option<usize> {
@@ -659,10 +676,7 @@ impl MinimalistApp {
         if self.persistence.workspace_failure.is_none() {
             log::warn!("Open workspace became unavailable; waiting for existing files");
         }
-        self.status = Some(format!(
-            "Workspace {} unavailable: {error}",
-            self.settings.workspace_path
-        ));
+        self.status = Some(error);
         self.persistence.workspace_failure = Some(self.settings.workspace_path.clone());
     }
 
@@ -678,7 +692,7 @@ impl MinimalistApp {
     /// - `explicit` - Whether this is a user's folder choice rather than a retry of
     ///   the current selection, which may be a launch-only override.
     fn open_workspace(&mut self, raw: &str, explicit: bool) {
-        if raw.trim().is_empty() {
+        if raw.is_empty() {
             return;
         }
         if !self.finish_pending_changes() {
@@ -813,7 +827,9 @@ impl eframe::App for MinimalistApp {
             .winit_window()
             .is_some_and(|window| window.is_minimized().unwrap_or(false));
         self.handle_window_actions(ctx, minimized);
-        self.poll_global_shortcut(ctx);
+        if self.quitting {
+            return;
+        }
         #[cfg(any(target_os = "windows", target_os = "linux"))]
         self.update_taskbar_presence(frame.winit_window().map(AsRef::as_ref));
         self.apply_window_preferences(ctx);
@@ -823,6 +839,9 @@ impl eframe::App for MinimalistApp {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        if self.quitting {
+            return;
+        }
         self.flush_deferred_settings(ui.ctx());
         self.handle_app_shortcuts(ui.ctx());
         let palette = self.palette();
@@ -959,13 +978,7 @@ impl eframe::App for MinimalistApp {
         self.task_operations_ui(ui.ctx());
         self.task_context_ui(ui.ctx());
         self.finish_keyboard_frame(ui.ctx());
-        // Native requests arrive in logic, before this frame's editor input is processed.
-        if let Some(was_hidden) = self.global_quick_add_requested.take()
-            && !self.quitting
-        {
-            self.open_global_quick_add(ui.ctx(), was_hidden);
-            ui.ctx().request_repaint();
-        }
+        self.finish_window_actions_after_input(ui.ctx());
     }
 }
 

@@ -78,6 +78,48 @@ fn escaped_macos_workspace_input_opens_existing_lists() {
     fs::remove_dir_all(root).unwrap();
 }
 
+#[cfg(unix)]
+#[test]
+fn literal_workspace_paths_keep_significant_spaces() {
+    let root = test_root();
+    let workspace = root.join("  workspace  ");
+    let path = workspace.to_str().unwrap();
+    let normalized = normalize_workspace_path(path).unwrap();
+    assert_eq!(normalized, workspace.canonicalize().unwrap());
+    assert_eq!(existing_workspace_path(path).unwrap(), normalized);
+    assert_eq!(
+        resolve_launch_workspace(path, true).unwrap(),
+        (normalized.clone(), true)
+    );
+    assert_eq!(
+        resolve_launch_workspace(path, false).unwrap(),
+        (normalized, false)
+    );
+    assert_eq!(parse_workspace_input(&format!("  \"{path}\"  ")), path);
+    assert!(workspace.join("lists").is_dir());
+    assert!(!root.join("  workspace").exists());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn utf8_workspace_alias_rejects_non_utf8_target_before_creating_lists() {
+    use std::os::unix::{ffi::OsStringExt, fs::symlink};
+
+    let root = test_root();
+    let target = root.join(OsString::from_vec(b"workspace\xff".to_vec()));
+    fs::create_dir_all(&target).unwrap();
+    let alias = root.join("workspace-alias");
+    symlink(&target, &alias).unwrap();
+    assert!(
+        normalize_workspace_path(alias.to_str().unwrap())
+            .unwrap_err()
+            .contains("UTF-8")
+    );
+    assert!(!target.join("lists").exists());
+    fs::remove_dir_all(root).unwrap();
+}
+
 #[test]
 fn selecting_the_list_directory_opens_its_parent_without_creating_a_nested_workspace() {
     let root = test_root();

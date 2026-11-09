@@ -353,7 +353,7 @@ fn parse_workspace_input_from(raw: &str, windows: bool) -> String {
 ///
 /// # Returns
 ///
-/// The canonical absolute workspace path.
+/// The canonical absolute UTF-8 workspace path.
 ///
 /// # Errors
 ///
@@ -374,14 +374,14 @@ pub fn normalize_workspace_path(raw: &str) -> Result<PathBuf, String> {
 ///
 /// # Returns
 ///
-/// The canonical absolute workspace path, and whether loading it may create a first list.
+/// The canonical absolute UTF-8 workspace path, and whether loading it may create a first list.
 ///
 /// # Errors
 ///
 /// Returns an error when a saved non-default folder or its list directory is
 /// missing, or when the path cannot be resolved or its list directory cannot be created.
 pub fn resolve_launch_workspace(raw: &str, explicit: bool) -> Result<(PathBuf, bool), String> {
-    let create = explicit || expand_tilde(raw.trim()) == default_workspace_dir();
+    let create = explicit || expand_tilde(raw) == default_workspace_dir();
     resolve_workspace_path(raw, create).map(|path| (path, create))
 }
 
@@ -389,7 +389,7 @@ pub fn resolve_launch_workspace(raw: &str, explicit: bool) -> Result<(PathBuf, b
 ///
 /// # Returns
 ///
-/// The canonical absolute workspace path.
+/// The canonical absolute UTF-8 workspace path.
 ///
 /// # Errors
 ///
@@ -400,10 +400,10 @@ pub fn existing_workspace_path(raw: &str) -> Result<PathBuf, String> {
 }
 
 fn resolve_workspace_path(raw: &str, create_missing: bool) -> Result<PathBuf, String> {
-    if raw.trim().is_empty() {
+    if raw.is_empty() {
         return Err("workspace path is empty".into());
     }
-    let path = expand_tilde(raw.trim());
+    let path = expand_tilde(raw);
     let mut absolute = if path.is_absolute() {
         path
     } else {
@@ -425,17 +425,26 @@ fn resolve_workspace_path(raw: &str, create_missing: bool) -> Result<PathBuf, St
         absolute.pop();
     }
     let lists = absolute.join("lists");
-    if create_missing {
-        fs::create_dir_all(&lists)
-            .map_err(|error| format!("could not create {}: {error}", absolute.display()))?;
-    } else if !lists.is_dir() {
+    if !create_missing && !lists.is_dir() {
         // A synced lists folder can vanish while its parent remains.
         let missing = if absolute.is_dir() { &lists } else { &absolute };
         return Err(format!("{} is missing", missing.display()));
     }
-    absolute
+    if create_missing {
+        fs::create_dir_all(&absolute)
+            .map_err(|error| format!("could not create {}: {error}", absolute.display()))?;
+    }
+    let workspace = absolute
         .canonicalize()
-        .map_err(|error| format!("could not resolve {}: {error}", absolute.display()))
+        .map_err(|error| format!("could not resolve {}: {error}", absolute.display()))?;
+    if workspace.to_str().is_none() {
+        return Err("The resolved workspace path must be valid UTF-8.".into());
+    }
+    if create_missing {
+        fs::create_dir_all(workspace.join("lists"))
+            .map_err(|error| format!("could not create {}: {error}", workspace.display()))?;
+    }
+    Ok(workspace)
 }
 
 /// Loads all readable list files and a fingerprint from a workspace, creating its

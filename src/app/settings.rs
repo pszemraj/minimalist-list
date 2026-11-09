@@ -199,7 +199,12 @@ impl MinimalistApp {
                         .set_directory(&self.workspace)
                         .pick_folder()
                     {
-                        self.switch_workspace(&path.to_string_lossy());
+                        if let Some(path) = path.to_str() {
+                            self.switch_workspace(path);
+                        } else {
+                            self.status =
+                                Some("The selected folder path must be valid UTF-8.".into());
+                        }
                     }
                 } else if use_folder.clicked()
                     || (submit && self.workspace_input != self.settings.workspace_path)

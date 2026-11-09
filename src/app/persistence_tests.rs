@@ -125,8 +125,10 @@ fn failed_startup_does_not_load_another_instances_default_workspace() {
     };
     let ctx = egui::Context::default();
     let mut app = MinimalistApp::new(&ctx, settings, None, None);
+    let requested = selected.to_str().unwrap();
+    let resolution = storage::resolve_launch_workspace(requested, false);
     let crate::instance::LaunchOutcome::Primary(recovery_owner) =
-        crate::claim_launch_instance(selected.to_str().unwrap(), false, state_dir, false).unwrap()
+        crate::claim_launch_instance(requested, &resolution, state_dir, false).unwrap()
     else {
         panic!("expected a recovery workspace owner");
     };
@@ -235,7 +237,7 @@ fn temporary_startup_failure_preserves_selected_path_and_retry_recovers_it() {
     app.switch_workspace(selected.to_str().unwrap());
     assert_eq!(app.lists[0].key, original.key);
     assert!(app.persistence.workspace_failure.is_none());
-    app.switch_workspace("   ");
+    app.switch_workspace(&storage::parse_workspace_input("   "));
     assert_eq!(app.lists[0].key, original.key);
     fs::remove_dir_all(root).unwrap();
 }

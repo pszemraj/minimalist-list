@@ -341,7 +341,15 @@ impl MinimalistApp {
             !dirty && failed_workspace.is_none() && self.status.is_none() && notice.is_some();
         let message = failed_workspace
             .as_ref()
-            .map(|path| format!("Workspace unavailable: {path}. Retry or choose another folder."))
+            .map(|path| {
+                let mut message =
+                    format!("Workspace unavailable: {path}. Retry or choose another folder.");
+                if let Some(status) = &self.status {
+                    message.push('\n');
+                    message.push_str(status);
+                }
+                message
+            })
             .or_else(|| {
                 self.status
                     .as_ref()
