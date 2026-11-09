@@ -307,7 +307,12 @@ impl MinimalistApp {
         }
     }
 
-    fn finish_native_shutdown(&mut self, ctx: &egui::Context, shutdown: NativeShutdown) {
+    /// Saves pending changes, then hides for a Close with a usable tray or exits.
+    ///
+    /// # Arguments
+    /// - `ctx` - Context receiving native window commands.
+    /// - `shutdown` - Close or Quit; a failed save keeps the window open.
+    pub(super) fn finish_native_shutdown(&mut self, ctx: &egui::Context, shutdown: NativeShutdown) {
         if !self.finish_pending_changes() {
             log::info!("Close or Quit canceled because changes need attention");
             cancel_native_close(ctx);

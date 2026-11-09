@@ -141,6 +141,8 @@ The [installers](../README.md#install-and-run) add a sign-in entry with `--start
 
 `Ctrl+W` closes the window like its close button, including while an overlay is open. With a usable tray, closing hides the window in the tray (the menu bar on macOS). Minimizing does the same on Windows and Linux. On GNOME, use close or `Ctrl+W` if minimize is disabled. Without a usable tray, closing exits after pending changes save.
 
+On Windows and Linux, `Ctrl+Q` quits like the tray's **Quit**, including while an overlay is open. It saves pending changes first; if a save fails, the window stays open.
+
 From the tray icon's menu, choose **Show Minimalist List** to restore the window, **Quick add** to open it with the capture field focused, or **Quit** to exit. Activating the icon also restores the window on desktops that support it. On GNOME with AppIndicator, a single left click opens the menu. Middle-click or double-click the icon to open the window directly. [Workspace scans](storage.md#file-sync-behavior) continue while hidden. See [save recovery](storage.md#save-recovery) for pending edits.
 
 Launching again with the same workspace and local settings asks the existing window to come forward. On native Wayland, use the compositor's app switcher to bring the window forward. A duplicate `--start-hidden` launch leaves its visibility alone. Different workspaces can run separately.

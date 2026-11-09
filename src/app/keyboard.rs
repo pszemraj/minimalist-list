@@ -25,6 +25,9 @@ pub(super) const QUICK_ADD: KeyboardShortcut = KeyboardShortcut::new(Modifiers::
 pub(super) const FIND: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::F);
 /// Closes the window like its close button, hiding it to the tray when available.
 pub(super) const CLOSE_WINDOW: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::W);
+/// Exits like the tray's Quit; macOS provides Command+Q itself.
+#[cfg(not(target_os = "macos"))]
+pub(super) const QUIT: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::Q);
 /// Opens list creation, applying Settings edits first.
 pub(super) const NEW_LIST: KeyboardShortcut = KeyboardShortcut::new(
     Modifiers {
@@ -238,6 +241,8 @@ pub(super) fn shortcut_groups(show_window: String, quick_add: String) -> Vec<Sho
                 ("Show window (global)", show_window),
                 ("Quick add from any app", quick_add),
                 ("Close window", shortcut(CLOSE_WINDOW)),
+                #[cfg(not(target_os = "macos"))]
+                ("Quit", shortcut(QUIT)),
             ],
         ),
         (
@@ -387,9 +392,15 @@ impl MinimalistApp {
         if let Some(id) = self.keyboard.requested {
             ctx.memory_mut(|memory| memory.request_focus(id));
         }
-        // Closing saves pending edits, so it works above every overlay.
+        // Closing and quitting save pending edits, so they work above every overlay.
         if take_shortcut(ctx, CLOSE_WINDOW) {
             self.close_window(ctx);
+            return;
+        }
+        #[cfg(not(target_os = "macos"))]
+        if take_shortcut(ctx, QUIT) {
+            log::debug!("Quit requested through the app");
+            self.finish_native_shutdown(ctx, super::window::NativeShutdown::Quit);
             return;
         }
         let copy_target = (self.shortcuts.is_none()

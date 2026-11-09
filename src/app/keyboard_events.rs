@@ -24,6 +24,8 @@ fn needs_current_editor_input(event: &Event) -> bool {
             QUICK_ADD,
             FIND,
             CLOSE_WINDOW,
+            #[cfg(not(target_os = "macos"))]
+            QUIT,
             NEW_LIST,
             NEXT_LIST,
             PREVIOUS_LIST,
