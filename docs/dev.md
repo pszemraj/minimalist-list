@@ -14,7 +14,7 @@ src/linux_taskbar.rs        EWMH state preservation and taskbar request payloads
 src/app.rs                  Application state, navigation, syncing, and eframe wiring
 src/app/drafts.rs           Session drafts scoped to workspace, list, and task
 src/app/duplicate_recovery.rs Conflicting-copy recovery banner and action
-src/app/persistence.rs      Save results, dirty-list retries, and visible status
+src/app/persistence.rs      List saves, Quick add replay, preference writes, and retry status
 src/app/save_conflict.rs    Local copies and reloads after an external edit
 src/app/keyboard.rs         Keyboard commands and transient focus restoration
 src/app/keyboard_events.rs  Ordered editor input before screen-changing shortcuts

@@ -1,7 +1,7 @@
 //! Multi-line paste into the task, checklist, and Quick add entry fields.
 
 use super::{MinimalistApp, Screen};
-use crate::{model::Task, storage};
+use crate::model::Task;
 use eframe::egui::{self, Event, Id};
 use uuid::Uuid;
 
@@ -91,62 +91,6 @@ fn take_pasted_batch(ctx: &egui::Context) -> Vec<String> {
 }
 
 impl MinimalistApp {
-    /// Writes a capture, replaying only a standalone addition on the current file.
-    ///
-    /// # Arguments
-    /// - `index` - Index of the loaded destination list.
-    /// - `tasks` - New tasks, with stable IDs reused for either write.
-    ///
-    /// # Returns
-    /// Success after all captured tasks reach the destination file.
-    ///
-    /// # Errors
-    /// Returns a failed write or reload error, leaving capture text available for recovery.
-    ///
-    /// # Panics
-    /// Panics if the destination index does not identify a loaded list.
-    pub(super) fn write_capture_tasks(
-        &mut self,
-        index: usize,
-        tasks: &[Task],
-    ) -> Result<(), String> {
-        let mut candidate = self.lists[index].clone();
-        let list = candidate.key;
-        let can_replay = !self.has_save_conflict(list)
-            && !self.persistence.dirty_lists.contains(&list)
-            && !self.persistence.pending_filenames.contains(&list)
-            && self.editing.is_none_or(|(id, _)| id != list)
-            && self
-                .details
-                .editor
-                .as_ref()
-                .is_none_or(|editor| editor.list != list)
-            && self
-                .task_context
-                .as_ref()
-                .is_none_or(|editor| editor.list != list || editor.archived)
-            && (self.settings_list_id != Some(list)
-                || self.rename_input.trim() == self.rename_baseline.trim())
-            && self.delete_animation.is_none_or(|(id, _, _)| id != list)
-            && self.clear_animation.is_none_or(|(id, _)| id != list);
-        candidate.data.tasks.splice(0..0, tasks.iter().cloned());
-        let Err(error) = self.save_list_candidate(index, candidate) else {
-            return Ok(());
-        };
-        if !can_replay || !self.has_save_conflict(list) {
-            return Err(error);
-        }
-        let fresh = storage::load_existing_workspace(&self.workspace)?
-            .lists
-            .into_iter()
-            .find(|item| item.key == list);
-        let Some(mut fresh) = fresh else {
-            return Err(error);
-        };
-        fresh.data.tasks.splice(0..0, tasks.iter().cloned());
-        self.save_reloaded_capture(index, fresh)
-    }
-
     /// Returns the list entry field that would receive a paste in this frame.
     fn paste_target(&self, ctx: &egui::Context) -> Option<PasteTarget> {
         let focused = ctx.memory(|memory| memory.focused())?;

@@ -1,7 +1,10 @@
 //! Save results, retryable in-memory edits, and visible persistence status.
 
 use super::{MinimalistApp, theme::Palette};
-use crate::storage::{self, Settings, StoredList};
+use crate::{
+    model::Task,
+    storage::{self, Settings, StoredList},
+};
 use eframe::egui::{self, Button, Color32, CornerRadius, Frame, Margin};
 use std::{
     collections::{HashMap, HashSet},
@@ -179,24 +182,62 @@ impl MinimalistApp {
         self.save_prepared_candidate(index, candidate, manual)
     }
 
-    /// Saves a capture replay using the freshly loaded file's manual task order.
+    /// Writes captured tasks, replaying a standalone addition on the current file.
     ///
     /// # Arguments
-    /// - `index` - Loaded destination to replace after saving.
-    /// - `candidate` - Fresh disk contents with the new tasks already inserted.
+    /// - `index` - Index of the loaded destination list.
+    /// - `tasks` - New tasks, with stable IDs reused for either write.
     ///
     /// # Returns
-    /// Success after writing and adopting the candidate.
+    /// Success after all captured tasks reach the destination file.
     ///
     /// # Errors
-    /// Returns the save error without replacing the displayed list.
-    pub(in crate::app) fn save_reloaded_capture(
+    /// Returns a failed write or reload error, leaving the capture available for recovery.
+    ///
+    /// # Panics
+    /// Panics if the destination index does not identify a loaded list.
+    pub(super) fn write_capture_tasks(
         &mut self,
         index: usize,
-        candidate: StoredList,
+        tasks: &[Task],
     ) -> Result<(), String> {
-        let manual = candidate.data.tasks.iter().map(|task| task.id).collect();
-        self.save_prepared_candidate(index, candidate, manual)
+        let mut candidate = self.lists[index].clone();
+        let list = candidate.key;
+        let can_replay = !self.has_save_conflict(list)
+            && !self.persistence.dirty_lists.contains(&list)
+            && !self.persistence.pending_filenames.contains(&list)
+            && self.editing.is_none_or(|(id, _)| id != list)
+            && self
+                .details
+                .editor
+                .as_ref()
+                .is_none_or(|editor| editor.list != list)
+            && self
+                .task_context
+                .as_ref()
+                .is_none_or(|editor| editor.list != list || editor.archived)
+            && (self.settings_list_id != Some(list)
+                || self.rename_input.trim() == self.rename_baseline.trim())
+            && self.delete_animation.is_none_or(|(id, _, _)| id != list)
+            && self.clear_animation.is_none_or(|(id, _)| id != list);
+        candidate.data.tasks.splice(0..0, tasks.iter().cloned());
+        let Err(error) = self.save_list_candidate(index, candidate) else {
+            return Ok(());
+        };
+        if !can_replay || !self.has_save_conflict(list) {
+            return Err(error);
+        }
+        let Some(mut fresh) = storage::load_existing_workspace(&self.workspace)?
+            .lists
+            .into_iter()
+            .find(|item| item.key == list)
+        else {
+            return Err(error);
+        };
+        fresh.data.tasks.splice(0..0, tasks.iter().cloned());
+        // Replay uses the file's current Manual order, independent of the cached view.
+        let manual = fresh.data.tasks.iter().map(|task| task.id).collect();
+        self.save_prepared_candidate(index, fresh, manual)
     }
 
     fn save_prepared_candidate(
