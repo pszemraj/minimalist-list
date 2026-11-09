@@ -204,23 +204,6 @@ fn external_manual_json_reorder_is_retained_during_a_sorted_view() {
 }
 
 #[test]
-fn deleting_and_undoing_in_sorted_view_restores_original_manual_position() {
-    let (_, mut app, list, manual) = fixture();
-    let before = serde_json::to_value(&app.lists[0].data.tasks).unwrap();
-    app.sort_tasks(list, TaskSort::Title);
-    app.remove_task(list, manual[0]);
-    assert!(!disk_ids(&app).contains(&manual[0]));
-    app.undo_last();
-    app.sort_tasks(list, TaskSort::Manual);
-    assert_eq!(ids(&app), manual);
-    assert_eq!(
-        serde_json::to_value(&app.lists[0].data.tasks).unwrap(),
-        before
-    );
-    std::fs::remove_dir_all(app.workspace).unwrap();
-}
-
-#[test]
 fn equal_keys_use_manual_ties_even_after_a_different_sort_mode() {
     let (_, mut app, list, manual) = fixture();
     app.sort_tasks(list, TaskSort::Newest);

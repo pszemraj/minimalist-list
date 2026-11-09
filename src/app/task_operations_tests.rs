@@ -815,24 +815,28 @@ fn deletion_undo_and_history_restore_keep_manual_positions_while_view_is_sorted(
     let (_ctx, mut app) = test_app();
     let list = app.lists[0].key;
     app.lists[0].data.tasks = ["Zulu", "Alpha", "Middle"].map(Task::new).to_vec();
+    let first = &mut app.lists[0].data.tasks[0];
+    first.toggle();
+    first
+        .subtasks
+        .push(Subtask::new("Preserved checklist item"));
     app.lists[0].data.tasks[1].context = "Hidden details must survive sorted Undo".into();
     let original: Vec<_> = app.lists[0].data.tasks.iter().map(|task| task.id).collect();
+    let before = serde_json::to_value(&app.lists[0].data.tasks).unwrap();
     app.save_list_index(0);
-    app.sort_tasks(list, crate::model::TaskSort::Title);
-    app.remove_task(list, original[1]);
-    app.undo_last();
-    assert_eq!(
-        saved(&app, 0)
-            .tasks
-            .iter()
-            .map(|task| task.id)
-            .collect::<Vec<_>>(),
-        original
-    );
-    assert_eq!(
-        saved(&app, 0).tasks[1].context,
-        "Hidden details must survive sorted Undo"
-    );
+    app.sort_tasks(list, TaskSort::Title);
+    for removed in [original[0], original[1]] {
+        app.remove_task(list, removed);
+        assert!(saved(&app, 0).tasks.iter().all(|task| task.id != removed));
+        app.undo_last();
+        assert_eq!(serde_json::to_value(saved(&app, 0).tasks).unwrap(), before);
+        app.sort_tasks(list, TaskSort::Manual);
+        assert_eq!(
+            serde_json::to_value(&app.lists[0].data.tasks).unwrap(),
+            before
+        );
+        app.sort_tasks(list, TaskSort::Title);
+    }
     let archived = Task::new("Restored last in Manual");
     let restored_id = archived.id;
     app.lists[0].data.archive.push(ArchivedTask::new(archived));
@@ -847,7 +851,7 @@ fn deletion_undo_and_history_restore_keep_manual_positions_while_view_is_sorted(
             .collect::<Vec<_>>(),
         expected
     );
-    app.sort_tasks(list, crate::model::TaskSort::Manual);
+    app.sort_tasks(list, TaskSort::Manual);
     assert_eq!(
         app.lists[0]
             .data
