@@ -5,10 +5,15 @@ $installRoot = Join-Path $env:LOCALAPPDATA 'minimalist-list'
 $binary = [System.IO.Path]::GetFullPath((Join-Path $installRoot 'bin/minimalist-list.exe'))
 
 # Windows cannot replace a running executable, and closing the window only hides it.
-$running = Get-Process minimalist-list -ErrorAction SilentlyContinue |
-  Where-Object { $_.Path -eq $binary }
-if ($running) {
-  throw "Minimalist List is still running from $binary (process $($running.Id -join ', ')). Choose Quit from its tray icon menu, then run this installer again."
+$processes = Get-Process minimalist-list -ErrorAction SilentlyContinue
+$runningIds = $processes | Where-Object Path -eq $binary | Select-Object -ExpandProperty Id
+if (!$runningIds -and ($processes | Where-Object { !$_.Path })) {
+  # A 32-bit PowerShell host cannot read Get-Process.Path for a 64-bit process.
+  $runningIds = Get-CimInstance -ClassName Win32_Process -Filter "Name = 'minimalist-list.exe'" -ErrorAction SilentlyContinue |
+    Where-Object ExecutablePath -eq $binary | Select-Object -ExpandProperty ProcessId
+}
+if ($runningIds) {
+  throw "Minimalist List is still running from $binary (process $($runningIds -join ', ')). Choose Quit from its tray icon menu, then run this installer again."
 }
 
 cargo install --locked --path $repository --root $installRoot --force
