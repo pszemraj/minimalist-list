@@ -146,7 +146,7 @@ pub struct MinimalistApp {
     shortcut_errors: crate::hotkey::PerAction<Option<String>>,
     task_context: Option<context::TaskContextEditor>,
     #[cfg(target_os = "macos")]
-    reopen: Option<crate::macos::ReopenHandler>,
+    macos_delegate: Option<crate::macos::AppDelegateHandler>,
     quitting: bool,
     pending_native_shutdown: Option<window::NativeShutdown>,
     keyboard: KeyboardState,
@@ -318,7 +318,7 @@ impl MinimalistApp {
             shortcut_errors: Default::default(),
             task_context: None,
             #[cfg(target_os = "macos")]
-            reopen: None,
+            macos_delegate: None,
             quitting: false,
             pending_native_shutdown: None,
             keyboard: KeyboardState::default(),

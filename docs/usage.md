@@ -141,6 +141,8 @@ The [installers](../README.md#install-and-run) add a sign-in entry with `--start
 
 `Ctrl+W` closes the window like its close button, including while an overlay is open. With a usable tray, closing hides the window in the tray (the menu bar on macOS). Minimizing does the same on Windows and Linux. On GNOME, use close or `Ctrl+W` if minimize is disabled. Without a usable tray, closing exits after pending changes save.
 
+On Windows and Linux, `Ctrl+Q` quits like the tray's **Quit**, including while an overlay is open. It saves pending changes first; if a save fails, the window stays open.
+
 From the tray icon's menu, choose **Show Minimalist List** to restore the window, **Quick add** to open it with the capture field focused, or **Quit** to exit. Activating the icon also restores the window on desktops that support it. On GNOME with AppIndicator, a single left click opens the menu. Middle-click or double-click the icon to open the window directly. [Workspace scans](storage.md#file-sync-behavior) continue while hidden. See [save recovery](storage.md#save-recovery) for pending edits.
 
 Launching again with the same workspace and local settings asks the existing window to come forward. On native Wayland, use the compositor's app switcher to bring the window forward. A duplicate `--start-hidden` launch leaves its visibility alone. Different workspaces can run separately.
@@ -151,7 +153,7 @@ Linux uses X11 or XWayland for tray hiding and restoration. The app confirms tha
 
 On X11, cursor theme and size follow the desktop's XSettings. The advertised cursor size already includes the desktop scale and is used directly. Explicit `XCURSOR_THEME` and `XCURSOR_SIZE` overrides take precedence. Restart the app after changing these desktop settings; native Wayland uses its existing cursor backend.
 
-On macOS, reopening the running app bundle through Finder or `open` restores its existing window. The app uses the menu bar without a Dock icon, including while its window is open. The minimize button is disabled to avoid leaving a hidden window in the Dock. Hidden startup avoids requesting activation over another app. **Quit** exits for the remainder of the session; the launch agent does not keep restarting it.
+On macOS, reopening the running app bundle through Finder or `open` restores its existing window. The app uses the menu bar without a Dock icon, including while its window is open. The minimize button is disabled to avoid leaving a hidden window in the Dock. Hidden startup avoids requesting activation over another app. A Quit request from macOS saves pending changes and keeps the window open if a save fails. Close the native folder picker before quitting. After quitting, the launch agent leaves the app stopped for the rest of the session.
 
 To disable startup on Windows, remove **Minimalist List** from the Startup folder (`shell:startup` in Run). On Linux, remove `${XDG_CONFIG_HOME:-$HOME/.config}/autostart/minimalist-list.desktop`. On macOS, quit the app and remove `~/Library/LaunchAgents/io.github.pszemraj.minimalist-list.plist`. Reinstalling enables startup again.
 

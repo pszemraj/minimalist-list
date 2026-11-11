@@ -632,6 +632,55 @@ fn task_context_shortcut_saves_typed_title_text_before_opening() {
     cleanup(&app);
 }
 
+#[cfg(not(target_os = "macos"))]
+#[test]
+fn quit_shortcut_saves_typed_title_text_before_exiting() {
+    let (ctx, mut app, list, tasks) = context_fixture();
+    app.editing = Some((list, tasks[1]));
+    app.edit_text = "B".into();
+    app.request_edit_focus = true;
+    idle(&ctx, &mut app);
+    let closes = |output: &egui::FullOutput| {
+        output.viewport_output[&egui::ViewportId::ROOT]
+            .commands
+            .contains(&egui::ViewportCommand::Close)
+    };
+    // Typing and the shortcut arrive in one batch; the text must land first.
+    let mut events = vec![Event::Text(" edited".into())];
+    events.extend(chord(Key::Q, Modifiers::COMMAND));
+    let typed = frame(&ctx, &mut app, events, 430.0);
+    assert!(!app.quitting && !closes(&typed));
+    let quit = frame(&ctx, &mut app, Vec::new(), 430.0);
+    assert!(app.quitting && closes(&quit));
+    assert_eq!(saved_tasks(&app)[1].text, "B edited");
+    cleanup(&app);
+}
+
+#[cfg(not(target_os = "macos"))]
+#[test]
+fn quit_shortcut_exits_above_overlays_after_saving_edits() {
+    for overlay in 0..3 {
+        let (ctx, mut app, list, tasks) = context_fixture();
+        app.editing = Some((list, tasks[1]));
+        app.edit_text = "B edited".into();
+        match overlay {
+            0 => app.open_shortcuts(),
+            1 => app.open_find(),
+            _ => app.open_quick_capture(None),
+        }
+        idle(&ctx, &mut app);
+        let output = frame(&ctx, &mut app, chord(Key::Q, Modifiers::COMMAND), 430.0);
+        assert!(app.quitting, "overlay {overlay}");
+        assert!(
+            output.viewport_output[&egui::ViewportId::ROOT]
+                .commands
+                .contains(&egui::ViewportCommand::Close)
+        );
+        assert_eq!(saved_tasks(&app)[1].text, "B edited");
+        cleanup(&app);
+    }
+}
+
 #[test]
 fn task_context_shortcut_opens_history_rows_read_only() {
     let (ctx, mut app, list, tasks) = context_fixture();

@@ -52,7 +52,7 @@ macOS:
 bash scripts/install-macos.sh
 ```
 
-Windows and Linux add an app-menu shortcut. macOS installs `~/Applications/Minimalist List.app`. Quit before reinstalling. See [startup and system tray](docs/usage.md#startup-and-system-tray) for what the installers configure at sign-in.
+Windows and Linux add an app-menu shortcut. macOS installs `~/Applications/Minimalist List.app`. Before reinstalling, choose **Quit** from the tray menu; closing the window only hides it. The Windows installer stops if the installed copy is still running. See [startup and system tray](docs/usage.md#startup-and-system-tray) for what the installers configure at sign-in.
 
 Verify the checkout with `cargo test --locked`. Run `cargo run --locked -- --version` to check the executable. See the [development guide](docs/dev.md#verification) for the full checks.
 

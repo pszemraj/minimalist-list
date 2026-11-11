@@ -1,6 +1,6 @@
 [package]
 name = "minimalist-list"
-version = "0.4.1"
+version = "0.4.2"
 edition = "2024"
 rust-version = "1.95"
 description = "A native, gesture-oriented minimalist task list built with egui"
@@ -19,8 +19,10 @@ chrono = { version = "0.4", default-features = false, features = ["now"] }
 log = { version = "0.4", features = ["std"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSResponder"] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "CFRunLoop", "CFString"] }
 winit = { version = "0.30", default-features = false }
 
 [target.'cfg(target_os = "windows")'.dependencies]

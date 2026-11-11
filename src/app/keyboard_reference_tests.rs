@@ -510,6 +510,8 @@ fn reference_uses_shared_bindings_and_native_key_names() {
         ("Find tasks and History", FIND),
         ("New list (Lists, list, Settings)", NEW_LIST),
         ("Close window", CLOSE_WINDOW),
+        #[cfg(not(target_os = "macos"))]
+        ("Quit", QUIT),
         ("Back to Lists", BACK_TO_LISTS),
         ("Move completed tasks to History", CLEAR_COMPLETED),
     ] {

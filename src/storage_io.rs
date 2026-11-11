@@ -68,6 +68,9 @@ pub(super) fn write_json_atomic_checked<T: Serialize>(
             .metadata()
             .map_err(|error| format!("could not inspect {}: {error}", temp.display()))?;
         before_replace()?;
+        // Windows locks are mandatory and would follow the file to its new name.
+        file.unlock()
+            .map_err(|error| format!("could not unlock {}: {error}", temp.display()))?;
         fs::rename(&temp, path)
             .map_err(|error| format!("could not replace {}: {error}", path.display()))?;
         Ok((saved_metadata, bytes))
